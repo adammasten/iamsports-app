@@ -14,7 +14,8 @@
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "IamSports needs access to your photo library to let you select game videos for tagging and highlight reels.",
         "NSPhotoLibraryAddUsageDescription": "IamSports needs permission to save your exported highlight reels to your photo library.",
-        "NSCameraUsageDescription": "IamSports needs camera access if you want to record game video directly in the app."
+        "NSCameraUsageDescription": "IamSports needs camera access if you want to record game video directly in the app.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
