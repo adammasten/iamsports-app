@@ -3,6 +3,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import * as tus from 'tus-js-client';
+
+const SUPABASE_URL = 'https://wscfpkaltajnrhiusoze.supabase.co';
 
 export default function GameScreen() {
   const params = useLocalSearchParams();
@@ -63,31 +66,56 @@ export default function GameScreen() {
 
     try {
       const fileName = `game-${id}-${Date.now()}.mp4`;
-      let uploadData: any;
 
-      if (pendingFile.isWeb) {
-        uploadData = pendingFile.file;
-      } else {
-        const formData = new FormData();
-        formData.append('file', { uri: pendingFile.uri, type: 'video/mp4', name: fileName } as any);
-        uploadData = formData;
+      // Get auth session for upload
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        Alert.alert('Not logged in', 'Please log in again.');
+        setUploading(false);
+        return;
       }
 
-      setUploadProgress(10);
+      // Get file as Blob (web uses File object directly, mobile fetches from local URI)
+      let fileBlob: Blob;
+      if (pendingFile.isWeb) {
+        fileBlob = pendingFile.file;
+      } else {
+        const response = await fetch(pendingFile.uri);
+        fileBlob = await response.blob();
+      }
 
-      const { error: uploadError } = await supabase.storage
-        .from('Videos')
-        .upload(fileName, uploadData, {
-          contentType: 'video/mp4',
-          onUploadProgress: (progress) => {
-            const percent = Math.round((progress.loaded / progress.total) * 100);
-            setUploadProgress(percent < 10 ? 10 : percent);
+      // Resumable chunked upload via TUS protocol
+      await new Promise<void>((resolve, reject) => {
+        const upload = new tus.Upload(fileBlob, {
+          endpoint: `${SUPABASE_URL}/storage/v1/upload/resumable`,
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+            'x-upsert': 'true',
+          },
+          uploadDataDuringCreation: true,
+          removeFingerprintOnSuccess: true,
+          metadata: {
+            bucketName: 'Videos',
+            objectName: fileName,
+            contentType: 'video/mp4',
+            cacheControl: '3600',
+          },
+          chunkSize: 6 * 1024 * 1024, // 6MB chunks
+          onError: (error) => {
+            console.error('TUS upload error:', error);
+            reject(error);
+          },
+          onProgress: (bytesUploaded, bytesTotal) => {
+            const percent = Math.round((bytesUploaded / bytesTotal) * 100);
+            setUploadProgress(percent);
+          },
+          onSuccess: () => {
+            resolve();
           },
         });
-
-      if (uploadError) { Alert.alert('Upload failed', uploadError.message); setUploading(false); return; }
-
-      setUploadProgress(100);
+        upload.start();
+      });
 
       const { data: urlData } = supabase.storage.from('Videos').getPublicUrl(fileName);
 
