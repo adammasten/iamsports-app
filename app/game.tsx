@@ -1,4 +1,5 @@
 import { supabase } from '@/supabase';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -6,6 +7,38 @@ import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacit
 import * as tus from 'tus-js-client';
 
 const SUPABASE_URL = 'https://wscfpkaltajnrhiusoze.supabase.co';
+const CHUNK_SIZE = 6 * 1024 * 1024; // 6MB chunks
+
+// Decode a base64 string to a Uint8Array
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = global.atob ? global.atob(base64) : Buffer.from(base64, 'base64').toString('binary');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+// Custom tus-js-client file source that reads chunks from disk on demand.
+// This avoids loading the entire file into memory.
+function makeFileSource(fileUri: string, fileSize: number) {
+  return {
+    size: fileSize,
+    slice: async (start: number, end: number) => {
+      const length = end - start;
+      const base64 = await FileSystem.readAsStringAsync(fileUri, {
+        encoding: FileSystem.EncodingType.Base64,
+        position: start,
+        length,
+      });
+      const bytes = base64ToUint8Array(base64);
+      return { value: bytes };
+    },
+    close: () => {
+      // Nothing to clean up for file:// URIs
+    },
+  };
+}
 
 export default function GameScreen() {
   const params = useLocalSearchParams();
@@ -66,7 +99,6 @@ export default function GameScreen() {
 
     try {
       const fileName = `game-${id}-${Date.now()}.mp4`;
-
       console.log('[Upload] Starting upload for', fileName);
 
       // Get auth session for upload
@@ -78,22 +110,28 @@ export default function GameScreen() {
       }
       console.log('[Upload] Got auth session');
 
-      // Get file as Blob (web uses File object directly, mobile fetches from local URI)
-      let fileBlob: Blob;
+      // Build the file input for TUS
+      let uploadInput: any;
       if (pendingFile.isWeb) {
-        fileBlob = pendingFile.file;
-        console.log('[Upload] Web file, size:', (fileBlob as any).size);
+        // Web: pass the File object directly
+        uploadInput = pendingFile.file;
+        console.log('[Upload] Web file, size:', uploadInput.size);
       } else {
-        console.log('[Upload] Fetching file from URI:', pendingFile.uri);
-        const response = await fetch(pendingFile.uri);
-        console.log('[Upload] Fetch complete, getting blob');
-        fileBlob = await response.blob();
-        console.log('[Upload] Blob created, size:', (fileBlob as any).size);
+        // Mobile: get file size, build streaming source
+        const info = await FileSystem.getInfoAsync(pendingFile.uri, { size: true });
+        if (!info.exists) {
+          Alert.alert('File not found', 'Could not access the selected video.');
+          setUploading(false);
+          return;
+        }
+        const fileSize = (info as any).size as number;
+        console.log('[Upload] Mobile file, size:', fileSize);
+        uploadInput = makeFileSource(pendingFile.uri, fileSize);
       }
 
       // Resumable chunked upload via TUS protocol
       await new Promise<void>((resolve, reject) => {
-        const upload = new tus.Upload(fileBlob, {
+        const upload = new tus.Upload(uploadInput, {
           endpoint: `${SUPABASE_URL}/storage/v1/upload/resumable`,
           retryDelays: [0, 3000, 5000, 10000, 20000],
           headers: {
@@ -108,7 +146,7 @@ export default function GameScreen() {
             contentType: 'video/mp4',
             cacheControl: '3600',
           },
-          chunkSize: 6 * 1024 * 1024, // 6MB chunks
+          chunkSize: CHUNK_SIZE,
           onError: (error: any) => {
             console.error('[Upload] TUS error:', error);
             const errMsg = error?.message || 'Unknown error';
