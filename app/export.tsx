@@ -62,6 +62,24 @@ export default function ExportScreen() {
     setExcludedClips(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
   }
 
+  // Bundle-aware matching: a clip matches a filter group if all filter tags are
+  // in clip-level OR all in a single bundle (combined with clip-level).
+  function clipMatchesGroup(clip: any, group: string[]): boolean {
+    if (group.length === 0) return false;
+    const clipLevel: string[] = clip.clipLevelTagIds || [];
+    const bundles: string[][] = clip.bundles || [];
+
+    // Match via clip-level alone
+    if (group.every(tagId => clipLevel.includes(tagId))) return true;
+
+    // Match via clip-level + some single bundle
+    for (const bundle of bundles) {
+      const combined = [...clipLevel, ...bundle];
+      if (group.every(tagId => combined.includes(tagId))) return true;
+    }
+    return false;
+  }
+
   async function loadClips() {
     const allGroups = currentGroup.length > 0 ? [...tagGroups, currentGroup] : tagGroups;
     if (selectedGames.length === 0) { Alert.alert('Select at least one game'); return; }
@@ -90,20 +108,41 @@ export default function ExportScreen() {
     const clipsWithTags = await Promise.all((clipData || []).map(async (clip: any) => {
       const { data: tagData } = await supabase
         .from('clip_tags')
-        .select('tag_id')
+        .select('tag_id, bundle_number')
         .eq('clip_id', clip.id);
+
+      // Organize tags by bundle
+      const clipLevelTagIds: string[] = [];
+      const bundleMap: Record<number, string[]> = {};
+      (tagData || []).forEach((t: any) => {
+        const bn = t.bundle_number ?? 0;
+        if (bn === 0) {
+          clipLevelTagIds.push(t.tag_id);
+        } else {
+          if (!bundleMap[bn]) bundleMap[bn] = [];
+          bundleMap[bn].push(t.tag_id);
+        }
+      });
+      const bundles = Object.values(bundleMap);
       const tagIds = (tagData || []).map((t: any) => t.tag_id);
+
       const video = videoMap[clip.video_id];
       const game = games.find(g => g.id === video?.game_id);
-      return { ...clip, tagIds, videoUrl: video?.url, videoLabel: video?.label, gameTitle: game?.title };
+      return {
+        ...clip,
+        tagIds,
+        clipLevelTagIds,
+        bundles,
+        videoUrl: video?.url,
+        videoLabel: video?.label,
+        gameTitle: game?.title,
+      };
     }));
 
-    // Match clips to groups using AND logic
+    // Match clips to groups using bundle-aware AND logic
     const matchedClips: any[] = [];
     allGroups.forEach((group, groupIndex) => {
-      const groupClips = clipsWithTags.filter(clip =>
-        group.every(tagId => clip.tagIds.includes(tagId))
-      );
+      const groupClips = clipsWithTags.filter(clip => clipMatchesGroup(clip, group));
       groupClips.forEach(clip => {
         matchedClips.push({ ...clip, groupIndex, groupTags: group });
       });
