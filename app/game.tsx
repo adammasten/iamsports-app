@@ -6,11 +6,10 @@ import { useEffect, useState } from 'react';
 import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as tus from 'tus-js-client';
 
-// Direct storage hostname for better large-file performance per Supabase docs
 const SUPABASE_STORAGE_URL = 'https://wscfpkaltajnrhiusoze.storage.supabase.co';
-const CHUNK_SIZE = 15 * 1024 * 1024; // 15MB - safely under Cloudflare's 100s timeout
+const CHUNK_SIZE = 15 * 1024 * 1024; // 15MB chunks
+const TOKEN_REFRESH_THRESHOLD_SEC = 300; // refresh if < 5 min left on token
 
-// Convert base64 string to Uint8Array for binary upload
 function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -18,6 +17,25 @@ function base64ToBytes(base64: string): Uint8Array {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
+}
+
+// Get a fresh token, refreshing if it's close to expiring
+async function getFreshToken(forceRefresh = false): Promise<string> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not logged in');
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const expiresAt = session.expires_at || 0;
+  const secondsLeft = expiresAt - nowSec;
+
+  if (forceRefresh || secondsLeft < TOKEN_REFRESH_THRESHOLD_SEC) {
+    console.log(`[Token] Refreshing (${secondsLeft}s left, forceRefresh=${forceRefresh})`);
+    const { data: { session: refreshed }, error } = await supabase.auth.refreshSession();
+    if (error || !refreshed) throw new Error(`Failed to refresh session: ${error?.message || 'unknown'}`);
+    return refreshed.access_token;
+  }
+
+  return session.access_token;
 }
 
 export default function GameScreen() {
@@ -71,7 +89,6 @@ export default function GameScreen() {
     input.click();
   }
 
-  // WEB upload path: tus-js-client (works great in browsers)
   async function uploadVideoWeb(fileName: string, fileBlob: Blob, accessToken: string) {
     return new Promise<void>((resolve, reject) => {
       const upload = new tus.Upload(fileBlob, {
@@ -104,20 +121,17 @@ export default function GameScreen() {
     });
   }
 
-  // Upload a single chunk via PATCH with retries
-  async function patchChunk(
-    uploadUrl: string,
-    bytes: Uint8Array,
-    offset: number,
-    accessToken: string
-  ): Promise<void> {
+  // Upload a single chunk via PATCH with retries + token refresh on auth errors
+  async function patchChunk(uploadUrl: string, bytes: Uint8Array, offset: number): Promise<void> {
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const token = await getFreshToken(attempt > 1);
+
       try {
         const resp = await fetch(uploadUrl, {
           method: 'PATCH',
           headers: {
-            authorization: `Bearer ${accessToken}`,
+            authorization: `Bearer ${token}`,
             'Tus-Resumable': '1.0.0',
             'Upload-Offset': String(offset),
             'Content-Type': 'application/offset+octet-stream',
@@ -125,9 +139,7 @@ export default function GameScreen() {
           body: bytes,
         });
 
-        if (resp.ok || resp.status === 204) {
-          return; // success
-        }
+        if (resp.ok || resp.status === 204) return;
 
         const body = await resp.text();
         throw new Error(`PATCH ${resp.status} at offset ${offset}: ${body.slice(0, 200)}`);
@@ -139,14 +151,13 @@ export default function GameScreen() {
     }
   }
 
-  // MOBILE upload: manual chunked TUS protocol
-  async function uploadVideoMobile(fileName: string, fileUri: string, accessToken: string, fileSize: number) {
-    // Step 1: Create the upload session
+  async function uploadVideoMobile(fileName: string, fileUri: string, fileSize: number) {
+    const initialToken = await getFreshToken();
     console.log('[Upload] Creating TUS session for', fileSize, 'bytes');
     const createResp = await fetch(`${SUPABASE_STORAGE_URL}/storage/v1/upload/resumable`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${accessToken}`,
+        authorization: `Bearer ${initialToken}`,
         'x-upsert': 'true',
         'Tus-Resumable': '1.0.0',
         'Upload-Length': String(fileSize),
@@ -168,7 +179,6 @@ export default function GameScreen() {
     if (!uploadUrl) throw new Error('No upload URL returned from Supabase');
     console.log('[Upload] Got upload URL, starting chunked upload');
 
-    // Step 2: Upload chunks sequentially
     let offset = 0;
     let chunkNum = 0;
     const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
@@ -180,18 +190,14 @@ export default function GameScreen() {
 
       console.log(`[Upload] Chunk ${chunkNum}/${totalChunks} (offset ${offset}, size ${currentChunkSize})`);
 
-      // Read chunk from disk (returns base64)
       const base64 = await FileSystem.readAsStringAsync(fileUri, {
         encoding: FileSystem.EncodingType.Base64,
         position: offset,
         length: currentChunkSize,
       });
-
-      // Convert to bytes
       const bytes = base64ToBytes(base64);
 
-      // Upload it
-      await patchChunk(uploadUrl, bytes, offset, accessToken);
+      await patchChunk(uploadUrl, bytes, offset);
 
       offset += currentChunkSize;
       const percent = Math.round((offset / fileSize) * 100);
@@ -211,15 +217,9 @@ export default function GameScreen() {
       const fileName = `game-${id}-${Date.now()}.mp4`;
       console.log('[Upload] Starting upload for', fileName);
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        Alert.alert('Not logged in', 'Please log in again.');
-        setUploading(false);
-        return;
-      }
-
       if (pendingFile.isWeb) {
-        await uploadVideoWeb(fileName, pendingFile.file, session.access_token);
+        const token = await getFreshToken();
+        await uploadVideoWeb(fileName, pendingFile.file, token);
       } else {
         const info = await FileSystem.getInfoAsync(pendingFile.uri, { size: true });
         if (!info.exists) {
@@ -229,7 +229,7 @@ export default function GameScreen() {
         }
         const fileSize = (info as any).size as number;
         console.log('[Upload] File size:', fileSize, 'bytes');
-        await uploadVideoMobile(fileName, pendingFile.uri, session.access_token, fileSize);
+        await uploadVideoMobile(fileName, pendingFile.uri, fileSize);
       }
 
       const { data: urlData } = supabase.storage.from('Videos').getPublicUrl(fileName);
