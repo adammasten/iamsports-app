@@ -6,9 +6,19 @@ import { useEffect, useState } from 'react';
 import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as tus from 'tus-js-client';
 
-// Direct storage hostname for better large-file upload performance
+// Direct storage hostname for better large-file performance per Supabase docs
 const SUPABASE_STORAGE_URL = 'https://wscfpkaltajnrhiusoze.storage.supabase.co';
-const SUPABASE_URL = 'https://wscfpkaltajnrhiusoze.supabase.co';
+const CHUNK_SIZE = 15 * 1024 * 1024; // 15MB - safely under Cloudflare's 100s timeout
+
+// Convert base64 string to Uint8Array for binary upload
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
 
 export default function GameScreen() {
   const params = useLocalSearchParams();
@@ -61,7 +71,7 @@ export default function GameScreen() {
     input.click();
   }
 
-  // WEB upload path: keep using tus-js-client (works great for browsers)
+  // WEB upload path: tus-js-client (works great in browsers)
   async function uploadVideoWeb(fileName: string, fileBlob: Blob, accessToken: string) {
     return new Promise<void>((resolve, reject) => {
       const upload = new tus.Upload(fileBlob, {
@@ -94,11 +104,45 @@ export default function GameScreen() {
     });
   }
 
-  // MOBILE upload path: native iOS URLSession via FileSystem.uploadAsync
-  // Handles huge files by streaming from disk, supports background execution.
+  // Upload a single chunk via PATCH with retries
+  async function patchChunk(
+    uploadUrl: string,
+    bytes: Uint8Array,
+    offset: number,
+    accessToken: string
+  ): Promise<void> {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const resp = await fetch(uploadUrl, {
+          method: 'PATCH',
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            'Tus-Resumable': '1.0.0',
+            'Upload-Offset': String(offset),
+            'Content-Type': 'application/offset+octet-stream',
+          },
+          body: bytes,
+        });
+
+        if (resp.ok || resp.status === 204) {
+          return; // success
+        }
+
+        const body = await resp.text();
+        throw new Error(`PATCH ${resp.status} at offset ${offset}: ${body.slice(0, 200)}`);
+      } catch (e: any) {
+        if (attempt === maxAttempts) throw e;
+        console.log(`[Upload] Chunk retry ${attempt}/${maxAttempts} at offset ${offset}: ${e?.message}`);
+        await new Promise(r => setTimeout(r, 2000 * attempt));
+      }
+    }
+  }
+
+  // MOBILE upload: manual chunked TUS protocol
   async function uploadVideoMobile(fileName: string, fileUri: string, accessToken: string, fileSize: number) {
-    // Step 1: Create the resumable upload (small POST, no file body)
-    console.log('[Upload] Creating TUS upload session...');
+    // Step 1: Create the upload session
+    console.log('[Upload] Creating TUS session for', fileSize, 'bytes');
     const createResp = await fetch(`${SUPABASE_STORAGE_URL}/storage/v1/upload/resumable`, {
       method: 'POST',
       headers: {
@@ -121,41 +165,40 @@ export default function GameScreen() {
     }
 
     const uploadUrl = createResp.headers.get('location');
-    if (!uploadUrl) {
-      throw new Error('No upload URL returned from Supabase');
+    if (!uploadUrl) throw new Error('No upload URL returned from Supabase');
+    console.log('[Upload] Got upload URL, starting chunked upload');
+
+    // Step 2: Upload chunks sequentially
+    let offset = 0;
+    let chunkNum = 0;
+    const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+
+    while (offset < fileSize) {
+      const remaining = fileSize - offset;
+      const currentChunkSize = Math.min(CHUNK_SIZE, remaining);
+      chunkNum++;
+
+      console.log(`[Upload] Chunk ${chunkNum}/${totalChunks} (offset ${offset}, size ${currentChunkSize})`);
+
+      // Read chunk from disk (returns base64)
+      const base64 = await FileSystem.readAsStringAsync(fileUri, {
+        encoding: FileSystem.EncodingType.Base64,
+        position: offset,
+        length: currentChunkSize,
+      });
+
+      // Convert to bytes
+      const bytes = base64ToBytes(base64);
+
+      // Upload it
+      await patchChunk(uploadUrl, bytes, offset, accessToken);
+
+      offset += currentChunkSize;
+      const percent = Math.round((offset / fileSize) * 100);
+      setUploadProgress(percent);
     }
-    console.log('[Upload] Got upload URL, starting stream...');
 
-    // Step 2: PATCH the file via FileSystem.uploadAsync (streams from disk)
-    const task = FileSystem.createUploadTask(
-      uploadUrl,
-      fileUri,
-      {
-        sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
-        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        httpMethod: 'PATCH',
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          'Tus-Resumable': '1.0.0',
-          'Upload-Offset': '0',
-          'Content-Type': 'application/offset+octet-stream',
-        },
-      },
-      (progress) => {
-        const { totalBytesSent, totalBytesExpectedToSend } = progress;
-        if (totalBytesExpectedToSend > 0) {
-          const percent = Math.round((totalBytesSent / totalBytesExpectedToSend) * 100);
-          setUploadProgress(percent);
-        }
-      }
-    );
-
-    const result = await task.uploadAsync();
-    console.log('[Upload] Upload result status:', result?.status);
-
-    if (!result || result.status < 200 || result.status >= 300) {
-      throw new Error(`Upload failed: status ${result?.status} body ${String(result?.body || '').slice(0, 300)}`);
-    }
+    console.log('[Upload] All chunks uploaded successfully');
   }
 
   async function uploadVideo() {
