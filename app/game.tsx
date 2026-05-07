@@ -1,10 +1,13 @@
 import { supabase } from '@/supabase';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as tus from 'tus-js-client';
 
+// Direct storage hostname for better large-file upload performance
+const SUPABASE_STORAGE_URL = 'https://wscfpkaltajnrhiusoze.storage.supabase.co';
 const SUPABASE_URL = 'https://wscfpkaltajnrhiusoze.supabase.co';
 
 export default function GameScreen() {
@@ -58,6 +61,103 @@ export default function GameScreen() {
     input.click();
   }
 
+  // WEB upload path: keep using tus-js-client (works great for browsers)
+  async function uploadVideoWeb(fileName: string, fileBlob: Blob, accessToken: string) {
+    return new Promise<void>((resolve, reject) => {
+      const upload = new tus.Upload(fileBlob, {
+        endpoint: `${SUPABASE_STORAGE_URL}/storage/v1/upload/resumable`,
+        retryDelays: [0, 3000, 5000, 10000, 20000],
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'x-upsert': 'true',
+        },
+        uploadDataDuringCreation: true,
+        removeFingerprintOnSuccess: true,
+        metadata: {
+          bucketName: 'Videos',
+          objectName: fileName,
+          contentType: 'video/mp4',
+          cacheControl: '3600',
+        },
+        chunkSize: 6 * 1024 * 1024,
+        onError: (error: any) => {
+          console.error('Web TUS error:', error);
+          reject(error);
+        },
+        onProgress: (bytesUploaded, bytesTotal) => {
+          const percent = Math.round((bytesUploaded / bytesTotal) * 100);
+          setUploadProgress(percent);
+        },
+        onSuccess: () => resolve(),
+      });
+      upload.start();
+    });
+  }
+
+  // MOBILE upload path: native iOS URLSession via FileSystem.uploadAsync
+  // Handles huge files by streaming from disk, supports background execution.
+  async function uploadVideoMobile(fileName: string, fileUri: string, accessToken: string, fileSize: number) {
+    // Step 1: Create the resumable upload (small POST, no file body)
+    console.log('[Upload] Creating TUS upload session...');
+    const createResp = await fetch(`${SUPABASE_STORAGE_URL}/storage/v1/upload/resumable`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'x-upsert': 'true',
+        'Tus-Resumable': '1.0.0',
+        'Upload-Length': String(fileSize),
+        'Upload-Metadata': [
+          `bucketName ${btoa('Videos')}`,
+          `objectName ${btoa(fileName)}`,
+          `contentType ${btoa('video/mp4')}`,
+          `cacheControl ${btoa('3600')}`,
+        ].join(','),
+      },
+    });
+
+    if (!createResp.ok) {
+      const body = await createResp.text();
+      throw new Error(`Create upload failed: ${createResp.status} ${body.slice(0, 300)}`);
+    }
+
+    const uploadUrl = createResp.headers.get('location');
+    if (!uploadUrl) {
+      throw new Error('No upload URL returned from Supabase');
+    }
+    console.log('[Upload] Got upload URL, starting stream...');
+
+    // Step 2: PATCH the file via FileSystem.uploadAsync (streams from disk)
+    const task = FileSystem.createUploadTask(
+      uploadUrl,
+      fileUri,
+      {
+        sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        httpMethod: 'PATCH',
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'Tus-Resumable': '1.0.0',
+          'Upload-Offset': '0',
+          'Content-Type': 'application/offset+octet-stream',
+        },
+      },
+      (progress) => {
+        const { totalBytesSent, totalBytesExpectedToSend } = progress;
+        if (totalBytesExpectedToSend > 0) {
+          const percent = Math.round((totalBytesSent / totalBytesExpectedToSend) * 100);
+          setUploadProgress(percent);
+        }
+      }
+    );
+
+    const result = await task.uploadAsync();
+    console.log('[Upload] Upload result status:', result?.status);
+
+    if (!result || result.status < 200 || result.status >= 300) {
+      throw new Error(`Upload failed: status ${result?.status} body ${String(result?.body || '').slice(0, 300)}`);
+    }
+  }
+
   async function uploadVideo() {
     if (!pendingFile || !videoLabel) { Alert.alert('Please add a label'); return; }
     setShowLabelForm(false);
@@ -66,6 +166,7 @@ export default function GameScreen() {
 
     try {
       const fileName = `game-${id}-${Date.now()}.mp4`;
+      console.log('[Upload] Starting upload for', fileName);
 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -74,52 +175,19 @@ export default function GameScreen() {
         return;
       }
 
-      let fileBlob: Blob;
       if (pendingFile.isWeb) {
-        fileBlob = pendingFile.file;
+        await uploadVideoWeb(fileName, pendingFile.file, session.access_token);
       } else {
-        const response = await fetch(pendingFile.uri);
-        fileBlob = await response.blob();
+        const info = await FileSystem.getInfoAsync(pendingFile.uri, { size: true });
+        if (!info.exists) {
+          Alert.alert('File not found', 'Could not access the selected video.');
+          setUploading(false);
+          return;
+        }
+        const fileSize = (info as any).size as number;
+        console.log('[Upload] File size:', fileSize, 'bytes');
+        await uploadVideoMobile(fileName, pendingFile.uri, session.access_token, fileSize);
       }
-
-      await new Promise<void>((resolve, reject) => {
-        const upload = new tus.Upload(fileBlob, {
-          endpoint: `${SUPABASE_URL}/storage/v1/upload/resumable`,
-          retryDelays: [0, 3000, 5000, 10000, 20000],
-          headers: {
-            authorization: `Bearer ${session.access_token}`,
-            'x-upsert': 'true',
-          },
-          uploadDataDuringCreation: true,
-          removeFingerprintOnSuccess: true,
-          metadata: {
-            bucketName: 'Videos',
-            objectName: fileName,
-            contentType: 'video/mp4',
-            cacheControl: '3600',
-          },
-          chunkSize: 6 * 1024 * 1024,
-          onError: (error: any) => {
-            console.error('TUS upload error:', error);
-            const errMsg = error?.message || 'Unknown error';
-            const errBody = error?.originalResponse?.getBody?.() || '';
-            const status = error?.originalResponse?.getStatus?.() || '';
-            Alert.alert(
-              'TUS Error',
-              `Status: ${status}\nMessage: ${errMsg}\nBody: ${String(errBody).slice(0, 500)}`
-            );
-            reject(error);
-          },
-          onProgress: (bytesUploaded, bytesTotal) => {
-            const percent = Math.round((bytesUploaded / bytesTotal) * 100);
-            setUploadProgress(percent);
-          },
-          onSuccess: () => {
-            resolve();
-          },
-        });
-        upload.start();
-      });
 
       const { data: urlData } = supabase.storage.from('Videos').getPublicUrl(fileName);
 
@@ -137,6 +205,7 @@ export default function GameScreen() {
         setPendingFile(null);
       }
     } catch (e: any) {
+      console.error('[Upload] Catch error:', e);
       Alert.alert(
         'Upload Error',
         `${e?.message || 'Unknown'}\n${String(e?.stack || '').slice(0, 300)}`
