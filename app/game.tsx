@@ -67,6 +67,8 @@ export default function GameScreen() {
     try {
       const fileName = `game-${id}-${Date.now()}.mp4`;
 
+      console.log('[Upload] Starting upload for', fileName);
+
       // Get auth session for upload
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
@@ -74,14 +76,19 @@ export default function GameScreen() {
         setUploading(false);
         return;
       }
+      console.log('[Upload] Got auth session');
 
       // Get file as Blob (web uses File object directly, mobile fetches from local URI)
       let fileBlob: Blob;
       if (pendingFile.isWeb) {
         fileBlob = pendingFile.file;
+        console.log('[Upload] Web file, size:', (fileBlob as any).size);
       } else {
+        console.log('[Upload] Fetching file from URI:', pendingFile.uri);
         const response = await fetch(pendingFile.uri);
+        console.log('[Upload] Fetch complete, getting blob');
         fileBlob = await response.blob();
+        console.log('[Upload] Blob created, size:', (fileBlob as any).size);
       }
 
       // Resumable chunked upload via TUS protocol
@@ -102,8 +109,15 @@ export default function GameScreen() {
             cacheControl: '3600',
           },
           chunkSize: 6 * 1024 * 1024, // 6MB chunks
-          onError: (error) => {
-            console.error('TUS upload error:', error);
+          onError: (error: any) => {
+            console.error('[Upload] TUS error:', error);
+            const errMsg = error?.message || 'Unknown error';
+            const errBody = error?.originalResponse?.getBody?.() || '';
+            const status = error?.originalResponse?.getStatus?.() || '';
+            Alert.alert(
+              'TUS Error',
+              `Status: ${status}\nMessage: ${errMsg}\nBody: ${String(errBody).slice(0, 500)}`
+            );
             reject(error);
           },
           onProgress: (bytesUploaded, bytesTotal) => {
@@ -111,10 +125,12 @@ export default function GameScreen() {
             setUploadProgress(percent);
           },
           onSuccess: () => {
+            console.log('[Upload] TUS success');
             resolve();
           },
         });
         upload.start();
+        console.log('[Upload] TUS upload started');
       });
 
       const { data: urlData } = supabase.storage.from('Videos').getPublicUrl(fileName);
@@ -133,7 +149,11 @@ export default function GameScreen() {
         setPendingFile(null);
       }
     } catch (e: any) {
-      Alert.alert('Upload Error', e?.message || 'Something went wrong');
+      console.error('[Upload] Catch error:', e);
+      Alert.alert(
+        'Upload Error (catch)',
+        `${e?.message || 'Unknown'}\n${String(e?.stack || '').slice(0, 300)}`
+      );
     } finally {
       setTimeout(() => {
         setUploading(false);
