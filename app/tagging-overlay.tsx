@@ -117,7 +117,7 @@ export default function TaggingOverlayScreen() {
 }
 
 const PILL_SIZE = 44;
-const PILL_SPACING = 8;
+const PILL_SPACING = 4;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
