@@ -5,7 +5,7 @@
 // No state wiring yet — Phases C–F build that on top. Routed to from
 // app/game.tsx via a TEMP Alert option until Phase G flips /tagging.
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback } from 'react';
@@ -58,6 +58,7 @@ export default function TaggingOverlayScreen() {
 
   return (
     <View style={styles.container}>
+      <Stack.Screen options={{ statusBarHidden: true }} />
       <VideoView
         player={player}
         style={StyleSheet.absoluteFillObject}
@@ -91,7 +92,7 @@ export default function TaggingOverlayScreen() {
       <View
         style={[
           styles.bundleStripContainer,
-          { top: insets.top + 60, bottom: insets.bottom + 60, right: insets.right + 8 },
+          { top: insets.top + 68, bottom: insets.bottom + 60, right: insets.right + 8 },
         ]}
         pointerEvents="box-none"
       >
