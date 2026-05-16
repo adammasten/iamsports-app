@@ -7,7 +7,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback } from 'react';
-import { AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, InteractionManager, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function TaggingOverlayScreen() {
   const params = useLocalSearchParams();
@@ -41,7 +41,13 @@ export default function TaggingOverlayScreen() {
 
       return () => {
         sub.remove();
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        // iOS's OS rotation animation can preempt the in-flight navigation
+        // transition if we lock synchronously on blur, intermittently leaving
+        // the user stuck on this screen in portrait. Defer until after the
+        // current transition settles.
+        InteractionManager.runAfterInteractions(() => {
+          ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        });
       };
     }, [])
   );
