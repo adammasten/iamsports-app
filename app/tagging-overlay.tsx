@@ -91,7 +91,7 @@ export default function TaggingOverlayScreen() {
       <View
         style={[
           styles.bundleStripContainer,
-          { top: insets.top + 30, bottom: insets.bottom + 60, right: insets.right + 8 },
+          { top: insets.top + 60, bottom: insets.bottom + 20, right: insets.right + 8 },
         ]}
         pointerEvents="box-none"
       >
