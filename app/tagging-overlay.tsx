@@ -1,18 +1,29 @@
-// V2 overlay tagging screen — Phase A skeleton + Phase B visual chrome + Phase C controls.
+// V2 overlay tagging screen — Phase A skeleton + Phase B chrome + Phase C controls + Phase D tags.
 // Scope so far: landscape lock, full-bleed video with native chrome suppressed,
 // styled top bar (Back + disabled Save Clip placeholder + gradient backdrop),
-// right-edge bundle strip with hardcoded placeholder pills, and a bottom
-// controls row (timestamp, play/pause, Mark Start, Mark End, Highlight). Clip
-// marking state is local-only — save wiring lands in Phase F. Routed to from
-// app/game.tsx via a TEMP Alert option until Phase G flips /tagging.
+// right-edge bundle strip wired to bundle state, bottom controls row (timestamp,
+// play/pause, Mark Start, Mark End, Highlight), and a 4-column tag region
+// scoped to the current profile/team. Save wiring lands in Phase F. Routed to
+// from app/game.tsx via a TEMP Alert option until Phase G flips /tagging.
+import { useTeamContext } from '@/context';
+import { supabase } from '@/supabase';
 import { useEvent } from 'expo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useCallback, useState } from 'react';
-import { AppState, InteractionManager, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, AppState, InteractionManager, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+// Mirrors app/tagging.tsx, app/(tabs)/tags.tsx, app/export.tsx — per CLAUDE.md,
+// the category list is a hardcoded literal across multiple files. Keep in sync.
+const CATEGORIES = [
+  { key: 'offense', label: 'Offense', color: '#1a6fd4', bg: '#e8f0fe' },
+  { key: 'defense', label: 'Defense', color: '#c0392b', bg: '#fde8e8' },
+  { key: 'plays',   label: 'Plays',   color: '#1e8449', bg: '#e8f8ed' },
+  { key: 'players', label: 'Players', color: '#7d3c98', bg: '#f5eef8' },
+];
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60);
@@ -27,10 +38,16 @@ export default function TaggingOverlayScreen() {
     ? parseFloat(Array.isArray(params.startAt) ? params.startAt[0] : (params.startAt as string))
     : null;
   const insets = useSafeAreaInsets();
+  const { profileId, teamId } = useTeamContext();
 
   const [startTime, setStartTime] = useState<number | null>(null);
   const [endTime, setEndTime] = useState<number | null>(null);
   const [isHighlight, setIsHighlight] = useState(false);
+
+  const [clipLevelTags, setClipLevelTags] = useState<string[]>([]);
+  const [bundles, setBundles] = useState<string[][]>([]);
+  const [activeSection, setActiveSection] = useState<'clip' | number>('clip');
+  const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [] });
 
   const player = useVideoPlayer(videoUrl, p => {
     // Phase C: pause on entry. User starts playback via the bottom-row button.
@@ -42,7 +59,6 @@ export default function TaggingOverlayScreen() {
 
   // Reactive player state. expo-video fires timeUpdate at the interval defined
   // by player.timeUpdateEventInterval (default 0.5s) — fine for a M:SS display.
-  // Bump it lower later if the tick feels laggy when scrubbing manually.
   const { currentTime } = useEvent(player, 'timeUpdate', {
     currentTime: 0,
     currentLiveTimestamp: null,
@@ -78,6 +94,83 @@ export default function TaggingOverlayScreen() {
     }, [])
   );
 
+  // Fetch tags scoped to the current profile/team. The .or(...) syntax must
+  // match app/tagging.tsx exactly — per CLAUDE.md, getting it wrong silently
+  // leaks tags across players.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let query = supabase.from('tags').select('*').order('sort_order');
+      if (profileId && teamId && teamId !== 'all') {
+        query = query.or(`scope.eq.global,and(scope.eq.player,profile_id.eq.${profileId}),and(scope.eq.team,team_id.eq.${teamId})`);
+      } else if (profileId) {
+        query = query.or(`scope.eq.global,and(scope.eq.player,profile_id.eq.${profileId})`);
+      } else {
+        query = query.eq('scope', 'global');
+      }
+      const { data, error } = await query;
+      if (cancelled) return;
+      if (error) {
+        Alert.alert('Error', error.message);
+        return;
+      }
+      const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [] };
+      (data || []).forEach((t: any) => {
+        if (grouped[t.category]) grouped[t.category].push(t);
+      });
+      setTags(grouped);
+    })();
+    return () => { cancelled = true; };
+  }, [profileId, teamId]);
+
+  function toggleTag(tagId: string) {
+    if (activeSection === 'clip') {
+      setClipLevelTags(prev =>
+        prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]
+      );
+    } else {
+      const idx = activeSection;
+      setBundles(prev => prev.map((bundle, i) => {
+        if (i !== idx) return bundle;
+        return bundle.includes(tagId) ? bundle.filter(id => id !== tagId) : [...bundle, tagId];
+      }));
+    }
+  }
+
+  function addBundle() {
+    const newIdx = bundles.length;
+    setBundles(prev => [...prev, []]);
+    setActiveSection(newIdx);
+  }
+
+  function removeBundle(idx: number) {
+    const bundle = bundles[idx];
+    const doRemove = () => {
+      setBundles(prev => prev.filter((_, i) => i !== idx));
+      if (activeSection === idx) {
+        setActiveSection('clip');
+      } else if (typeof activeSection === 'number' && activeSection > idx) {
+        setActiveSection(activeSection - 1);
+      }
+    };
+    if (bundle && bundle.length > 0) {
+      Alert.alert(
+        'Remove bundle?',
+        `Bundle ${idx + 1} has ${bundle.length} tag(s). This can't be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove', style: 'destructive', onPress: doRemove },
+        ]
+      );
+    } else {
+      doRemove();
+    }
+  }
+
+  const activeTags = activeSection === 'clip'
+    ? clipLevelTags
+    : (bundles[activeSection] ?? []);
+
   return (
     <View style={styles.container}>
       <VideoView
@@ -109,7 +202,7 @@ export default function TaggingOverlayScreen() {
         </View>
       </LinearGradient>
 
-      {/* Right-edge bundle strip — visual only. Pills become tappable in Phase D. */}
+      {/* Right-edge bundle strip — Clip pill + dynamic numbered pills + add pill. */}
       <View
         style={[
           styles.bundleStripContainer,
@@ -121,22 +214,69 @@ export default function TaggingOverlayScreen() {
           contentContainerStyle={styles.bundleStripContent}
           showsVerticalScrollIndicator={false}
         >
-          <View style={[styles.pill, styles.pillActive]}>
+          <TouchableOpacity
+            style={[styles.pill, activeSection === 'clip' ? styles.pillActive : styles.pillInactive]}
+            onPress={() => setActiveSection('clip')}
+          >
             <Text style={styles.pillTextActive}>Clip</Text>
-          </View>
-          {[1, 2, 3].map(n => (
-            <View key={n} style={[styles.pill, styles.pillInactive]}>
-              <Text style={styles.pillTextInactive}>{n}</Text>
-            </View>
+          </TouchableOpacity>
+          {bundles.map((_, idx) => (
+            <TouchableOpacity
+              key={idx}
+              style={[styles.pill, activeSection === idx ? styles.pillActive : styles.pillInactive]}
+              onPress={() => setActiveSection(idx)}
+              onLongPress={() => removeBundle(idx)}
+            >
+              <Text style={styles.pillTextInactive}>{idx + 1}</Text>
+            </TouchableOpacity>
           ))}
-          <View style={[styles.pill, styles.pillAdd]}>
+          <TouchableOpacity style={[styles.pill, styles.pillAdd]} onPress={addBundle}>
             <Text style={styles.pillTextAdd}>+</Text>
-          </View>
+          </TouchableOpacity>
         </ScrollView>
       </View>
 
+      {/* Tag region — 4 category columns. Sits above the controls row, to the
+          left of the strip's lower portion. Each column scrolls vertically. */}
+      <View
+        style={[
+          styles.tagRegion,
+          {
+            bottom: insets.bottom + 56 + 8,
+            left: insets.left + 12,
+            right: insets.right + PILL_SIZE + 8 + 12,
+          },
+        ]}
+        pointerEvents="box-none"
+      >
+        {CATEGORIES.map(cat => (
+          <View key={cat.key} style={styles.tagColumn}>
+            <Text style={[styles.colHeader, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.chipsWrap}>
+                {tags[cat.key].map(tag => {
+                  const selected = activeTags.includes(tag.id);
+                  return (
+                    <TouchableOpacity
+                      key={tag.id}
+                      onPress={() => toggleTag(tag.id)}
+                      style={[styles.tagChip, { backgroundColor: selected ? cat.color : cat.bg }]}
+                    >
+                      <Text style={[styles.tagChipText, { color: selected ? '#fff' : cat.color }]}>
+                        {tag.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
+        ))}
+      </View>
+
       {/* Bottom controls — timestamp, play/pause, Mark Start/End, Highlight.
-          State is local-only here; Save wiring in Phase F batches into supabase. */}
+          State is local-only here; Save wiring in Phase F batches into supabase.
+          Gradient extends up far enough to backdrop the tag region for readability. */}
       <LinearGradient
         colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)']}
         style={[styles.bottomGradient, { paddingBottom: insets.bottom }]}
@@ -261,12 +401,45 @@ const styles = StyleSheet.create({
   pillTextInactive: { color: '#fff', fontSize: 14, fontWeight: '600' },
   pillTextAdd: { color: 'rgba(255, 255, 255, 0.7)', fontSize: 22, fontWeight: '300' },
 
+  tagRegion: {
+    position: 'absolute',
+    flexDirection: 'row',
+    gap: 8,
+    height: 100,
+  },
+  tagColumn: {
+    flex: 1,
+  },
+  colHeader: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  chipsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  tagChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  tagChipText: {
+    fontSize: 10,
+    fontWeight: '500',
+  },
+
   bottomGradient: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: 96,
+    height: 200,
     justifyContent: 'flex-end',
   },
   controlsRow: {
