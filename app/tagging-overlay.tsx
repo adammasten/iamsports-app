@@ -1,12 +1,14 @@
-// V2 overlay tagging screen — Phases A-F. Scope so far: landscape lock,
-// full-bleed video with native chrome suppressed, styled top bar (Back +
-// active Save Clip + gradient backdrop), right-edge bundle strip wired to
-// bundle state, bottom controls row (timestamp, play/pause, Mark Start, Mark
-// End, Highlight), 4-column tag region scoped to the current profile/team,
-// tap-to-hide chrome with iOS Live Text suppression via a Pressable that
-// absorbs long-press, and clip save (clips + clip_tags batch insert
-// preserving the bundle_number contract). Routed to from app/game.tsx via a
-// TEMP Alert option until Phase G flips /tagging.
+// V2 overlay tagging screen — Phases A-F + F.2 scrub bar. Scope so far:
+// landscape lock, full-bleed video with native chrome suppressed, styled top
+// bar (Back + active Save Clip + gradient backdrop), right-edge bundle strip
+// wired to bundle state, bottom controls row (timestamp + duration, ±1s/±5s
+// skip buttons, play/pause, Mark Start, Mark End, Highlight), scrub bar
+// above controls with drag-to-seek + tap-to-seek + drag-time tooltip,
+// 4-column tag region scoped to the current profile/team, tap-to-hide chrome
+// with iOS Live Text suppression via a Pressable that absorbs long-press,
+// and clip save (clips + clip_tags batch insert preserving the bundle_number
+// contract). Routed to from app/game.tsx via a TEMP Alert option until
+// Phase G flips /tagging.
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { useEvent } from 'expo';
@@ -16,7 +18,8 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, AppState, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Mirrors app/tagging.tsx, app/(tabs)/tags.tsx, app/export.tsx — per CLAUDE.md,
@@ -87,6 +90,22 @@ export default function TaggingOverlayScreen() {
     bufferedPosition: 0,
   });
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: false });
+
+  // sourceLoad fires once when metadata loads — gives us the real duration
+  // immediately. Without it, player.duration reads 0 until the first
+  // timeUpdate after play() (bad UX: display shows "0:42 / 0:00" initially).
+  const { duration } = useEvent(player, 'sourceLoad', {
+    videoSource: null,
+    duration: 0,
+    availableVideoTracks: [],
+    availableSubtitleTracks: [],
+    availableAudioTracks: [],
+  });
+
+  // Scrub bar state — dragging drives thumb size + tooltip visibility;
+  // barWidth captured via onLayout for pixel→time conversion.
+  const [dragging, setDragging] = useState(false);
+  const [barWidth, setBarWidth] = useState(0);
 
   // Lock landscape on focus, restore portrait on blur. useFocusEffect (not
   // useEffect) so the restore fires before the previous screen re-renders,
@@ -195,6 +214,42 @@ export default function TaggingOverlayScreen() {
   const hasClipMarked = startTime !== null && endTime !== null;
   const canSave = hasClipMarked && !saving;
 
+  function seekToX(x: number) {
+    if (barWidth <= 0 || duration <= 0) return;
+    const pct = Math.max(0, Math.min(1, x / barWidth));
+    player.currentTime = pct * duration;
+  }
+
+  function skip(deltaSeconds: number) {
+    if (duration <= 0) return;
+    player.currentTime = Math.max(0, Math.min(duration, player.currentTime + deltaSeconds));
+  }
+
+  function handleDragStart(x: number) {
+    player.pause();
+    seekToX(x);
+  }
+
+  // Pan gesture handles both single tap (onBegin only, no movement) and drag
+  // (onBegin + onUpdate sequence). On release, video stays paused per spec —
+  // user hits play when ready to verify the seek. runOnJS bridges from the
+  // worklet (UI thread) to the JS-side setters and player methods.
+  const pan = Gesture.Pan()
+    .onBegin(e => {
+      runOnJS(setDragging)(true);
+      runOnJS(handleDragStart)(e.x);
+    })
+    .onUpdate(e => {
+      runOnJS(seekToX)(e.x);
+    })
+    .onEnd(() => {
+      runOnJS(setDragging)(false);
+    });
+
+  const thumbX = duration > 0 ? Math.max(0, Math.min(barWidth, (currentTime / duration) * barWidth)) : 0;
+  const TOOLTIP_WIDTH = 50;
+  const tooltipLeft = Math.max(0, Math.min(barWidth - TOOLTIP_WIDTH, thumbX - TOOLTIP_WIDTH / 2));
+
   // Mirrors app/tagging.tsx:123-190 verbatim. The bundle_number contract
   // (clip-level = 0, bundles[idx] = idx + 1) is what app/export.tsx's
   // clipMatchesGroup relies on — off-by-one here silently breaks bundle
@@ -268,7 +323,7 @@ export default function TaggingOverlayScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <GestureHandlerRootView style={styles.container}>
       <VideoView
         player={player}
         style={StyleSheet.absoluteFillObject}
@@ -355,7 +410,8 @@ export default function TaggingOverlayScreen() {
           style={[
             styles.tagRegion,
             {
-              bottom: insets.bottom + 56 + 8,
+              // Bumped up to clear the scrub bar (24pt) + 8pt gap added in F.2.
+              bottom: insets.bottom + 56 + 8 + 24 + 8,
               left: insets.left + 12,
               right: insets.right + PILL_SIZE + 8 + 12,
             },
@@ -395,18 +451,67 @@ export default function TaggingOverlayScreen() {
           style={[styles.bottomGradient, { paddingBottom: insets.bottom }]}
           pointerEvents="box-none"
         >
+          {/* Scrub bar — drag thumb or tap anywhere to seek; tooltip above
+              thumb while dragging. Pan auto-pauses on drag start; stays paused
+              on release per spec. */}
+          <View
+            style={[styles.scrubBarWrapper, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
+            pointerEvents="box-none"
+          >
+            <GestureDetector gesture={pan}>
+              <View
+                onLayout={e => setBarWidth(e.nativeEvent.layout.width)}
+                style={styles.scrubBarHitTarget}
+              >
+                <View style={[styles.scrubBarTrack, dragging && styles.scrubBarTrackDragging]}>
+                  <View style={[styles.scrubBarFill, { width: thumbX }]} />
+                </View>
+                <View
+                  style={[
+                    styles.scrubBarThumb,
+                    dragging && styles.scrubBarThumbDragging,
+                    { left: thumbX - (dragging ? 8 : 6) },
+                  ]}
+                  pointerEvents="none"
+                />
+              </View>
+            </GestureDetector>
+            {dragging && (
+              <View
+                style={[styles.tooltip, { left: tooltipLeft }]}
+                pointerEvents="none"
+              >
+                <Text style={styles.tooltipText}>{formatTime(currentTime)}</Text>
+              </View>
+            )}
+          </View>
+
           <View
             style={[styles.controlsRow, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
             pointerEvents="box-none"
           >
             <View style={styles.leftGroup}>
-              <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+              <Text style={styles.timeText}>
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </Text>
+              <TouchableOpacity style={styles.skipBtn} onPress={() => skip(-5)}>
+                <Text style={styles.skipBtnText}>-5s</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.skipBtn} onPress={() => skip(-1)}>
+                <Text style={styles.skipBtnText}>-1s</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.playBtn}
                 onPress={() => (isPlaying ? player.pause() : player.play())}
                 hitSlop={8}
               >
                 <Text style={styles.playBtnText}>{isPlaying ? '❚❚' : '▶'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.skipBtn} onPress={() => skip(1)}>
+                <Text style={styles.skipBtnText}>+1s</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.skipBtn} onPress={() => skip(5)}>
+                <Text style={styles.skipBtnText}>+5s</Text>
               </TouchableOpacity>
             </View>
 
@@ -439,7 +544,7 @@ export default function TaggingOverlayScreen() {
           </View>
         </LinearGradient>
       </Animated.View>
-    </View>
+    </GestureHandlerRootView>
   );
 }
 
@@ -519,7 +624,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     flexDirection: 'row',
     gap: 8,
-    height: 100,
+    // Shrunk from 100pt in F.2 to make room for the scrub bar between the tag
+    // region and the controls row. Bump back if Players column feels cramped.
+    height: 80,
   },
   tagColumn: {
     flex: 1,
@@ -555,6 +662,8 @@ const styles = StyleSheet.create({
     right: 0,
     height: 200,
     justifyContent: 'flex-end',
+    // 8pt vertical breathing room between the F.2 scrub bar and the controls row.
+    gap: 8,
   },
   controlsRow: {
     flexDirection: 'row',
@@ -583,6 +692,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   playBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+
+  skipBtn: {
+    width: 40,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  skipBtnText: { color: '#fff', fontSize: 11, fontWeight: '600' },
 
   markGroup: {
     flexDirection: 'row',
@@ -615,4 +734,64 @@ const styles = StyleSheet.create({
   },
   highlightStar: { color: '#EF9F27', fontSize: 18, fontWeight: '600' },
   highlightStarActive: { color: '#fff' },
+
+  scrubBarWrapper: {
+    // Sits inside the bottom LinearGradient as the first child; gradient's gap:8
+    // puts 8pt below it before the controls row.
+  },
+  scrubBarHitTarget: {
+    // Pan gesture is on the GestureDetector wrapping this view — entire 24pt
+    // height is the tap target, not just the visible 4pt bar. Thumb is centered
+    // vertically via absolute positioning below.
+    height: 24,
+    justifyContent: 'center',
+  },
+  scrubBarTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  scrubBarTrackDragging: {
+    height: 6,
+    borderRadius: 3,
+  },
+  scrubBarFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: '#534AB7',
+    borderRadius: 2,
+  },
+  scrubBarThumb: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#fff',
+    // Centered vertically in the 24pt hit target: (24 - 12) / 2 = 6.
+    top: 6,
+  },
+  scrubBarThumbDragging: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    // (24 - 16) / 2 = 4.
+    top: 4,
+  },
+  tooltip: {
+    position: 'absolute',
+    top: -28,
+    width: 50,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    alignItems: 'center',
+  },
+  tooltipText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
 });
