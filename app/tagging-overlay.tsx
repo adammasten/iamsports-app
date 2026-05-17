@@ -1,11 +1,12 @@
-// V2 overlay tagging screen — Phases A-E. Scope so far: landscape lock,
+// V2 overlay tagging screen — Phases A-F. Scope so far: landscape lock,
 // full-bleed video with native chrome suppressed, styled top bar (Back +
-// disabled Save Clip placeholder + gradient backdrop), right-edge bundle
-// strip wired to bundle state, bottom controls row (timestamp, play/pause,
-// Mark Start, Mark End, Highlight), 4-column tag region scoped to the current
-// profile/team, and tap-to-hide chrome with iOS Live Text suppression via a
-// Pressable that absorbs long-press. Save wiring lands in Phase F. Routed to
-// from app/game.tsx via a TEMP Alert option until Phase G flips /tagging.
+// active Save Clip + gradient backdrop), right-edge bundle strip wired to
+// bundle state, bottom controls row (timestamp, play/pause, Mark Start, Mark
+// End, Highlight), 4-column tag region scoped to the current profile/team,
+// tap-to-hide chrome with iOS Live Text suppression via a Pressable that
+// absorbs long-press, and clip save (clips + clip_tags batch insert
+// preserving the bundle_number contract). Routed to from app/game.tsx via a
+// TEMP Alert option until Phase G flips /tagging.
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { useEvent } from 'expo';
@@ -36,6 +37,7 @@ function formatTime(seconds: number) {
 export default function TaggingOverlayScreen() {
   const params = useLocalSearchParams();
   const videoUrl = Array.isArray(params.url) ? params.url[0] : params.url;
+  const videoId = Array.isArray(params.videoId) ? params.videoId[0] : params.videoId;
   const startAt = params.startAt
     ? parseFloat(Array.isArray(params.startAt) ? params.startAt[0] : (params.startAt as string))
     : null;
@@ -45,6 +47,7 @@ export default function TaggingOverlayScreen() {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [endTime, setEndTime] = useState<number | null>(null);
   const [isHighlight, setIsHighlight] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const [clipLevelTags, setClipLevelTags] = useState<string[]>([]);
   const [bundles, setBundles] = useState<string[][]>([]);
@@ -185,6 +188,81 @@ export default function TaggingOverlayScreen() {
     ? clipLevelTags
     : (bundles[activeSection] ?? []);
 
+  const hasClipMarked = startTime !== null && endTime !== null;
+  const canSave = hasClipMarked && !saving;
+
+  // Mirrors app/tagging.tsx:123-190 verbatim. The bundle_number contract
+  // (clip-level = 0, bundles[idx] = idx + 1) is what app/export.tsx's
+  // clipMatchesGroup relies on — off-by-one here silently breaks bundle
+  // attribution in exports. Reset only on the success path (Alert OK).
+  async function saveClip() {
+    if (startTime === null || endTime === null) {
+      Alert.alert('Missing times', 'Please mark a start and end time first.');
+      return;
+    }
+    if (endTime <= startTime) {
+      Alert.alert('Invalid clip', 'End time must be after start time.');
+      return;
+    }
+    setSaving(true);
+
+    const { data: clip, error: clipError } = await supabase
+      .from('clips')
+      .insert({
+        video_id: videoId,
+        start_time: startTime,
+        end_time: endTime,
+        is_starred: isHighlight,
+        note: '',
+      })
+      .select()
+      .single();
+
+    if (clipError) {
+      Alert.alert('Error saving clip', clipError.message);
+      setSaving(false);
+      return;
+    }
+
+    const rows: any[] = [];
+    for (const tagId of clipLevelTags) {
+      rows.push({ clip_id: clip.id, tag_id: tagId, bundle_number: 0 });
+    }
+    bundles.forEach((bundle, idx) => {
+      const bundleNum = idx + 1;
+      for (const tagId of bundle) {
+        rows.push({ clip_id: clip.id, tag_id: tagId, bundle_number: bundleNum });
+      }
+    });
+
+    if (rows.length > 0) {
+      const { error: tagError } = await supabase.from('clip_tags').insert(rows);
+      if (tagError) {
+        Alert.alert('Error saving tags', tagError.message);
+        setSaving(false);
+        return;
+      }
+    }
+
+    const nonEmptyBundles = bundles.filter(b => b.length > 0).length;
+    Alert.alert(
+      'Saved!',
+      `Clip saved with ${rows.length} tag(s)${nonEmptyBundles > 0 ? ` across ${nonEmptyBundles} bundle(s)` : ''}.`,
+      [{
+        text: 'OK',
+        onPress: () => {
+          setStartTime(null);
+          setEndTime(null);
+          setIsHighlight(false);
+          setClipLevelTags([]);
+          setBundles([]);
+          setActiveSection('clip');
+        },
+      }]
+    );
+    setSaving(false);
+  }
+
   return (
     <View style={styles.container}>
       <VideoView
@@ -223,9 +301,12 @@ export default function TaggingOverlayScreen() {
             <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
               <Text style={styles.backBtnText}>←</Text>
             </TouchableOpacity>
-            {/* Save Clip wires up in Phase F — disabled placeholder. */}
-            <TouchableOpacity style={styles.saveBtn} disabled>
-              <Text style={styles.saveBtnText}>Save Clip</Text>
+            <TouchableOpacity
+              style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
+              disabled={!canSave}
+              onPress={saveClip}
+            >
+              <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Clip'}</Text>
             </TouchableOpacity>
           </View>
         </LinearGradient>
@@ -390,10 +471,10 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     backgroundColor: '#534AB7',
-    opacity: 0.5,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  saveBtnDisabled: { opacity: 0.5 },
   saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
   bundleStripContainer: {
