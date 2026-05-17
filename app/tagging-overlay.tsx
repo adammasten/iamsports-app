@@ -1,9 +1,10 @@
-// V2 overlay tagging screen — Phase A skeleton + Phase B chrome + Phase C controls + Phase D tags.
-// Scope so far: landscape lock, full-bleed video with native chrome suppressed,
-// styled top bar (Back + disabled Save Clip placeholder + gradient backdrop),
-// right-edge bundle strip wired to bundle state, bottom controls row (timestamp,
-// play/pause, Mark Start, Mark End, Highlight), and a 4-column tag region
-// scoped to the current profile/team. Save wiring lands in Phase F. Routed to
+// V2 overlay tagging screen — Phases A-E. Scope so far: landscape lock,
+// full-bleed video with native chrome suppressed, styled top bar (Back +
+// disabled Save Clip placeholder + gradient backdrop), right-edge bundle
+// strip wired to bundle state, bottom controls row (timestamp, play/pause,
+// Mark Start, Mark End, Highlight), 4-column tag region scoped to the current
+// profile/team, and tap-to-hide chrome with iOS Live Text suppression via a
+// Pressable that absorbs long-press. Save wiring lands in Phase F. Routed to
 // from app/game.tsx via a TEMP Alert option until Phase G flips /tagging.
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
@@ -13,7 +14,8 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, AppState, InteractionManager, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Mirrors app/tagging.tsx, app/(tabs)/tags.tsx, app/export.tsx — per CLAUDE.md,
@@ -48,6 +50,18 @@ export default function TaggingOverlayScreen() {
   const [bundles, setBundles] = useState<string[][]>([]);
   const [activeSection, setActiveSection] = useState<'clip' | number>('clip');
   const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [] });
+
+  // Chrome visibility — pointerEvents flips synchronously via React state; the
+  // opacity transition is driven by Reanimated over 200ms. Both must move
+  // together (state synchronously, animation following) so the user never
+  // sees the chrome visually faded but still intercepting taps.
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const chromeOpacity = useSharedValue(1);
+  const animatedChromeStyle = useAnimatedStyle(() => ({ opacity: chromeOpacity.value }));
+
+  useEffect(() => {
+    chromeOpacity.value = withTiming(controlsVisible ? 1 : 0, { duration: 200 });
+  }, [controlsVisible, chromeOpacity]);
 
   const player = useVideoPlayer(videoUrl, p => {
     // Phase C: pause on entry. User starts playback via the bottom-row button.
@@ -182,149 +196,164 @@ export default function TaggingOverlayScreen() {
         contentFit="contain"
       />
 
-      {/* Top bar — gradient backdrop + Back (left) + Save Clip (right, disabled placeholder) */}
-      <LinearGradient
-        colors={['rgba(0,0,0,0.5)', 'rgba(0,0,0,0)']}
-        style={[styles.topGradient, { paddingTop: insets.top }]}
-        pointerEvents="box-none"
+      {/* Tap-to-hide layer. Single tap toggles chrome visibility. onLongPress
+          is a no-op but its mere presence claims the long-press gesture,
+          preventing iOS Live Text's "Copy All" popup from firing on the video.
+          Sits above VideoView, below the chrome wrapper. */}
+      <Pressable
+        style={StyleSheet.absoluteFillObject}
+        onPress={() => setControlsVisible(v => !v)}
+        onLongPress={() => {}}
+      />
+
+      <Animated.View
+        style={[StyleSheet.absoluteFillObject, animatedChromeStyle]}
+        pointerEvents={controlsVisible ? 'box-none' : 'none'}
       >
-        <View
-          style={[styles.topBar, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
+        {/* Top bar — gradient backdrop + Back (left) + Save Clip (right, disabled placeholder) */}
+        <LinearGradient
+          colors={['rgba(0,0,0,0.5)', 'rgba(0,0,0,0)']}
+          style={[styles.topGradient, { paddingTop: insets.top }]}
           pointerEvents="box-none"
         >
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
-            <Text style={styles.backBtnText}>←</Text>
-          </TouchableOpacity>
-          {/* Save Clip wires up in Phase F — disabled placeholder. */}
-          <TouchableOpacity style={styles.saveBtn} disabled>
-            <Text style={styles.saveBtnText}>Save Clip</Text>
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
-
-      {/* Right-edge bundle strip — Clip pill + dynamic numbered pills + add pill. */}
-      <View
-        style={[
-          styles.bundleStripContainer,
-          { top: insets.top + 60, bottom: insets.bottom + 80, right: insets.right + 8 },
-        ]}
-        pointerEvents="box-none"
-      >
-        <ScrollView
-          contentContainerStyle={styles.bundleStripContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <TouchableOpacity
-            style={[styles.pill, activeSection === 'clip' ? styles.pillActive : styles.pillInactive]}
-            onPress={() => setActiveSection('clip')}
+          <View
+            style={[styles.topBar, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
+            pointerEvents="box-none"
           >
-            <Text style={styles.pillTextActive}>Clip</Text>
-          </TouchableOpacity>
-          {bundles.map((_, idx) => (
-            <TouchableOpacity
-              key={idx}
-              style={[styles.pill, activeSection === idx ? styles.pillActive : styles.pillInactive]}
-              onPress={() => setActiveSection(idx)}
-              onLongPress={() => removeBundle(idx)}
-            >
-              <Text style={styles.pillTextInactive}>{idx + 1}</Text>
+            <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
+              <Text style={styles.backBtnText}>←</Text>
             </TouchableOpacity>
-          ))}
-          <TouchableOpacity style={[styles.pill, styles.pillAdd]} onPress={addBundle}>
-            <Text style={styles.pillTextAdd}>+</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
-
-      {/* Tag region — 4 category columns. Sits above the controls row, to the
-          left of the strip's lower portion. Each column scrolls vertically. */}
-      <View
-        style={[
-          styles.tagRegion,
-          {
-            bottom: insets.bottom + 56 + 8,
-            left: insets.left + 12,
-            right: insets.right + PILL_SIZE + 8 + 12,
-          },
-        ]}
-        pointerEvents="box-none"
-      >
-        {CATEGORIES.map(cat => (
-          <View key={cat.key} style={styles.tagColumn}>
-            <Text style={[styles.colHeader, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.chipsWrap}>
-                {tags[cat.key].map(tag => {
-                  const selected = activeTags.includes(tag.id);
-                  return (
-                    <TouchableOpacity
-                      key={tag.id}
-                      onPress={() => toggleTag(tag.id)}
-                      style={[styles.tagChip, { backgroundColor: selected ? cat.color : cat.bg }]}
-                    >
-                      <Text style={[styles.tagChipText, { color: selected ? '#fff' : cat.color }]}>
-                        {tag.name}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </ScrollView>
+            {/* Save Clip wires up in Phase F — disabled placeholder. */}
+            <TouchableOpacity style={styles.saveBtn} disabled>
+              <Text style={styles.saveBtnText}>Save Clip</Text>
+            </TouchableOpacity>
           </View>
-        ))}
-      </View>
+        </LinearGradient>
 
-      {/* Bottom controls — timestamp, play/pause, Mark Start/End, Highlight.
-          State is local-only here; Save wiring in Phase F batches into supabase.
-          Gradient extends up far enough to backdrop the tag region for readability. */}
-      <LinearGradient
-        colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)']}
-        style={[styles.bottomGradient, { paddingBottom: insets.bottom }]}
-        pointerEvents="box-none"
-      >
+        {/* Right-edge bundle strip — Clip pill + dynamic numbered pills + add pill. */}
         <View
-          style={[styles.controlsRow, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
+          style={[
+            styles.bundleStripContainer,
+            { top: insets.top + 60, bottom: insets.bottom + 80, right: insets.right + 8 },
+          ]}
           pointerEvents="box-none"
         >
-          <View style={styles.leftGroup}>
-            <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+          <ScrollView
+            contentContainerStyle={styles.bundleStripContent}
+            showsVerticalScrollIndicator={false}
+          >
             <TouchableOpacity
-              style={styles.playBtn}
-              onPress={() => (isPlaying ? player.pause() : player.play())}
+              style={[styles.pill, activeSection === 'clip' ? styles.pillActive : styles.pillInactive]}
+              onPress={() => setActiveSection('clip')}
+            >
+              <Text style={styles.pillTextActive}>Clip</Text>
+            </TouchableOpacity>
+            {bundles.map((_, idx) => (
+              <TouchableOpacity
+                key={idx}
+                style={[styles.pill, activeSection === idx ? styles.pillActive : styles.pillInactive]}
+                onPress={() => setActiveSection(idx)}
+                onLongPress={() => removeBundle(idx)}
+              >
+                <Text style={styles.pillTextInactive}>{idx + 1}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={[styles.pill, styles.pillAdd]} onPress={addBundle}>
+              <Text style={styles.pillTextAdd}>+</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+
+        {/* Tag region — 4 category columns. Sits above the controls row, to the
+            left of the strip's lower portion. Each column scrolls vertically. */}
+        <View
+          style={[
+            styles.tagRegion,
+            {
+              bottom: insets.bottom + 56 + 8,
+              left: insets.left + 12,
+              right: insets.right + PILL_SIZE + 8 + 12,
+            },
+          ]}
+          pointerEvents="box-none"
+        >
+          {CATEGORIES.map(cat => (
+            <View key={cat.key} style={styles.tagColumn}>
+              <Text style={[styles.colHeader, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={styles.chipsWrap}>
+                  {tags[cat.key].map(tag => {
+                    const selected = activeTags.includes(tag.id);
+                    return (
+                      <TouchableOpacity
+                        key={tag.id}
+                        onPress={() => toggleTag(tag.id)}
+                        style={[styles.tagChip, { backgroundColor: selected ? cat.color : cat.bg }]}
+                      >
+                        <Text style={[styles.tagChipText, { color: selected ? '#fff' : cat.color }]}>
+                          {tag.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            </View>
+          ))}
+        </View>
+
+        {/* Bottom controls — timestamp, play/pause, Mark Start/End, Highlight.
+            State is local-only here; Save wiring in Phase F batches into supabase.
+            Gradient extends up far enough to backdrop the tag region for readability. */}
+        <LinearGradient
+          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)']}
+          style={[styles.bottomGradient, { paddingBottom: insets.bottom }]}
+          pointerEvents="box-none"
+        >
+          <View
+            style={[styles.controlsRow, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
+            pointerEvents="box-none"
+          >
+            <View style={styles.leftGroup}>
+              <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+              <TouchableOpacity
+                style={styles.playBtn}
+                onPress={() => (isPlaying ? player.pause() : player.play())}
+                hitSlop={8}
+              >
+                <Text style={styles.playBtnText}>{isPlaying ? '❚❚' : '▶'}</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.markGroup}>
+              <TouchableOpacity
+                style={[styles.markBtn, styles.markStartBtn]}
+                onPress={() => setStartTime(player.currentTime)}
+              >
+                <Text style={styles.markBtnText}>
+                  {startTime !== null ? `Start ${formatTime(startTime)}` : 'Mark Start'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.markBtn, styles.markEndBtn]}
+                onPress={() => setEndTime(player.currentTime)}
+              >
+                <Text style={styles.markBtnText}>
+                  {endTime !== null ? `End ${formatTime(endTime)}` : 'Mark End'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.highlightBtn, isHighlight && styles.highlightBtnActive]}
+              onPress={() => setIsHighlight(v => !v)}
               hitSlop={8}
             >
-              <Text style={styles.playBtnText}>{isPlaying ? '❚❚' : '▶'}</Text>
+              <Text style={[styles.highlightStar, isHighlight && styles.highlightStarActive]}>★</Text>
             </TouchableOpacity>
           </View>
-
-          <View style={styles.markGroup}>
-            <TouchableOpacity
-              style={[styles.markBtn, styles.markStartBtn]}
-              onPress={() => setStartTime(player.currentTime)}
-            >
-              <Text style={styles.markBtnText}>
-                {startTime !== null ? `Start ${formatTime(startTime)}` : 'Mark Start'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.markBtn, styles.markEndBtn]}
-              onPress={() => setEndTime(player.currentTime)}
-            >
-              <Text style={styles.markBtnText}>
-                {endTime !== null ? `End ${formatTime(endTime)}` : 'Mark End'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity
-            style={[styles.highlightBtn, isHighlight && styles.highlightBtnActive]}
-            onPress={() => setIsHighlight(v => !v)}
-            hitSlop={8}
-          >
-            <Text style={[styles.highlightStar, isHighlight && styles.highlightStarActive]}>★</Text>
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
+        </LinearGradient>
+      </Animated.View>
     </View>
   );
 }
