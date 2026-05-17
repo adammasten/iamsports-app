@@ -95,6 +95,10 @@ After upload, the public URL is grabbed via `supabase.storage.from('Videos').get
 - Long-term goal is side income, not a 40 hr/wk job — **default to shipping over polish**.
 - Subscription/payment work uses **RevenueCat** when it begins, which is **post-App-Store launch, NOT before**. Includes affiliate/referral tracking via per-coach codes.
 
+### Planned: Highlight reel shortcut (post-V2 overlay)
+
+The ★ Highlight button on the tagging screen sets `clips.is_starred = true` on save. After V2 overlay ships, add a "Make Highlight Reel" option that filters clips by `is_starred = true`, skips `app/export.tsx`'s tag-group builder, and goes straight to the Railway `/export` endpoint. **Why:** top-tier user value for parents making highlight tapes — the current 3-step wizard is overkill when the user has already marked their highlights during tagging. Don't lose track of this; it's the most direct conversion from "I tagged a great play" to "I have a shareable video."
+
 ## Working style
 
 - Adam uses **VS Code exclusively**. Never suggest `nano`, `vim`, TextEdit, or any other editor.
