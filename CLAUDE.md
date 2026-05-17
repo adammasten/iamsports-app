@@ -99,6 +99,10 @@ After upload, the public URL is grabbed via `supabase.storage.from('Videos').get
 
 The ★ Highlight button on the tagging screen sets `clips.is_starred = true` on save. After V2 overlay ships, add a "Make Highlight Reel" option that filters clips by `is_starred = true`, skips `app/export.tsx`'s tag-group builder, and goes straight to the Railway `/export` endpoint. **Why:** top-tier user value for parents making highlight tapes — the current 3-step wizard is overkill when the user has already marked their highlights during tagging. Don't lose track of this; it's the most direct conversion from "I tagged a great play" to "I have a shareable video."
 
+### Planned: Save-Alert → toast (post-V2 overlay)
+
+V2 Phase F's "Saved!" Alert (with OK-button-then-reset) in `app/tagging-overlay.tsx` is intentional parity with `app/tagging.tsx`'s portrait save flow — it was the right call for shipping Phase F without diverging from the working portrait pattern. But it's a known UX friction point for high-volume landscape tagging sessions: every save interrupts the user with a modal they have to dismiss before tagging the next clip. **Post-V2 polish:** replace with a toast (brief visual feedback, auto-dismiss ~1.5s, state reset happens automatically). **Don't change before beta** — coaches will surface this in real use and we'll know how strongly to prioritize.
+
 ## Working style
 
 - Adam uses **VS Code exclusively**. Never suggest `nano`, `vim`, TextEdit, or any other editor.
