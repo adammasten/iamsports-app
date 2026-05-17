@@ -69,13 +69,17 @@ export default function TaggingOverlayScreen() {
   const player = useVideoPlayer(videoUrl, p => {
     // Phase C: pause on entry. User starts playback via the bottom-row button.
     p.pause();
+    // expo-video defaults timeUpdateEventInterval to 0 (event never fires) —
+    // set explicitly so the bottom-row timestamp ticks during playback.
+    p.timeUpdateEventInterval = 0.5;
     if (startAt !== null) {
       setTimeout(() => { p.currentTime = startAt; }, 800);
     }
   });
 
-  // Reactive player state. expo-video fires timeUpdate at the interval defined
-  // by player.timeUpdateEventInterval (default 0.5s) — fine for a M:SS display.
+  // Reactive player state. timeUpdate fires every
+  // player.timeUpdateEventInterval seconds (set explicitly in the useVideoPlayer
+  // setup above — the package's own default is 0, which disables the event).
   const { currentTime } = useEvent(player, 'timeUpdate', {
     currentTime: 0,
     currentLiveTimestamp: null,
