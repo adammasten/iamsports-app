@@ -37,6 +37,16 @@ function formatTime(seconds: number) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// Converts a #RRGGBB hex string to rgba(...) with the given alpha. Used in F.3
+// for translucent chip backgrounds/borders without polluting the CATEGORIES
+// literal (which mirrors the portrait UI's shape — see CLAUDE.md).
+function colorWithAlpha(hex: string, alpha: number) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export default function TaggingOverlayScreen() {
   const params = useLocalSearchParams();
   const videoUrl = Array.isArray(params.url) ? params.url[0] : params.url;
@@ -438,9 +448,19 @@ export default function TaggingOverlayScreen() {
                       <TouchableOpacity
                         key={tag.id}
                         onPress={() => toggleTag(tag.id)}
-                        style={[styles.tagChip, { backgroundColor: selected ? cat.color : cat.bg }]}
+                        style={[
+                          styles.tagChip,
+                          selected
+                            ? { backgroundColor: cat.color, borderColor: 'rgba(255,255,255,0.4)' }
+                            : { backgroundColor: colorWithAlpha(cat.color, 0.25), borderColor: colorWithAlpha(cat.color, 0.6) },
+                        ]}
                       >
-                        <Text style={[styles.tagChipText, { color: selected ? '#fff' : cat.color }]}>
+                        <Text
+                          style={[
+                            styles.tagChipText,
+                            selected ? { color: '#fff', fontWeight: '700' } : { color: cat.color },
+                          ]}
+                        >
                           {tag.name}
                         </Text>
                       </TouchableOpacity>
@@ -456,7 +476,7 @@ export default function TaggingOverlayScreen() {
             State is local-only here; Save wiring in Phase F batches into supabase.
             Gradient extends up far enough to backdrop the tag region for readability. */}
         <LinearGradient
-          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.6)']}
+          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)']}
           style={[styles.bottomGradient, { paddingBottom: insets.bottom }]}
           pointerEvents="box-none"
         >
@@ -645,7 +665,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.5,
     marginBottom: 4,
-    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowColor: 'rgba(0,0,0,0.9)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
@@ -658,10 +678,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
+    borderWidth: 1,
   },
   tagChipText: {
     fontSize: 10,
     fontWeight: '500',
+    textShadowColor: 'rgba(0,0,0,0.85)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 
   bottomGradient: {
