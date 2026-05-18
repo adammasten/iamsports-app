@@ -327,9 +327,7 @@ export default function GameScreen() {
             <TouchableOpacity
               style={styles.videoCard}
               onPress={() => Alert.alert(item.label, 'What would you like to do?', [
-                { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging', params: { videoId: item.id, url: item.url, label: item.label } }) },
-                // TEMP — V2 overlay entry during phased rollout. Replaced in Phase G by flipping /tagging above.
-                { text: 'Tag V2 (overlay)', onPress: () => router.push({ pathname: '/tagging-overlay' as any, params: { videoId: item.id, url: item.url, label: item.label } }) },
+                { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: item.id, url: item.url, label: item.label } }) },
                 { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: item.id, label: item.label } }) },
                 { text: 'Cancel', style: 'cancel' }
               ])}
