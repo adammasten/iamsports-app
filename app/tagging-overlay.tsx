@@ -1,9 +1,8 @@
-// V2 overlay tagging screen — Phases A-G + F.2 scrub + F.3 translucency + F.4 fullscreen.
-// Two tag modes: compact (default — full chrome over video) and fullscreen (just
-// tags + bundle pills, video paused behind). Mode switches preserve ALL clip
-// state (startTime, endTime, isHighlight, clipLevelTags, bundles, activeSection).
-// Compact has the scrub bar + Mark Start/End + skip buttons; fullscreen is for
-// rapid-fire tagging after a clip's boundaries are already marked.
+// V2 overlay tagging screen — Phases A-G + F.2 scrub + F.3 translucency + F.4 tall tag region.
+// Two tag modes: compact (default — tag region above the bottom controls row)
+// and fullscreen (tag region grows up under the top bar). Everything else
+// stays the same in both modes: top bar, right-edge bundle strip, scrub bar,
+// bottom controls row. Toggle is in the bottom controls row (rightmost).
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { useEvent } from 'expo';
@@ -112,15 +111,13 @@ export default function TaggingOverlayScreen() {
   const [dragging, setDragging] = useState(false);
   const [barWidth, setBarWidth] = useState(0);
 
-  // F.4 tag mode. 'compact' = current full chrome (default); 'fullscreen' =
-  // just the 4 tag columns + bundle pills, no scrub/Mark/Highlight chrome.
-  // CRITICAL: switching modes preserves all clip state — no effect resets
-  // startTime / endTime / isHighlight / clipLevelTags / bundles / activeSection.
+  // F.4 tag mode. 'compact' (default) = tag region above bottom controls.
+  // 'fullscreen' = tag region also covers the video area between top bar and
+  // bottom controls (more rows of chips visible without scrolling). All other
+  // chrome (top bar, right-edge strip, scrub, bottom controls) stays in both
+  // modes — only the tag region's top offset changes. No state resets on mode
+  // switch; coach can scrub for the next play without leaving fullscreen.
   const [tagMode, setTagMode] = useState<'compact' | 'fullscreen'>('compact');
-
-  useEffect(() => {
-    if (tagMode === 'fullscreen') player.pause();
-  }, [tagMode, player]);
 
   // Lock landscape on focus, restore portrait on blur. useFocusEffect (not
   // useEffect) so the restore fires before the previous screen re-renders,
@@ -340,9 +337,6 @@ export default function TaggingOverlayScreen() {
           setClipLevelTags([]);
           setBundles([]);
           setActiveSection('clip');
-          // F.4: return to compact after save so the next clip's Mark Start
-          // chrome is available without an extra toggle tap.
-          setTagMode('compact');
         },
       }]
     );
@@ -384,46 +378,9 @@ export default function TaggingOverlayScreen() {
             style={[styles.topBar, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
             pointerEvents="box-none"
           >
-            {tagMode === 'compact' ? (
-              <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
-                <Text style={styles.backBtnText}>←</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity style={styles.toggleBtn} onPress={() => setTagMode('compact')}>
-                <Text style={styles.toggleBtnText}>Video</Text>
-              </TouchableOpacity>
-            )}
-
-            {tagMode === 'fullscreen' && (
-              <View style={styles.horizontalBundleStripContainer}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalBundleStripContent}
-                >
-                  <TouchableOpacity
-                    style={[styles.pill, activeSection === 'clip' ? styles.pillActive : styles.pillInactive]}
-                    onPress={() => setActiveSection('clip')}
-                  >
-                    <Text style={styles.pillTextActive}>Clip</Text>
-                  </TouchableOpacity>
-                  {bundles.map((_, idx) => (
-                    <TouchableOpacity
-                      key={idx}
-                      style={[styles.pill, activeSection === idx ? styles.pillActive : styles.pillInactive]}
-                      onPress={() => setActiveSection(idx)}
-                      onLongPress={() => removeBundle(idx)}
-                    >
-                      <Text style={styles.pillTextInactive}>{idx + 1}</Text>
-                    </TouchableOpacity>
-                  ))}
-                  <TouchableOpacity style={[styles.pill, styles.pillAdd]} onPress={addBundle}>
-                    <Text style={styles.pillTextAdd}>+</Text>
-                  </TouchableOpacity>
-                </ScrollView>
-              </View>
-            )}
-
+            <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
+              <Text style={styles.backBtnText}>←</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
               disabled={!canSave}
@@ -434,63 +391,55 @@ export default function TaggingOverlayScreen() {
           </View>
         </LinearGradient>
 
-        {/* Right-edge bundle strip — compact mode only. Fullscreen has the
-            bundle strip horizontally in the top bar instead. */}
-        {tagMode === 'compact' && (
-          <View
-            style={[
-              styles.bundleStripContainer,
-              { top: insets.top + 60, bottom: insets.bottom + 80, right: insets.right + 8 },
-            ]}
-            pointerEvents="box-none"
+        {/* Right-edge bundle strip — Clip pill + dynamic numbered pills + add pill.
+            Same in both tag modes. */}
+        <View
+          style={[
+            styles.bundleStripContainer,
+            { top: insets.top + 60, bottom: insets.bottom + 80, right: insets.right + 8 },
+          ]}
+          pointerEvents="box-none"
+        >
+          <ScrollView
+            contentContainerStyle={styles.bundleStripContent}
+            showsVerticalScrollIndicator={false}
           >
-            <ScrollView
-              contentContainerStyle={styles.bundleStripContent}
-              showsVerticalScrollIndicator={false}
+            <TouchableOpacity
+              style={[styles.pill, activeSection === 'clip' ? styles.pillActive : styles.pillInactive]}
+              onPress={() => setActiveSection('clip')}
             >
+              <Text style={styles.pillTextActive}>Clip</Text>
+            </TouchableOpacity>
+            {bundles.map((_, idx) => (
               <TouchableOpacity
-                style={[styles.pill, activeSection === 'clip' ? styles.pillActive : styles.pillInactive]}
-                onPress={() => setActiveSection('clip')}
+                key={idx}
+                style={[styles.pill, activeSection === idx ? styles.pillActive : styles.pillInactive]}
+                onPress={() => setActiveSection(idx)}
+                onLongPress={() => removeBundle(idx)}
               >
-                <Text style={styles.pillTextActive}>Clip</Text>
+                <Text style={styles.pillTextInactive}>{idx + 1}</Text>
               </TouchableOpacity>
-              {bundles.map((_, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  style={[styles.pill, activeSection === idx ? styles.pillActive : styles.pillInactive]}
-                  onPress={() => setActiveSection(idx)}
-                  onLongPress={() => removeBundle(idx)}
-                >
-                  <Text style={styles.pillTextInactive}>{idx + 1}</Text>
-                </TouchableOpacity>
-              ))}
-              <TouchableOpacity style={[styles.pill, styles.pillAdd]} onPress={addBundle}>
-                <Text style={styles.pillTextAdd}>+</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        )}
+            ))}
+            <TouchableOpacity style={[styles.pill, styles.pillAdd]} onPress={addBundle}>
+              <Text style={styles.pillTextAdd}>+</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
 
         {/* Tag region — 4 category columns. Compact: short strip above the
-            controls row, left of the bundle strip. Fullscreen: fills the body
-            between the top bar and the home indicator. Chip dimensions differ
-            per mode; translucent treatment from F.3 is identical in both. */}
+            controls row. Fullscreen: same left/right/bottom; top extends up
+            under the top bar so the columns get much more vertical space.
+            Chip dimensions identical in both modes (per F.4 correction). */}
         <View
           style={[
             tagMode === 'compact' ? styles.tagRegion : styles.fullscreenTagRegion,
-            tagMode === 'compact'
-              ? {
-                  // Bumped up to clear the scrub bar (24pt) + 8pt gap added in F.2.
-                  bottom: insets.bottom + 56 + 8 + 24 + 8,
-                  left: insets.left + 12,
-                  right: insets.right + PILL_SIZE + 8 + 12,
-                }
-              : {
-                  top: insets.top + 60,
-                  bottom: insets.bottom + 12,
-                  left: insets.left + 12,
-                  right: insets.right + 12,
-                },
+            {
+              // Same bottom in both modes — keeps the scrub bar + controls row visible.
+              bottom: insets.bottom + 56 + 8 + 24 + 8,
+              left: insets.left + 12,
+              right: insets.right + PILL_SIZE + 8 + 12,
+            },
+            tagMode === 'fullscreen' && { top: insets.top + 60 },
           ]}
           pointerEvents="box-none"
         >
@@ -498,7 +447,7 @@ export default function TaggingOverlayScreen() {
             <View key={cat.key} style={styles.tagColumn}>
               <Text style={[styles.colHeader, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
               <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={[styles.chipsWrap, tagMode === 'fullscreen' && { gap: 8 }]}>
+                <View style={styles.chipsWrap}>
                   {tags[cat.key].map(tag => {
                     const selected = activeTags.includes(tag.id);
                     return (
@@ -506,7 +455,7 @@ export default function TaggingOverlayScreen() {
                         key={tag.id}
                         onPress={() => toggleTag(tag.id)}
                         style={[
-                          tagMode === 'compact' ? styles.tagChip : styles.fullscreenTagChip,
+                          styles.tagChip,
                           selected
                             ? { backgroundColor: cat.color, borderColor: 'rgba(255,255,255,0.4)' }
                             : { backgroundColor: colorWithAlpha(cat.color, 0.25), borderColor: colorWithAlpha(cat.color, 0.6) },
@@ -514,7 +463,7 @@ export default function TaggingOverlayScreen() {
                       >
                         <Text
                           style={[
-                            tagMode === 'compact' ? styles.tagChipText : styles.fullscreenTagChipText,
+                            styles.tagChipText,
                             selected ? { color: '#fff', fontWeight: '700' } : { color: cat.color },
                           ]}
                         >
@@ -529,14 +478,13 @@ export default function TaggingOverlayScreen() {
           ))}
         </View>
 
-        {/* Bottom gradient + scrub bar + controls row — compact mode only.
-            Fullscreen hides this; the toggle to return lives in the top bar. */}
-        {tagMode === 'compact' && (
-          <LinearGradient
-            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)']}
-            style={[styles.bottomGradient, { paddingBottom: insets.bottom }]}
-            pointerEvents="box-none"
-          >
+        {/* Bottom gradient + scrub bar + controls row — same in both tag modes.
+            Toggle ("Tags" / "Video") sits rightmost in the controls row. */}
+        <LinearGradient
+          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)']}
+          style={[styles.bottomGradient, { paddingBottom: insets.bottom }]}
+          pointerEvents="box-none"
+        >
           {/* Scrub bar — drag thumb or tap anywhere to seek; tooltip above
               thumb while dragging. Pan auto-pauses on drag start; stays paused
               on release per spec. */}
@@ -628,12 +576,14 @@ export default function TaggingOverlayScreen() {
               <Text style={[styles.highlightStar, isHighlight && styles.highlightStarActive]}>★</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.toggleBtn} onPress={() => setTagMode('fullscreen')}>
-              <Text style={styles.toggleBtnText}>Tags</Text>
+            <TouchableOpacity
+              style={styles.toggleBtn}
+              onPress={() => setTagMode(m => (m === 'compact' ? 'fullscreen' : 'compact'))}
+            >
+              <Text style={styles.toggleBtnText}>{tagMode === 'compact' ? 'Tags' : 'Video'}</Text>
             </TouchableOpacity>
           </View>
         </LinearGradient>
-        )}
       </Animated.View>
     </GestureHandlerRootView>
   );
@@ -890,35 +840,17 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
 
-  // F.4 fullscreen tag mode — bigger chips, fills the body, no fixed height
-  // (top/bottom set inline so it stretches between top bar and home indicator).
-  // Translucent chip treatment inherits from compact via the same selected /
-  // unselected inline backgroundColor + borderColor logic in the JSX.
+  // F.4 fullscreen tag region — same shape as tagRegion but no fixed height
+  // (top set inline = insets.top + 60 so it grows under the top bar; bottom
+  // matches compact so the scrub + controls row stay visible).
   fullscreenTagRegion: {
     position: 'absolute',
     flexDirection: 'row',
     gap: 8,
   },
-  fullscreenTagChip: {
-    minHeight: 50,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fullscreenTagChipText: {
-    fontSize: 14,
-    fontWeight: '500',
-    textShadowColor: 'rgba(0,0,0,0.85)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
 
-  // F.4 toggle button — "Tags" in compact bottom controls (rightmost),
-  // "Video" in fullscreen top-left (replacing Back's slot). Same dimensions
-  // and styling as skip buttons.
+  // F.4 toggle button — label flips "Tags" (compact) / "Video" (fullscreen).
+  // Rightmost slot in the bottom controls row in both modes.
   toggleBtn: {
     width: 40,
     height: 36,
@@ -928,16 +860,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   toggleBtnText: { color: '#fff', fontSize: 11, fontWeight: '600' },
-
-  // F.4 horizontal bundle strip in fullscreen top bar. flex: 1 in the middle
-  // slot pushes Save Clip and Toggle to the edges; ScrollView inside scrolls
-  // horizontally if many bundles.
-  horizontalBundleStripContainer: {
-    flex: 1,
-    marginHorizontal: 12,
-  },
-  horizontalBundleStripContent: {
-    gap: 4,
-    alignItems: 'center',
-  },
 });
