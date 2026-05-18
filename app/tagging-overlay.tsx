@@ -119,6 +119,73 @@ export default function TaggingOverlayScreen() {
   // switch; coach can scrub for the next play without leaving fullscreen.
   const [tagMode, setTagMode] = useState<'compact' | 'fullscreen'>('compact');
 
+  // Video load observation + bounded auto-retry. On "first session of the day"
+  // Supabase's CDN edge can be cold and expo-video transitions silently into
+  // 'error'. We log every status transition for diagnosis, and on 'error' we
+  // call player.replace(videoUrl) up to 3 times (2s apart) before surfacing an
+  // Alert with a manual Retry button. Counter only resets on 'readyToPlay' —
+  // 'error' → 'idle' happens DURING our retry sequence (via replace) so
+  // resetting there would loop forever.
+  const statusEvent = useEvent(player, 'statusChange', {
+    status: 'idle' as const,
+    oldStatus: undefined,
+    error: undefined,
+  });
+  const retryCountRef = useRef(0);
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const { status, oldStatus, error } = statusEvent;
+    const urlTail = videoUrl ? `...${videoUrl.slice(-30)}` : 'none';
+    console.log(
+      `[video-load] t=${Date.now()} ${oldStatus ?? 'init'}→${status} url=${urlTail}${error ? ` err=${error.message}` : ''}`
+    );
+
+    if (status === 'readyToPlay') {
+      retryCountRef.current = 0;
+      return;
+    }
+
+    if (status === 'error' && videoUrl) {
+      if (retryCountRef.current < 3) {
+        retryCountRef.current += 1;
+        const attempt = retryCountRef.current;
+        console.log(`[video-load] scheduling retry ${attempt}/3 in 2s`);
+        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = setTimeout(() => {
+          retryTimeoutRef.current = null;
+          console.log(`[video-load] retry ${attempt}/3: calling player.replace`);
+          player.replace(videoUrl);
+        }, 2000);
+      } else {
+        console.log(`[video-load] retries exhausted (3/3) — surfacing alert`);
+        Alert.alert(
+          'Video failed to load',
+          'The video could not be loaded after 3 attempts.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Retry',
+              onPress: () => {
+                retryCountRef.current = 0;
+                if (videoUrl) player.replace(videoUrl);
+              },
+            },
+          ]
+        );
+      }
+    }
+  }, [statusEvent, videoUrl, player]);
+
   // Lock landscape on focus, restore portrait on blur. useFocusEffect (not
   // useEffect) so the restore fires before the previous screen re-renders,
   // avoiding a portrait-flash on back navigation. AppState listener nested
