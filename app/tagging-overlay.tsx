@@ -214,15 +214,24 @@ export default function TaggingOverlayScreen() {
   const hasClipMarked = startTime !== null && endTime !== null;
   const canSave = hasClipMarked && !saving;
 
+  // Using seekBy (keyframe-tolerant, ~10x faster than currentTime= which is
+  // frame-accurate). Clips land at keyframe boundaries (0.5-2s granularity);
+  // coaches fine-tune with -1s/+1s after rough seek. Per expo-video docs,
+  // this is the recommended path for non-precise seeks.
   function seekToX(x: number) {
     if (barWidth <= 0 || duration <= 0) return;
     const pct = Math.max(0, Math.min(1, x / barWidth));
-    player.currentTime = pct * duration;
+    const targetTime = pct * duration;
+    const delta = targetTime - player.currentTime;
+    player.seekBy(delta);
   }
 
   function skip(deltaSeconds: number) {
     if (duration <= 0) return;
-    player.currentTime = Math.max(0, Math.min(duration, player.currentTime + deltaSeconds));
+    const currentTime = player.currentTime;
+    const clampedTarget = Math.max(0, Math.min(duration, currentTime + deltaSeconds));
+    const clampedDelta = clampedTarget - currentTime;
+    player.seekBy(clampedDelta);
   }
 
   function handleDragStart(x: number) {
