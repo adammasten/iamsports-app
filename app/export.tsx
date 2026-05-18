@@ -2,7 +2,7 @@ import { supabase } from '@/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
@@ -21,9 +21,25 @@ export default function ExportScreen() {
   const [exportStatus, setExportStatus] = useState('');
   const [exportProgress, setExportProgress] = useState(0);
 
+  // Polling refs — mountedRef gates setState calls after unmount, intervalRef
+  // lets the cleanup effect clear the active poll if the user navigates away
+  // mid-export. The server keeps processing regardless; we just stop listening.
+  const mountedRef = useRef(true);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     fetchGames();
     fetchTags();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
   }, []);
 
   async function fetchGames() {
@@ -158,16 +174,24 @@ export default function ExportScreen() {
 
   async function pollJob(jobId: string) {
     return new Promise<string>((resolve, reject) => {
-      const interval = setInterval(async () => {
+      const stopPolling = () => {
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+      };
+      pollIntervalRef.current = setInterval(async () => {
+        if (!mountedRef.current) { stopPolling(); return; }
         try {
           const response = await fetch(`${SERVER_URL}/job/${jobId}`);
           const job = await response.json();
+          if (!mountedRef.current) { stopPolling(); return; }
           setExportProgress(job.progress || 0);
-          setExportStatus(`Processing... ${job.progress || 0}%`);
-          if (job.status === 'done') { clearInterval(interval); resolve(job.url); }
-          else if (job.status === 'failed') { clearInterval(interval); reject(new Error(job.error || 'Export failed')); }
-        } catch (e) { clearInterval(interval); reject(e); }
-      }, 5000);
+          setExportStatus(job.label || `Processing... ${job.progress || 0}%`);
+          if (job.status === 'done') { stopPolling(); resolve(job.url); }
+          else if (job.status === 'failed') { stopPolling(); reject(new Error(job.error || 'Export failed')); }
+        } catch (e) { stopPolling(); reject(e); }
+      }, 3000);
     });
   }
 
