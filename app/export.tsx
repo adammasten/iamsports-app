@@ -1,11 +1,40 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
+const ACTIVE_JOB_KEY = 'iamsports.active_export_job';
+const ACTIVE_JOB_TTL_MS = 2 * 60 * 60 * 1000;
+
+// Tier 1 export resume: persist the in-flight jobId so backgrounding the app
+// (or unmounting the export screen) doesn't lose it. On mount or foreground,
+// we read this back and either resume polling or pick up a finished job.
+async function clearActiveJob() {
+  try { await AsyncStorage.removeItem(ACTIVE_JOB_KEY); } catch {}
+}
+
+async function saveActiveJob(jobId: string) {
+  try {
+    await AsyncStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({ jobId, startedAt: Date.now() }));
+  } catch {}
+}
+
+async function readActiveJob(): Promise<{ jobId: string; startedAt: number } | null> {
+  try {
+    const raw = await AsyncStorage.getItem(ACTIVE_JOB_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.jobId || typeof parsed.startedAt !== 'number') return null;
+    if (Date.now() - parsed.startedAt > ACTIVE_JOB_TTL_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 export default function ExportScreen() {
   const [games, setGames] = useState<any[]>([]);
@@ -20,12 +49,18 @@ export default function ExportScreen() {
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState('');
   const [exportProgress, setExportProgress] = useState(0);
+  // Tier 1: when resuming a persisted job we skip the clip-selector view and
+  // show only the progress card.
+  const [resuming, setResuming] = useState(false);
 
   // Polling refs — mountedRef gates setState calls after unmount, intervalRef
   // lets the cleanup effect clear the active poll if the user navigates away
   // mid-export. The server keeps processing regardless; we just stop listening.
   const mountedRef = useRef(true);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Guards the foreground AppState handler from racing with an active export.
+  const exportingRef = useRef(false);
+  useEffect(() => { exportingRef.current = exporting; }, [exporting]);
 
   useEffect(() => {
     fetchGames();
@@ -40,6 +75,94 @@ export default function ExportScreen() {
         pollIntervalRef.current = null;
       }
     };
+  }, []);
+
+  async function saveExportToLibrary(videoUrl: string) {
+    setExportStatus('Saving to camera roll...');
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status === 'granted') {
+      const localPath = FileSystem.documentDirectory + 'highlight.mp4';
+      await FileSystem.downloadAsync(videoUrl, localPath);
+      await MediaLibrary.saveToLibraryAsync(localPath);
+      Alert.alert('Saved! 🎉', 'Your highlight reel has been saved to your camera roll!');
+    } else {
+      Alert.alert('Export Ready! 🎉', 'Video exported successfully!');
+    }
+  }
+
+  // Tier 1 resume: on mount and on foreground, check AsyncStorage for an
+  // in-flight job and either pick up its result or resume polling.
+  async function checkForActiveExport() {
+    if (exportingRef.current) return;
+    const active = await readActiveJob();
+    if (!active) return;
+
+    let job: any;
+    try {
+      const response = await fetch(`${SERVER_URL}/job/${active.jobId}`);
+      if (response.status === 404) {
+        await clearActiveJob();
+        return;
+      }
+      job = await response.json();
+    } catch {
+      // Network unreachable — leave the stored job alone; retry next foreground.
+      return;
+    }
+
+    if (!mountedRef.current) return;
+    setResuming(true);
+    setExporting(true);
+    setStep('review');
+    setExportProgress(job.progress || 0);
+    setExportStatus(job.label || `Processing... ${job.progress || 0}%`);
+
+    const finishResume = () => {
+      if (!mountedRef.current) return;
+      setExporting(false);
+      setResuming(false);
+      setExportProgress(0);
+      setExportStatus('');
+      setStep('games');
+    };
+
+    if (job.status === 'done') {
+      await clearActiveJob();
+      try { await saveExportToLibrary(job.url); }
+      catch (e: any) { Alert.alert('Save error', e?.message || 'Failed to save to camera roll'); }
+      finishResume();
+      return;
+    }
+    if (job.status === 'failed') {
+      await clearActiveJob();
+      Alert.alert('Export failed', job.error || 'Unknown error');
+      finishResume();
+      return;
+    }
+
+    // Still processing — resume polling. pollJob clears AsyncStorage on done/failed.
+    try {
+      const url = await pollJob(active.jobId);
+      if (!mountedRef.current) return;
+      await saveExportToLibrary(url);
+    } catch (e: any) {
+      Alert.alert('Export error', e?.message || 'Polling failed');
+    } finally {
+      finishResume();
+    }
+  }
+
+  useEffect(() => {
+    checkForActiveExport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') checkForActiveExport();
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function fetchGames() {
@@ -188,9 +311,21 @@ export default function ExportScreen() {
           if (!mountedRef.current) { stopPolling(); return; }
           setExportProgress(job.progress || 0);
           setExportStatus(job.label || `Processing... ${job.progress || 0}%`);
-          if (job.status === 'done') { stopPolling(); resolve(job.url); }
-          else if (job.status === 'failed') { stopPolling(); reject(new Error(job.error || 'Export failed')); }
-        } catch (e) { stopPolling(); reject(e); }
+          if (job.status === 'done') {
+            stopPolling();
+            clearActiveJob().catch(() => {});
+            resolve(job.url);
+          } else if (job.status === 'failed') {
+            stopPolling();
+            clearActiveJob().catch(() => {});
+            reject(new Error(job.error || 'Export failed'));
+          }
+        } catch (e) {
+          // Transient fetch error — stop the interval but keep the stored job so
+          // a future mount/foreground can resume polling.
+          stopPolling();
+          reject(e);
+        }
       }, 3000);
     });
   }
@@ -214,19 +349,13 @@ export default function ExportScreen() {
       const data = await response.json();
       if (!response.ok) { Alert.alert('Export failed', data.error || 'Something went wrong'); setExporting(false); return; }
 
+      // Persist before polling so a backgrounded app can resume this job.
+      await saveActiveJob(data.jobId);
+
       setExportStatus('Processing clips...');
       const videoUrl = await pollJob(data.jobId);
 
-      setExportStatus('Saving to camera roll...');
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status === 'granted') {
-        const localPath = FileSystem.documentDirectory + 'highlight.mp4';
-        await FileSystem.downloadAsync(videoUrl, localPath);
-        await MediaLibrary.saveToLibraryAsync(localPath);
-        Alert.alert('Saved! 🎉', 'Your highlight reel has been saved to your camera roll!');
-      } else {
-        Alert.alert('Export Ready! 🎉', 'Video exported successfully!');
-      }
+      await saveExportToLibrary(videoUrl);
     } catch (e: any) {
       Alert.alert('Export error', e.message);
     }
@@ -243,6 +372,26 @@ export default function ExportScreen() {
 
   function getDuration(start: number, end: number) {
     return `${Math.round(end - start)}s`;
+  }
+
+  // Tier 1 resume mode: skip the wizard, show only progress until the
+  // restored job finishes (success or failure clears resuming back to false).
+  if (resuming) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Export Highlights</Text>
+        <Text style={styles.subtitle}>Resuming previous export...</Text>
+        {exporting && (
+          <View style={styles.exportingContainer}>
+            <Text style={styles.exportingText}>{exportStatus}</Text>
+            <View style={styles.progressOuter}>
+              <View style={[styles.progressInner, { width: `${exportProgress}%` as any }]} />
+            </View>
+            <Text style={styles.progressLabel}>{exportProgress}%</Text>
+          </View>
+        )}
+      </View>
+    );
   }
 
   if (step === 'games') {
