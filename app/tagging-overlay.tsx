@@ -391,10 +391,23 @@ export default function TaggingOverlayScreen() {
       }
     }
 
+    const clipLevelCount = clipLevelTags.length;
+    const bundledCount = rows.length - clipLevelCount;
     const nonEmptyBundles = bundles.filter(b => b.length > 0).length;
+    const bundlesWord = nonEmptyBundles === 1 ? 'bundle' : 'bundles';
+    let message: string;
+    if (clipLevelCount > 0 && bundledCount > 0) {
+      message = `${clipLevelCount} clip-wide + ${bundledCount} ${bundledCount === 1 ? 'tag' : 'tags'} across ${nonEmptyBundles} ${bundlesWord} (${rows.length} total).`;
+    } else if (clipLevelCount > 0) {
+      message = `${clipLevelCount} clip-wide ${clipLevelCount === 1 ? 'tag' : 'tags'}.`;
+    } else if (bundledCount > 0) {
+      message = `${bundledCount} ${bundledCount === 1 ? 'tag' : 'tags'} across ${nonEmptyBundles} ${bundlesWord}.`;
+    } else {
+      message = 'Clip saved with no tags.';
+    }
     Alert.alert(
       'Saved!',
-      `Clip saved with ${rows.length} tag(s)${nonEmptyBundles > 0 ? ` across ${nonEmptyBundles} bundle(s)` : ''}.`,
+      message,
       [{
         text: 'OK',
         onPress: () => {
