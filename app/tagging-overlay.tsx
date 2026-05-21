@@ -11,7 +11,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +26,9 @@ const CATEGORIES = [
 ];
 
 function formatTime(seconds: number) {
+  // Render '–:–' for NaN / Infinity / negative — happens briefly during video
+  // load when player.currentTime / player.duration are indefinite (CMTime).
+  if (!Number.isFinite(seconds) || seconds < 0) return '–:–';
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
@@ -167,21 +170,10 @@ export default function TaggingOverlayScreen() {
           player.replace(videoUrl);
         }, 2000);
       } else {
-        console.log(`[video-load] retries exhausted (3/3) — surfacing alert`);
-        Alert.alert(
-          'Video failed to load',
-          'The video could not be loaded after 3 attempts.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Retry',
-              onPress: () => {
-                retryCountRef.current = 0;
-                if (videoUrl) player.replace(videoUrl);
-              },
-            },
-          ]
-        );
+        // Retries exhausted — the loading overlay's tap-to-retry surfaces this
+        // to the user. No Alert.alert here (we used to show one but it
+        // double-stacked with the overlay).
+        console.log(`[video-load] retries exhausted (3/3) — overlay surfaces tap-to-retry`);
       }
     }
   }, [statusEvent, videoUrl, player]);
@@ -291,7 +283,9 @@ export default function TaggingOverlayScreen() {
     : (bundles[activeSection] ?? []);
 
   const hasClipMarked = startTime !== null && endTime !== null;
-  const canSave = hasClipMarked && !saving;
+  const videoReady = statusEvent.status === 'readyToPlay';
+  const retriesExhausted = statusEvent.status === 'error' && retryCountRef.current >= 3;
+  const canSave = hasClipMarked && !saving && videoReady;
 
   // Using seekBy (keyframe-tolerant, ~10x faster than currentTime= which is
   // frame-accurate). Clips land at keyframe boundaries (0.5-2s granularity);
@@ -443,6 +437,36 @@ export default function TaggingOverlayScreen() {
         onPress={() => setControlsVisible(v => !v)}
         onLongPress={() => {}}
       />
+
+      {/* Loading overlay — hides the crossed-out icon + NaN time while the
+          source is loading or mid-retry. Rendered above the tap-to-hide layer
+          (intercepts taps for retry) and below the chrome wrapper (chrome
+          buttons still render on top but are disabled via videoReady). */}
+      {!videoReady && (
+        <Pressable
+          style={[StyleSheet.absoluteFillObject, styles.loadingOverlay]}
+          onPress={() => {
+            if (retriesExhausted && videoUrl) {
+              retryCountRef.current = 0;
+              player.replace(videoUrl);
+            }
+          }}
+        >
+          {retriesExhausted ? (
+            <>
+              <Text style={styles.loadingTextLarge}>Couldn&apos;t load video.</Text>
+              <Text style={styles.loadingText}>Tap to retry.</Text>
+            </>
+          ) : (
+            <>
+              <ActivityIndicator size="large" color="#EF9F27" />
+              <Text style={styles.loadingText}>
+                Loading video...{retryCountRef.current > 0 ? ' (retrying)' : ''}
+              </Text>
+            </>
+          )}
+        </Pressable>
+      )}
 
       <Animated.View
         style={[StyleSheet.absoluteFillObject, animatedChromeStyle]}
@@ -631,16 +655,18 @@ export default function TaggingOverlayScreen() {
 
             <View style={styles.markGroup}>
               <TouchableOpacity
-                style={[styles.markBtn, styles.markStartBtn]}
+                style={[styles.markBtn, styles.markStartBtn, !videoReady && styles.disabledBtn]}
                 onPress={() => setStartTime(player.currentTime)}
+                disabled={!videoReady}
               >
                 <Text style={styles.markBtnText}>
                   {startTime !== null ? `Start ${formatTime(startTime)}` : 'Mark Start'}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.markBtn, styles.markEndBtn]}
+                style={[styles.markBtn, styles.markEndBtn, !videoReady && styles.disabledBtn]}
                 onPress={() => setEndTime(player.currentTime)}
+                disabled={!videoReady}
               >
                 <Text style={styles.markBtnText}>
                   {endTime !== null ? `End ${formatTime(endTime)}` : 'Mark End'}
@@ -649,9 +675,10 @@ export default function TaggingOverlayScreen() {
             </View>
 
             <TouchableOpacity
-              style={[styles.highlightBtn, isHighlight && styles.highlightBtnActive]}
+              style={[styles.highlightBtn, isHighlight && styles.highlightBtnActive, !videoReady && styles.disabledBtn]}
               onPress={() => setIsHighlight(v => !v)}
               hitSlop={8}
+              disabled={!videoReady}
             >
               <Text style={[styles.highlightStar, isHighlight && styles.highlightStarActive]}>★</Text>
             </TouchableOpacity>
@@ -674,6 +701,25 @@ const PILL_SPACING = 4;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
+
+  loadingOverlay: {
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 12,
+  },
+  loadingTextLarge: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  disabledBtn: { opacity: 0.4 },
 
   topGradient: {
     position: 'absolute',
