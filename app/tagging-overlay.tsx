@@ -13,7 +13,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, AppState, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Mirrors app/tagging.tsx, app/(tabs)/tags.tsx, app/export.tsx — per CLAUDE.md,
@@ -286,6 +286,25 @@ export default function TaggingOverlayScreen() {
   const videoReady = statusEvent.status === 'readyToPlay';
   const retriesExhausted = statusEvent.status === 'error' && retryCountRef.current >= 3;
   const canSave = hasClipMarked && !saving && videoReady;
+
+  // Highlight ★ button scale-pulse — fires only on enable (false → true).
+  // Coaches frequently miss this button, so the pulse + larger size + label
+  // are the visual reinforcement for the highlight → export feedback loop.
+  const highlightScale = useSharedValue(1);
+  const highlightAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: highlightScale.value }],
+  }));
+  function toggleHighlight() {
+    setIsHighlight(prev => {
+      if (!prev) {
+        highlightScale.value = withSequence(
+          withTiming(1.15, { duration: 100 }),
+          withTiming(1, { duration: 100 })
+        );
+      }
+      return !prev;
+    });
+  }
 
   // Using seekBy (keyframe-tolerant, ~10x faster than currentTime= which is
   // frame-accurate). Clips land at keyframe boundaries (0.5-2s granularity);
@@ -672,16 +691,20 @@ export default function TaggingOverlayScreen() {
                   {endTime !== null ? `End ${formatTime(endTime)}` : 'Mark End'}
                 </Text>
               </TouchableOpacity>
+              {/* Highlight ★ — relocated into markGroup adjacent to Mark End so
+                  the natural flow is "just marked the end → star this clip?". */}
+              <Animated.View style={[!videoReady && styles.disabledBtn, highlightAnimatedStyle]}>
+                <TouchableOpacity
+                  style={[styles.highlightBtn, isHighlight && styles.highlightBtnActive]}
+                  onPress={toggleHighlight}
+                  hitSlop={8}
+                  disabled={!videoReady}
+                >
+                  <Text style={styles.highlightStar}>{isHighlight ? '★' : '☆'}</Text>
+                  <Text style={styles.highlightLabel}>Highlight</Text>
+                </TouchableOpacity>
+              </Animated.View>
             </View>
-
-            <TouchableOpacity
-              style={[styles.highlightBtn, isHighlight && styles.highlightBtnActive, !videoReady && styles.disabledBtn]}
-              onPress={() => setIsHighlight(v => !v)}
-              hitSlop={8}
-              disabled={!videoReady}
-            >
-              <Text style={[styles.highlightStar, isHighlight && styles.highlightStarActive]}>★</Text>
-            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.toggleBtn}
@@ -891,20 +914,24 @@ const styles = StyleSheet.create({
   markBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
   highlightBtn: {
-    width: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     height: 36,
+    paddingHorizontal: 12,
     borderRadius: 18,
     borderWidth: 1.5,
     borderColor: '#EF9F27',
     backgroundColor: 'rgba(0,0,0,0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
+  // Star is always gold (#EF9F27); the ☆ → ★ glyph swap + subtle gold-tinted
+  // backdrop convey the active state. Avoids gray, keeps gold as the constant
+  // visual identity of the highlight concept.
   highlightBtnActive: {
-    backgroundColor: '#EF9F27',
+    backgroundColor: 'rgba(239, 159, 39, 0.25)',
   },
-  highlightStar: { color: '#EF9F27', fontSize: 18, fontWeight: '600' },
-  highlightStarActive: { color: '#fff' },
+  highlightStar: { color: '#EF9F27', fontSize: 27, fontWeight: '700' },
+  highlightLabel: { color: '#EF9F27', fontSize: 11, fontWeight: '600' },
 
   scrubBarWrapper: {
     // Sits inside the bottom LinearGradient as the first child; gradient's gap:8
