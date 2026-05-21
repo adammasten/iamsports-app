@@ -166,3 +166,50 @@ Current 3-step flow (game → tags → review) may need restructure. **Do not re
 - Preview-before-export: should users see a video preview of the result before triggering the Railway render?
 - Server-side processing time: ~minutes for long highlight reels — can the perceived wait be reduced (background processing, push notification on completion — see Tier 2/Tier 3 from the export-resume work)?
 - Clip discovery for highlight reels: with the new ★ Highlight filter and `is_starred` data, is the "Make Highlight Reel" shortcut from CLAUDE.md the natural simplification?
+
+## Storage cap & usage UI
+
+The free tier (and Viewer tier) has a storage cap of **5 games OR 20GB, whichever is hit first**. Hitting the cap must be a clear conversion moment, not a confusing error state.
+
+### UI requirements
+
+1. **Persistent usage indicator** — visible in the user's library/team view at all times. Shows "X of 5 games used" or a progress bar with GB usage. Color-coded:
+   - Green: under 60% of cap
+   - Yellow: 60–90% of cap (gentle nudge)
+   - Red: 90%+ (urgent upsell visible)
+
+2. **Settings / account page** — full breakdown:
+   - Games uploaded vs cap
+   - Storage used (GB) vs cap
+   - "Upgrade to Creator for unlimited uploads — $12.99/mo" CTA button
+
+3. **At-upload moment** — if the user is about to upload a game that would push them over the cap:
+   - Pre-upload check: calculate file size, show warning before upload starts
+   - Modal: "This game would put you over your 5-game / 20GB limit. Upgrade to Creator for unlimited uploads, or delete an existing game first." with two buttons: **Upgrade** and **Manage Games**
+   - Never silently fail an upload — always explain why
+
+4. **Approaching-cap notification** — push notification or in-app banner when user hits 4/5 games or 16/20GB:
+   - "You're almost at your storage limit. Upgrade to Creator ($12.99/mo) for unlimited uploads."
+
+5. **Hit-cap state** — when user has reached the cap:
+   - Disable the "Upload Game" button, replace with "Upload (Upgrade Required)" or similar
+   - Tapping it opens the upgrade flow
+   - Existing content remains viewable / shareable — only new uploads blocked
+   - Deleting a game frees a slot and re-enables uploads at lower count
+
+### Schema implications
+
+Add usage tracking at the user account level (not team-level, since the cap follows the user not the team):
+
+```
+users  (or new user_storage table)
+  storage_used_bytes   (recalculated when uploads/deletes happen)
+  game_count           (cached count of games uploaded by this user across all their teams)
+  last_calculated_at
+```
+
+Periodic recalc job to keep these accurate.
+
+### Why this matters strategically
+
+Storage caps are the natural conversion trigger from Free → Creator. Done well, it's the moment a user feels real value ("I want to keep uploading because this app is useful") and pays. Done badly, it's a confusing error state that triggers churn. The UI must be honest, helpful, and convert energy from frustration into upgrade intent.
