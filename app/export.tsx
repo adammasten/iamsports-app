@@ -10,6 +10,12 @@ const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
 const ACTIVE_JOB_KEY = 'iamsports.active_export_job';
 const ACTIVE_JOB_TTL_MS = 2 * 60 * 60 * 1000;
 
+// Virtual tag ID for the ★ Highlight filter chip. Stored in tagGroups[N]
+// arrays alongside real tag IDs, but clipMatchesGroup treats it specially:
+// when present, the clip must have is_starred=true AND any remaining real
+// tags in the group must still match via the existing clip-level/bundle logic.
+const HIGHLIGHT_FILTER_ID = '__highlight__';
+
 // Tier 1 export resume: persist the in-flight jobId so backgrounding the app
 // (or unmounting the export screen) doesn't lose it. On mount or foreground,
 // we read this back and either resume polling or pick up a finished job.
@@ -194,6 +200,7 @@ export default function ExportScreen() {
   }
 
   function getTagName(id: string) {
+    if (id === HIGHLIGHT_FILTER_ID) return '★ Highlight';
     return tags.find(t => t.id === id)?.name || id;
   }
 
@@ -202,19 +209,27 @@ export default function ExportScreen() {
   }
 
   // Bundle-aware matching: a clip matches a filter group if all filter tags are
-  // in clip-level OR all in a single bundle (combined with clip-level).
+  // in clip-level OR all in a single bundle (combined with clip-level). The
+  // ★ Highlight virtual ID, if present in the group, adds an is_starred=true
+  // gate; the remaining real tags still need to satisfy the bundle/clip-level
+  // rules. A group of just [★] matches every starred clip.
   function clipMatchesGroup(clip: any, group: string[]): boolean {
     if (group.length === 0) return false;
+    const hasHighlightFilter = group.includes(HIGHLIGHT_FILTER_ID);
+    if (hasHighlightFilter && !clip.is_starred) return false;
+    const realTags = group.filter(t => t !== HIGHLIGHT_FILTER_ID);
+    if (realTags.length === 0) return hasHighlightFilter;
+
     const clipLevel: string[] = clip.clipLevelTagIds || [];
     const bundles: string[][] = clip.bundles || [];
 
     // Match via clip-level alone
-    if (group.every(tagId => clipLevel.includes(tagId))) return true;
+    if (realTags.every(tagId => clipLevel.includes(tagId))) return true;
 
     // Match via clip-level + some single bundle
     for (const bundle of bundles) {
       const combined = [...clipLevel, ...bundle];
-      if (group.every(tagId => combined.includes(tagId))) return true;
+      if (realTags.every(tagId => combined.includes(tagId))) return true;
     }
     return false;
   }
@@ -464,6 +479,20 @@ export default function ExportScreen() {
           </View>
         )}
 
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>HIGHLIGHTS</Text>
+          <View style={styles.tagGrid}>
+            <TouchableOpacity
+              style={[styles.tagBtnHighlight, currentGroup.includes(HIGHLIGHT_FILTER_ID) && styles.tagBtnHighlightSelected]}
+              onPress={() => toggleTagInGroup(HIGHLIGHT_FILTER_ID)}
+            >
+              <Text style={[styles.tagBtnHighlightText, currentGroup.includes(HIGHLIGHT_FILTER_ID) && styles.tagBtnHighlightTextSelected]}>
+                ★ Highlight
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {categories.map(cat => {
           const catTags = tags.filter(t => t.category === cat);
           if (catTags.length === 0) return null;
@@ -630,6 +659,17 @@ const styles = StyleSheet.create({
   tagBtnSelected: { backgroundColor: '#534AB7' },
   tagBtnText: { fontSize: 13, color: '#333', fontWeight: '500' },
   tagBtnTextSelected: { color: '#fff' },
+  tagBtnHighlight: {
+    backgroundColor: '#fff8e1',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderWidth: 1.5,
+    borderColor: '#EF9F27',
+  },
+  tagBtnHighlightSelected: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
+  tagBtnHighlightText: { fontSize: 13, color: '#EF9F27', fontWeight: '700' },
+  tagBtnHighlightTextSelected: { color: '#fff' },
   groupActions: { marginBottom: 8 },
   addGroupBtn: { backgroundColor: '#1D9E75', borderRadius: 12, padding: 14, alignItems: 'center' },
   addGroupBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
