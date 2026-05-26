@@ -326,6 +326,35 @@ export default function TaggingOverlayScreen() {
     player.seekBy(clampedDelta);
   }
 
+  // Skip buttons: tap fires once via onPressIn; press-and-hold past 400ms
+  // starts a 150ms repeat interval. Single quick taps clear the pending timeout
+  // before the interval starts, so they keep their 1-shot behavior. The ref
+  // holds either a setTimeout or setInterval handle — clearTimeout/clearInterval
+  // are interchangeable on RN, so the cleanup handles both.
+  const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function startSkipRepeat(deltaSeconds: number) {
+    skip(deltaSeconds);
+    skipTimerRef.current = setTimeout(() => {
+      skipTimerRef.current = setInterval(() => skip(deltaSeconds), 150);
+    }, 400);
+  }
+  function stopSkipRepeat() {
+    if (skipTimerRef.current) {
+      clearTimeout(skipTimerRef.current);
+      clearInterval(skipTimerRef.current);
+      skipTimerRef.current = null;
+    }
+  }
+  useEffect(() => {
+    return () => {
+      if (skipTimerRef.current) {
+        clearTimeout(skipTimerRef.current);
+        clearInterval(skipTimerRef.current);
+        skipTimerRef.current = null;
+      }
+    };
+  }, []);
+
   function handleDragStart(x: number) {
     player.pause();
     seekToX(x);
@@ -651,10 +680,18 @@ export default function TaggingOverlayScreen() {
               <Text style={styles.timeText}>
                 {formatTime(currentTime)} / {formatTime(duration)}
               </Text>
-              <TouchableOpacity style={styles.skipBtn} onPress={() => skip(-5)}>
+              <TouchableOpacity
+                style={styles.skipBtn}
+                onPressIn={() => startSkipRepeat(-5)}
+                onPressOut={stopSkipRepeat}
+              >
                 <Text style={styles.skipBtnText}>-5s</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.skipBtn} onPress={() => skip(-1)}>
+              <TouchableOpacity
+                style={styles.skipBtn}
+                onPressIn={() => startSkipRepeat(-1)}
+                onPressOut={stopSkipRepeat}
+              >
                 <Text style={styles.skipBtnText}>-1s</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -664,10 +701,18 @@ export default function TaggingOverlayScreen() {
               >
                 <Text style={styles.playBtnText}>{isPlaying ? '❚❚' : '▶'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.skipBtn} onPress={() => skip(1)}>
+              <TouchableOpacity
+                style={styles.skipBtn}
+                onPressIn={() => startSkipRepeat(1)}
+                onPressOut={stopSkipRepeat}
+              >
                 <Text style={styles.skipBtnText}>+1s</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.skipBtn} onPress={() => skip(5)}>
+              <TouchableOpacity
+                style={styles.skipBtn}
+                onPressIn={() => startSkipRepeat(5)}
+                onPressOut={stopSkipRepeat}
+              >
                 <Text style={styles.skipBtnText}>+5s</Text>
               </TouchableOpacity>
             </View>
