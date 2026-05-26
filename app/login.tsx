@@ -53,9 +53,9 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  title: { fontSize: 36, marginBottom: 8 },
-  subtitle: { fontSize: 18, color: '#666', marginBottom: 32 },
+  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: '#000' },
+  title: { fontSize: 36, marginBottom: 8, color: '#fff' },
+  subtitle: { fontSize: 18, color: '#aaa', marginBottom: 32 },
   input: { width: '100%', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 14, marginBottom: 12, fontSize: 16, color: '#FFFFFF' },
   button: { width: '100%', backgroundColor: '#534AB7', borderRadius: 8, padding: 16, alignItems: 'center', marginBottom: 16 },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
