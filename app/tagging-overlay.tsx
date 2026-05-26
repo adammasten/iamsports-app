@@ -701,7 +701,6 @@ export default function TaggingOverlayScreen() {
                   disabled={!videoReady}
                 >
                   <Text style={styles.highlightStar}>{isHighlight ? '★' : '☆'}</Text>
-                  <Text style={styles.highlightLabel}>Highlight</Text>
                 </TouchableOpacity>
               </Animated.View>
             </View>
@@ -914,15 +913,14 @@ const styles = StyleSheet.create({
   markBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
   highlightBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    width: 36,
     height: 36,
-    paddingHorizontal: 12,
     borderRadius: 18,
     borderWidth: 1.5,
     borderColor: '#EF9F27',
     backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   // Star is always gold (#EF9F27); the ☆ → ★ glyph swap + subtle gold-tinted
   // backdrop convey the active state. Avoids gray, keeps gold as the constant
@@ -930,8 +928,7 @@ const styles = StyleSheet.create({
   highlightBtnActive: {
     backgroundColor: 'rgba(239, 159, 39, 0.25)',
   },
-  highlightStar: { color: '#EF9F27', fontSize: 27, fontWeight: '700' },
-  highlightLabel: { color: '#EF9F27', fontSize: 11, fontWeight: '600' },
+  highlightStar: { color: '#EF9F27', fontSize: 22, fontWeight: '700' },
 
   scrubBarWrapper: {
     // Sits inside the bottom LinearGradient as the first child; gradient's gap:8
