@@ -633,7 +633,7 @@ export default function TaggingOverlayScreen() {
                           styles.tagChip,
                           selected
                             ? { backgroundColor: cat.color, borderColor: 'rgba(255,255,255,0.4)' }
-                            : { backgroundColor: colorWithAlpha(cat.color, 0.25), borderColor: colorWithAlpha(cat.color, 0.6) },
+                            : { backgroundColor: 'rgba(255, 255, 255, 0.25)', borderColor: colorWithAlpha(cat.color, 0.6) },
                         ]}
                       >
                         <Text
