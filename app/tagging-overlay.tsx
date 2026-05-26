@@ -57,6 +57,7 @@ export default function TaggingOverlayScreen() {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [endTime, setEndTime] = useState<number | null>(null);
   const [isHighlight, setIsHighlight] = useState(false);
+  const [isPOE, setIsPOE] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [clipLevelTags, setClipLevelTags] = useState<string[]>([]);
@@ -306,6 +307,26 @@ export default function TaggingOverlayScreen() {
     });
   }
 
+  // POE button — red counterpart to ★. Same toggle behavior, same scale-pulse
+  // on enable, same disable-during-load. Writes is_point_of_emphasis on save.
+  // (point_of_emphasis_for_users[] left at DB default '{}' — forward-looking
+  // for V3 multi-tenant scoping; no code reads/writes it yet.)
+  const poeScale = useSharedValue(1);
+  const poeAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: poeScale.value }],
+  }));
+  function togglePOE() {
+    setIsPOE(prev => {
+      if (!prev) {
+        poeScale.value = withSequence(
+          withTiming(1.15, { duration: 100 }),
+          withTiming(1, { duration: 100 })
+        );
+      }
+      return !prev;
+    });
+  }
+
   // Using seekBy (keyframe-tolerant, ~10x faster than currentTime= which is
   // frame-accurate). Clips land at keyframe boundaries (0.5-2s granularity);
   // coaches fine-tune with -1s/+1s after rough seek. Per expo-video docs,
@@ -402,6 +423,7 @@ export default function TaggingOverlayScreen() {
         start_time: startTime,
         end_time: endTime,
         is_starred: isHighlight,
+        is_point_of_emphasis: isPOE,
         note: '',
       })
       .select()
@@ -456,6 +478,7 @@ export default function TaggingOverlayScreen() {
           setStartTime(null);
           setEndTime(null);
           setIsHighlight(false);
+          setIsPOE(false);
           setClipLevelTags([]);
           setBundles([]);
           setActiveSection('clip');
@@ -748,6 +771,17 @@ export default function TaggingOverlayScreen() {
                   <Text style={styles.highlightStar}>{isHighlight ? '★' : '☆'}</Text>
                 </TouchableOpacity>
               </Animated.View>
+              {/* POE ! — red counterpart to ★, sits next to Highlight. */}
+              <Animated.View style={[!videoReady && styles.disabledBtn, poeAnimatedStyle]}>
+                <TouchableOpacity
+                  style={[styles.poeBtn, isPOE && styles.poeBtnActive]}
+                  onPress={togglePOE}
+                  hitSlop={8}
+                  disabled={!videoReady}
+                >
+                  <Text style={[styles.poeText, isPOE && styles.poeTextActive]}>!</Text>
+                </TouchableOpacity>
+              </Animated.View>
             </View>
 
             <TouchableOpacity
@@ -974,6 +1008,25 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(239, 159, 39, 0.25)',
   },
   highlightStar: { color: '#EF9F27', fontSize: 22, fontWeight: '700' },
+
+  // POE button — red counterpart to the gold Highlight star. Same dimensions
+  // and toggle pattern; only the color changes. Inactive = outlined red on
+  // dark transparent; active = solid red filled with white "!".
+  poeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: '#DC3545',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  poeBtnActive: {
+    backgroundColor: '#DC3545',
+  },
+  poeText: { color: '#DC3545', fontSize: 22, fontWeight: '700' },
+  poeTextActive: { color: '#fff' },
 
   scrubBarWrapper: {
     // Sits inside the bottom LinearGradient as the first child; gradient's gap:8
