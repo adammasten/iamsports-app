@@ -34,16 +34,6 @@ function formatTime(seconds: number) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-// Converts a #RRGGBB hex string to rgba(...) with the given alpha. Used in F.3
-// for translucent chip backgrounds/borders without polluting the CATEGORIES
-// literal (which mirrors the portrait UI's shape — see CLAUDE.md).
-function colorWithAlpha(hex: string, alpha: number) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
 export default function TaggingOverlayScreen() {
   const params = useLocalSearchParams();
   const videoUrl = Array.isArray(params.url) ? params.url[0] : params.url;
@@ -629,21 +619,9 @@ export default function TaggingOverlayScreen() {
                       <TouchableOpacity
                         key={tag.id}
                         onPress={() => toggleTag(tag.id)}
-                        style={[
-                          styles.tagChip,
-                          selected
-                            ? { backgroundColor: cat.color, borderColor: 'rgba(255,255,255,0.4)' }
-                            : { backgroundColor: colorWithAlpha(cat.color, 0.25), borderColor: colorWithAlpha(cat.color, 0.6) },
-                        ]}
+                        style={[styles.tagChip, selected && styles.tagChipSelected]}
                       >
-                        <Text
-                          style={[
-                            styles.tagChipText,
-                            selected ? { color: '#fff', fontWeight: '700' } : { color: cat.color },
-                          ]}
-                        >
-                          {tag.name}
-                        </Text>
+                        <Text style={styles.tagChipText}>{tag.name}</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -913,17 +891,27 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 4,
   },
+  // Frosted-glass chip: dark semi-transparent backdrop, hairline white border,
+  // white text with a soft halo (textShadow radius:2 no-offset = glow not stroke).
+  // Selected state overrides the bg to gold #EF9F27 (matches the ★ Highlight
+  // button); text stays white + halo. Category color stays on colHeader only.
   tagChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
+    backgroundColor: 'rgba(20, 20, 24, 0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  tagChipSelected: {
+    backgroundColor: '#EF9F27',
   },
   tagChipText: {
-    fontSize: 10,
-    fontWeight: '500',
-    textShadowColor: 'rgba(0,0,0,0.85)',
-    textShadowOffset: { width: 0, height: 1 },
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    textShadowColor: 'rgba(255, 255, 255, 0.35)',
+    textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 2,
   },
 
