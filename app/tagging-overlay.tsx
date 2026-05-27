@@ -469,22 +469,21 @@ export default function TaggingOverlayScreen() {
     } else {
       message = 'Clip saved with no tags.';
     }
-    Alert.alert(
-      'Saved!',
-      message,
-      [{
-        text: 'OK',
-        onPress: () => {
-          setStartTime(null);
-          setEndTime(null);
-          setIsHighlight(false);
-          setIsPOE(false);
-          setClipLevelTags([]);
-          setBundles([]);
-          setActiveSection('clip');
-        },
-      }]
-    );
+
+    // Reset state synchronously on save success — POE / Highlight / tag chips
+    // visually clear immediately, not on Alert dismissal. Previously these were
+    // in the Alert OK onPress, which made it look like POE was "staying lit
+    // across saves" because the button stayed red-filled behind the modal until
+    // the user tapped OK.
+    setStartTime(null);
+    setEndTime(null);
+    setIsHighlight(false);
+    setIsPOE(false);
+    setClipLevelTags([]);
+    setBundles([]);
+    setActiveSection('clip');
+
+    Alert.alert('Saved!', message);
     setSaving(false);
   }
 
