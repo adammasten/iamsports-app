@@ -79,14 +79,22 @@ export default function ClipsScreen() {
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <TouchableOpacity
-              style={[styles.clipCard, item.is_starred && styles.starredCard]}
+              style={[
+                styles.clipCard,
+                // POE first, starred second — when both true, starred (gold) wins the card.
+                item.is_point_of_emphasis && styles.poeCard,
+                item.is_starred && styles.starredCard,
+              ]}
               onLongPress={() => deleteClip(item.id)}
             >
               <View style={styles.clipHeader}>
                 <Text style={styles.clipTime}>
                   {formatTime(item.start_time)} → {formatTime(item.end_time)}
                 </Text>
-                {item.is_starred && <Text style={styles.star}>★ Highlight</Text>}
+                <View style={styles.badges}>
+                  {item.is_starred && <Text style={styles.star}>★ Highlight</Text>}
+                  {item.is_point_of_emphasis && <Text style={styles.poe}>! POE</Text>}
+                </View>
               </View>
               <Text style={styles.clipTags}>{getTagNames(item)}</Text>
               {item.note ? <Text style={styles.clipNote}>{item.note}</Text> : null}
@@ -106,9 +114,12 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 12, color: '#aaa', marginBottom: 24 },
   clipCard: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 12 },
   starredCard: { borderWidth: 2, borderColor: '#EF9F27', backgroundColor: '#fffbf0' },
+  poeCard: { borderWidth: 2, borderColor: '#DC3545', backgroundColor: '#fff5f5' },
   clipHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   clipTime: { fontSize: 16, fontWeight: '600', color: '#333' },
+  badges: { flexDirection: 'row', gap: 8 },
   star: { fontSize: 12, color: '#EF9F27', fontWeight: '600' },
+  poe: { fontSize: 12, color: '#DC3545', fontWeight: '600' },
   clipTags: { fontSize: 13, color: '#534AB7', marginBottom: 4 },
   clipNote: { fontSize: 12, color: '#888' },
   empty: { textAlign: 'center', color: '#888', marginTop: 60, fontSize: 16 },
