@@ -1,7 +1,9 @@
 import { useTeamContext } from '@/context';
+import { computeSortOrderUpdates } from '@/lib/core/tag-reorder';
 import { supabase } from '@/supabase';
 import { useEffect, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 type Tag = { id: string; name: string; category: string; sort_order: number; scope: string; };
@@ -59,6 +61,16 @@ export default function TagsScreen() {
     ]);
   }
 
+  async function handleReorder(catKey: string, reordered: Tag[]) {
+    // Optimistic update: re-render the new order immediately, then persist diffs.
+    setTags(prev => ({ ...prev, [catKey]: reordered }));
+    const updates = computeSortOrderUpdates(reordered);
+    if (updates.length === 0) return;
+    await Promise.all(updates.map(update =>
+      supabase.from('tags').update({ sort_order: update.sort_order }).eq('id', update.id)
+    ));
+  }
+
   function getScopeLabel(tag: Tag) {
     if (tag.scope === 'global') return '🌍';
     if (tag.scope === 'player') return '👤';
@@ -66,121 +78,104 @@ export default function TagsScreen() {
     return '';
   }
 
-  // Build a flat list of items including headers and tags
-  const listData: any[] = [];
-
-  // Header section
-  listData.push({ type: 'header' });
-
-  // Add form if active
-  if (addingTo) {
-    listData.push({ type: 'addForm' });
-  }
-
-  // Categories and their tags
-  CATEGORIES.forEach(cat => {
-    listData.push({ type: 'categoryHeader', cat });
-    tags[cat.key].forEach(tag => {
-      listData.push({ type: 'tag', tag, cat });
-    });
-  });
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <FlatList
-        data={listData}
-        keyExtractor={(item, index) => `${item.type}-${item.tag?.id || item.cat?.key || index}`}
-        contentContainerStyle={styles.content}
-        renderItem={({ item }) => {
-          if (item.type === 'header') {
-            return (
-              <View style={styles.header}>
-                <Text style={styles.title}>My Tags</Text>
-                <Text style={styles.context}>
-                  {profileName ? `${profileName}${teamName && teamId !== 'all' ? ` • ${teamName}` : ''}` : 'No team selected'}
-                </Text>
-                <Text style={styles.subtitle}>Long press a tag to delete • 🌍 Global 👤 Player 🏀 Team</Text>
-              </View>
-            );
-          }
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <Text style={styles.title}>My Tags</Text>
+          <Text style={styles.context}>
+            {profileName ? `${profileName}${teamName && teamId !== 'all' ? ` • ${teamName}` : ''}` : 'No team selected'}
+          </Text>
+          <Text style={styles.subtitle}>Long press a tag to delete • Long press ☰ to drag • 🌍 Global 👤 Player 🏀 Team</Text>
+        </View>
 
-          if (item.type === 'addForm') {
-            return (
-              <View style={styles.addForm}>
-                <Text style={styles.addFormTitle}>
-                  Add to {CATEGORIES.find(c => c.key === addingTo)?.label}
-                </Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Tag name"
-                  value={newTagName}
-                  onChangeText={setNewTagName}
-                  autoFocus
-                  onSubmitEditing={addTag}
-                />
-                <Text style={styles.scopeLabel}>Add to:</Text>
-                <View style={styles.scopeRow}>
-                  <TouchableOpacity
-                    style={[styles.scopeBtn, newTagScope === 'global' && styles.scopeBtnActive]}
-                    onPress={() => setNewTagScope('global')}
-                  >
-                    <Text style={[styles.scopeBtnText, newTagScope === 'global' && styles.scopeBtnTextActive]}>🌍 Everyone</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.scopeBtn, newTagScope === 'player' && styles.scopeBtnActive]}
-                    onPress={() => setNewTagScope('player')}
-                  >
-                    <Text style={[styles.scopeBtnText, newTagScope === 'player' && styles.scopeBtnTextActive]}>👤 {profileName || 'Player'}</Text>
-                  </TouchableOpacity>
-                  {teamId && teamId !== 'all' && (
-                    <TouchableOpacity
-                      style={[styles.scopeBtn, newTagScope === 'team' && styles.scopeBtnActive]}
-                      onPress={() => setNewTagScope('team')}
-                    >
-                      <Text style={[styles.scopeBtnText, newTagScope === 'team' && styles.scopeBtnTextActive]}>🏀 {teamName || 'Team'}</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                <View style={styles.formButtons}>
-                  <TouchableOpacity style={styles.saveBtn} onPress={addTag}>
-                    <Text style={styles.saveBtnText}>Add Tag</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.cancelBtn} onPress={() => { setAddingTo(null); setNewTagName(''); }}>
-                    <Text style={styles.cancelBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            );
-          }
-
-          if (item.type === 'categoryHeader') {
-            return (
-              <View style={styles.sectionHeader}>
-                <Text style={[styles.sectionTitle, { color: item.cat.color }]}>{item.cat.label}</Text>
-                <TouchableOpacity onPress={() => { setAddingTo(item.cat.key); setNewTagName(''); }}>
-                  <Text style={[styles.addBtn, { color: item.cat.color }]}>+ Add</Text>
-                </TouchableOpacity>
-              </View>
-            );
-          }
-
-          if (item.type === 'tag') {
-            return (
+        {addingTo && (
+          <View style={styles.addForm}>
+            <Text style={styles.addFormTitle}>
+              Add to {CATEGORIES.find(c => c.key === addingTo)?.label}
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Tag name"
+              value={newTagName}
+              onChangeText={setNewTagName}
+              autoFocus
+              onSubmitEditing={addTag}
+            />
+            <Text style={styles.scopeLabel}>Add to:</Text>
+            <View style={styles.scopeRow}>
               <TouchableOpacity
-                onLongPress={() => deleteTag(item.tag.id, item.tag.name)}
-                delayLongPress={400}
-                style={[styles.tag, { backgroundColor: item.cat.bg }]}
+                style={[styles.scopeBtn, newTagScope === 'global' && styles.scopeBtnActive]}
+                onPress={() => setNewTagScope('global')}
               >
-                <Text style={[styles.tagText, { color: item.cat.color }]}>
-                  {getScopeLabel(item.tag)} {item.tag.name}
-                </Text>
+                <Text style={[styles.scopeBtnText, newTagScope === 'global' && styles.scopeBtnTextActive]}>🌍 Everyone</Text>
               </TouchableOpacity>
-            );
-          }
+              <TouchableOpacity
+                style={[styles.scopeBtn, newTagScope === 'player' && styles.scopeBtnActive]}
+                onPress={() => setNewTagScope('player')}
+              >
+                <Text style={[styles.scopeBtnText, newTagScope === 'player' && styles.scopeBtnTextActive]}>👤 {profileName || 'Player'}</Text>
+              </TouchableOpacity>
+              {teamId && teamId !== 'all' && (
+                <TouchableOpacity
+                  style={[styles.scopeBtn, newTagScope === 'team' && styles.scopeBtnActive]}
+                  onPress={() => setNewTagScope('team')}
+                >
+                  <Text style={[styles.scopeBtnText, newTagScope === 'team' && styles.scopeBtnTextActive]}>🏀 {teamName || 'Team'}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <View style={styles.formButtons}>
+              <TouchableOpacity style={styles.saveBtn} onPress={addTag}>
+                <Text style={styles.saveBtnText}>Add Tag</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setAddingTo(null); setNewTagName(''); }}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
-          return null;
-        }}
-      />
+        {CATEGORIES.map(cat => (
+          <View key={cat.key}>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: cat.color }]}>{cat.label}</Text>
+              <TouchableOpacity onPress={() => { setAddingTo(cat.key); setNewTagName(''); }}>
+                <Text style={[styles.addBtn, { color: cat.color }]}>+ Add</Text>
+              </TouchableOpacity>
+            </View>
+            <DraggableFlatList
+              data={tags[cat.key]}
+              keyExtractor={item => item.id}
+              onDragEnd={({ data }) => handleReorder(cat.key, data)}
+              scrollEnabled={false}
+              activationDistance={5}
+              renderItem={({ item, drag, isActive }: RenderItemParams<Tag>) => (
+                <ScaleDecorator>
+                  <View style={[styles.tagRow, { backgroundColor: cat.bg }, isActive && styles.tagRowActive]}>
+                    <TouchableOpacity
+                      style={styles.tagBody}
+                      onLongPress={() => deleteTag(item.id, item.name)}
+                      delayLongPress={400}
+                    >
+                      <Text style={[styles.tagText, { color: cat.color }]}>
+                        {getScopeLabel(item)} {item.name}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onLongPress={drag}
+                      delayLongPress={150}
+                      style={styles.dragHandle}
+                    >
+                      <Text style={[styles.dragHandleText, { color: cat.color }]}>☰</Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScaleDecorator>
+              )}
+            />
+          </View>
+        ))}
+      </ScrollView>
     </GestureHandlerRootView>
   );
 }
@@ -208,6 +203,10 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 16 },
   sectionTitle: { fontSize: 16, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   addBtn: { fontSize: 14, fontWeight: '600' },
-  tag: { padding: 10, borderRadius: 8, marginBottom: 4 },
+  tagRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 8, marginBottom: 4 },
+  tagRowActive: { opacity: 0.85 },
+  tagBody: { flex: 1, padding: 10 },
+  dragHandle: { paddingHorizontal: 12, paddingVertical: 10 },
+  dragHandleText: { fontSize: 16, opacity: 0.6 },
   tagText: { fontSize: 13, fontWeight: '500' },
 });
