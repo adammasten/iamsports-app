@@ -1,4 +1,4 @@
-import { CacheStatus, getManifest, prefetch, subscribe } from '@/lib/native/video-cache';
+import { CacheStatus, getManifest, prefetch, remove as removeFromCache, subscribe } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -41,7 +41,7 @@ async function getFreshToken(forceRefresh = false): Promise<string> {
 
 function badgeProps(status: CacheStatus): { label: string; bg: string; fg: string; pressable: boolean } {
   switch (status) {
-    case 'cached':      return { label: '✓ Ready Offline',           bg: '#e8f5e9', fg: '#2e7d32', pressable: false };
+    case 'cached':      return { label: '✓ Ready Offline',           bg: '#e8f5e9', fg: '#2e7d32', pressable: true };
     case 'downloading': return { label: '⋯ Saving…',                  bg: '#ede9fe', fg: '#534AB7', pressable: false };
     case 'queued':      return { label: '⏸ Queued',                   bg: '#f0f0f0', fg: '#666',    pressable: false };
     case 'error':       return { label: '↻ Retry',                    bg: '#fdecea', fg: '#c62828', pressable: true };
@@ -375,7 +375,18 @@ export default function GameScreen() {
                 <TouchableOpacity
                   style={[styles.cacheBadge, { backgroundColor: badge.bg }]}
                   onPress={() => {
-                    if (status === 'idle' || status === 'error') prefetch(item.id, item.url);
+                    if (status === 'idle' || status === 'error') {
+                      prefetch(item.id, item.url);
+                    } else if (status === 'cached') {
+                      Alert.alert(
+                        'Remove from device?',
+                        'The video stays in the cloud — you can save it offline again later.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Remove', style: 'destructive', onPress: () => removeFromCache(item.id) },
+                        ]
+                      );
+                    }
                   }}
                   disabled={!badge.pressable}
                   activeOpacity={badge.pressable ? 0.6 : 1}
