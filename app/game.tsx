@@ -1,3 +1,4 @@
+import { CacheStatus, getManifest, prefetch, subscribe } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -38,6 +39,17 @@ async function getFreshToken(forceRefresh = false): Promise<string> {
   return session.access_token;
 }
 
+function badgeProps(status: CacheStatus): { label: string; bg: string; fg: string; pressable: boolean } {
+  switch (status) {
+    case 'cached':      return { label: '✓ Cached',       bg: '#e8f5e9', fg: '#2e7d32', pressable: false };
+    case 'downloading': return { label: '⋯ Downloading',  bg: '#ede9fe', fg: '#534AB7', pressable: false };
+    case 'queued':      return { label: '⏸ Queued',       bg: '#f0f0f0', fg: '#666',    pressable: false };
+    case 'error':       return { label: '↻ Retry',        bg: '#fdecea', fg: '#c62828', pressable: true };
+    case 'idle':
+    default:            return { label: '⬇ Download',     bg: '#ede9fe', fg: '#534AB7', pressable: true };
+  }
+}
+
 export default function GameScreen() {
   const params = useLocalSearchParams();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -48,10 +60,30 @@ export default function GameScreen() {
   const [showLabelForm, setShowLabelForm] = useState(false);
   const [videoLabel, setVideoLabel] = useState('');
   const [pendingFile, setPendingFile] = useState<any>(null);
+  const [cacheState, setCacheState] = useState<Record<string, CacheStatus>>({});
 
   useEffect(() => {
     if (id) fetchVideos();
   }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const m = await getManifest();
+      if (cancelled) return;
+      setCacheState(prev => ({
+        ...prev,
+        ...Object.fromEntries(m.map(e => [e.videoId, 'cached' as CacheStatus])),
+      }));
+    })();
+    const unsub = subscribe((videoId, status) => {
+      setCacheState(prev => ({ ...prev, [videoId]: status }));
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
 
   async function fetchVideos() {
     const { data, error } = await supabase.from('videos').select('*').eq('game_id', id).order('sort_order');
@@ -323,20 +355,36 @@ export default function GameScreen() {
         <FlatList
           data={videos}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.videoCard}
-              onPress={() => Alert.alert(item.label, 'What would you like to do?', [
-                { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: item.id, url: item.url, label: item.label } }) },
-                { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: item.id, label: item.label } }) },
-                { text: 'Cancel', style: 'cancel' }
-              ])}
-              onLongPress={() => deleteVideo(item.id)}
-            >
-              <Text style={styles.videoLabel}>{item.label}</Text>
-              <Text style={styles.videoHint}>Tap for options • Hold to delete</Text>
-            </TouchableOpacity>
-          )}
+          renderItem={({ item }) => {
+            const status = cacheState[item.id] ?? 'idle';
+            const badge = badgeProps(status);
+            return (
+              <View style={styles.videoCard}>
+                <TouchableOpacity
+                  style={styles.videoCardMain}
+                  onPress={() => Alert.alert(item.label, 'What would you like to do?', [
+                    { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: item.id, url: item.url, label: item.label } }) },
+                    { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: item.id, label: item.label } }) },
+                    { text: 'Cancel', style: 'cancel' }
+                  ])}
+                  onLongPress={() => deleteVideo(item.id)}
+                >
+                  <Text style={styles.videoLabel}>{item.label}</Text>
+                  <Text style={styles.videoHint}>Tap for options • Hold to delete</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.cacheBadge, { backgroundColor: badge.bg }]}
+                  onPress={() => {
+                    if (status === 'idle' || status === 'error') prefetch(item.id, item.url);
+                  }}
+                  disabled={!badge.pressable}
+                  activeOpacity={badge.pressable ? 0.6 : 1}
+                >
+                  <Text style={[styles.cacheBadgeText, { color: badge.fg }]}>{badge.label}</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          }}
         />
       )}
     </View>
@@ -357,8 +405,11 @@ const styles = StyleSheet.create({
   progressContainer: { marginBottom: 16, backgroundColor: '#f0f0f0', borderRadius: 8, overflow: 'hidden', height: 44, justifyContent: 'center' },
   progressBar: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#534AB7', borderRadius: 8 },
   progressText: { textAlign: 'center', fontSize: 12, color: '#fff', fontWeight: '600', zIndex: 1 },
-  videoCard: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 12 },
+  videoCard: { flexDirection: 'row', alignItems: 'stretch', backgroundColor: '#f5f5f5', borderRadius: 12, marginBottom: 12, overflow: 'hidden' },
+  videoCardMain: { flex: 1, padding: 16 },
   videoLabel: { fontSize: 18, fontWeight: '600', marginBottom: 4 },
   videoHint: { fontSize: 12, color: '#aaa' },
+  cacheBadge: { paddingHorizontal: 14, justifyContent: 'center', alignItems: 'center', minWidth: 118 },
+  cacheBadgeText: { fontSize: 13, fontWeight: '600' },
   empty: { textAlign: 'center', color: '#888', marginTop: 60, fontSize: 16 },
 });
