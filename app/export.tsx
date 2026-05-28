@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/supabase';
+import { clipMatchesGroup, HIGHLIGHT_FILTER_ID, POE_FILTER_ID } from '@/lib/core/clip-filtering';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
@@ -9,12 +10,6 @@ import { Alert, AppState, FlatList, ScrollView, StyleSheet, Text, TouchableOpaci
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
 const ACTIVE_JOB_KEY = 'iamsports.active_export_job';
 const ACTIVE_JOB_TTL_MS = 2 * 60 * 60 * 1000;
-
-// Virtual tag ID for the ★ Highlight filter chip. Stored in tagGroups[N]
-// arrays alongside real tag IDs, but clipMatchesGroup treats it specially:
-// when present, the clip must have is_starred=true AND any remaining real
-// tags in the group must still match via the existing clip-level/bundle logic.
-const HIGHLIGHT_FILTER_ID = '__highlight__';
 
 // Tier 1 export resume: persist the in-flight jobId so backgrounding the app
 // (or unmounting the export screen) doesn't lose it. On mount or foreground,
@@ -201,37 +196,12 @@ export default function ExportScreen() {
 
   function getTagName(id: string) {
     if (id === HIGHLIGHT_FILTER_ID) return '★ Highlight';
+    if (id === POE_FILTER_ID) return '! POE';
     return tags.find(t => t.id === id)?.name || id;
   }
 
   function toggleExclude(id: string) {
     setExcludedClips(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
-  }
-
-  // Bundle-aware matching: a clip matches a filter group if all filter tags are
-  // in clip-level OR all in a single bundle (combined with clip-level). The
-  // ★ Highlight virtual ID, if present in the group, adds an is_starred=true
-  // gate; the remaining real tags still need to satisfy the bundle/clip-level
-  // rules. A group of just [★] matches every starred clip.
-  function clipMatchesGroup(clip: any, group: string[]): boolean {
-    if (group.length === 0) return false;
-    const hasHighlightFilter = group.includes(HIGHLIGHT_FILTER_ID);
-    if (hasHighlightFilter && !clip.is_starred) return false;
-    const realTags = group.filter(t => t !== HIGHLIGHT_FILTER_ID);
-    if (realTags.length === 0) return hasHighlightFilter;
-
-    const clipLevel: string[] = clip.clipLevelTagIds || [];
-    const bundles: string[][] = clip.bundles || [];
-
-    // Match via clip-level alone
-    if (realTags.every(tagId => clipLevel.includes(tagId))) return true;
-
-    // Match via clip-level + some single bundle
-    for (const bundle of bundles) {
-      const combined = [...clipLevel, ...bundle];
-      if (realTags.every(tagId => combined.includes(tagId))) return true;
-    }
-    return false;
   }
 
   async function loadClips() {
@@ -493,6 +463,20 @@ export default function ExportScreen() {
           </View>
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>EMPHASIS</Text>
+          <View style={styles.tagGrid}>
+            <TouchableOpacity
+              style={[styles.tagBtnPOE, currentGroup.includes(POE_FILTER_ID) && styles.tagBtnPOESelected]}
+              onPress={() => toggleTagInGroup(POE_FILTER_ID)}
+            >
+              <Text style={[styles.tagBtnPOEText, currentGroup.includes(POE_FILTER_ID) && styles.tagBtnPOETextSelected]}>
+                ! POE
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {categories.map(cat => {
           const catTags = tags.filter(t => t.category === cat);
           if (catTags.length === 0) return null;
@@ -670,6 +654,17 @@ const styles = StyleSheet.create({
   tagBtnHighlightSelected: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
   tagBtnHighlightText: { fontSize: 13, color: '#EF9F27', fontWeight: '700' },
   tagBtnHighlightTextSelected: { color: '#fff' },
+  tagBtnPOE: {
+    backgroundColor: '#fff5f5',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderWidth: 1.5,
+    borderColor: '#DC3545',
+  },
+  tagBtnPOESelected: { backgroundColor: '#DC3545', borderColor: '#DC3545' },
+  tagBtnPOEText: { fontSize: 13, color: '#DC3545', fontWeight: '700' },
+  tagBtnPOETextSelected: { color: '#fff' },
   groupActions: { marginBottom: 8 },
   addGroupBtn: { backgroundColor: '#1D9E75', borderRadius: 12, padding: 14, alignItems: 'center' },
   addGroupBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
