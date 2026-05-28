@@ -4,6 +4,7 @@
 // stays the same in both modes: top bar, right-edge bundle strip, scrub bar,
 // bottom controls row. Toggle is in the bottom controls row (rightmost).
 import { useTeamContext } from '@/context';
+import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
 import { useEvent } from 'expo';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -46,7 +47,7 @@ function colorWithAlpha(hex: string, alpha: number) {
 
 export default function TaggingOverlayScreen() {
   const params = useLocalSearchParams();
-  const videoUrl = Array.isArray(params.url) ? params.url[0] : params.url;
+  const remoteUrl = Array.isArray(params.url) ? params.url[0] : params.url;
   const videoId = Array.isArray(params.videoId) ? params.videoId[0] : params.videoId;
   const startAt = params.startAt
     ? parseFloat(Array.isArray(params.startAt) ? params.startAt[0] : (params.startAt as string))
@@ -77,7 +78,13 @@ export default function TaggingOverlayScreen() {
     chromeOpacity.value = withTiming(controlsVisible ? 1 : 0, { duration: 200 });
   }, [controlsVisible, chromeOpacity]);
 
-  const player = useVideoPlayer(videoUrl, p => {
+  // Prefer the on-device cached file at player init; fall back to remote URL
+  // if the manifest doesn't have an entry (or we're on web). All retry paths
+  // below still use remoteUrl explicitly, so a corrupted/evicted cache file
+  // mid-session recovers via network on the next replace().
+  const initialSource = (videoId ? getCachedPathSync(videoId) : null) ?? remoteUrl;
+
+  const player = useVideoPlayer(initialSource, p => {
     // Phase C: pause on entry. User starts playback via the bottom-row button.
     p.pause();
     // expo-video defaults timeUpdateEventInterval to 0 (event never fires) —
@@ -126,7 +133,7 @@ export default function TaggingOverlayScreen() {
   // Video load observation + bounded auto-retry. On "first session of the day"
   // Supabase's CDN edge can be cold and expo-video transitions silently into
   // 'error'. We log every status transition for diagnosis, and on 'error' we
-  // call player.replace(videoUrl) up to 3 times (2s apart) before surfacing an
+  // call player.replace(remoteUrl) up to 3 times (2s apart) before surfacing an
   // Alert with a manual Retry button. Counter only resets on 'readyToPlay' —
   // 'error' → 'idle' happens DURING our retry sequence (via replace) so
   // resetting there would loop forever.
@@ -148,8 +155,12 @@ export default function TaggingOverlayScreen() {
   }, []);
 
   useEffect(() => {
+    if (videoId) touchVideoCache(videoId).catch(() => {});
+  }, [videoId]);
+
+  useEffect(() => {
     const { status, oldStatus, error } = statusEvent;
-    const urlTail = videoUrl ? `...${videoUrl.slice(-30)}` : 'none';
+    const urlTail = remoteUrl ? `...${remoteUrl.slice(-30)}` : 'none';
     console.log(
       `[video-load] t=${Date.now()} ${oldStatus ?? 'init'}→${status} url=${urlTail}${error ? ` err=${error.message}` : ''}`
     );
@@ -159,7 +170,7 @@ export default function TaggingOverlayScreen() {
       return;
     }
 
-    if (status === 'error' && videoUrl) {
+    if (status === 'error' && remoteUrl) {
       if (retryCountRef.current < 3) {
         retryCountRef.current += 1;
         const attempt = retryCountRef.current;
@@ -168,7 +179,7 @@ export default function TaggingOverlayScreen() {
         retryTimeoutRef.current = setTimeout(() => {
           retryTimeoutRef.current = null;
           console.log(`[video-load] retry ${attempt}/3: calling player.replace`);
-          player.replace(videoUrl);
+          player.replace(remoteUrl);
         }, 2000);
       } else {
         // Retries exhausted — the loading overlay's tap-to-retry surfaces this
@@ -177,7 +188,7 @@ export default function TaggingOverlayScreen() {
         console.log(`[video-load] retries exhausted (3/3) — overlay surfaces tap-to-retry`);
       }
     }
-  }, [statusEvent, videoUrl, player]);
+  }, [statusEvent, remoteUrl, player]);
 
   // Lock landscape on focus, restore portrait on blur. useFocusEffect (not
   // useEffect) so the restore fires before the previous screen re-renders,
@@ -516,9 +527,9 @@ export default function TaggingOverlayScreen() {
         <Pressable
           style={[StyleSheet.absoluteFillObject, styles.loadingOverlay]}
           onPress={() => {
-            if (retriesExhausted && videoUrl) {
+            if (retriesExhausted && remoteUrl) {
               retryCountRef.current = 0;
-              player.replace(videoUrl);
+              player.replace(remoteUrl);
             }
           }}
         >

@@ -1,4 +1,5 @@
 import { useTeamContext } from '@/context';
+import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -8,18 +9,26 @@ import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 export default function TaggingScreen() {
   const params = useLocalSearchParams();
   const videoId = Array.isArray(params.videoId) ? params.videoId[0] : params.videoId;
-  const videoUrl = Array.isArray(params.url) ? params.url[0] : params.url;
+  const remoteUrl = Array.isArray(params.url) ? params.url[0] : params.url;
   const videoLabel = Array.isArray(params.label) ? params.label[0] : params.label;
   const startAt = params.startAt ? parseFloat(Array.isArray(params.startAt) ? params.startAt[0] : params.startAt as string) : null;
 
   const { profileId, teamId } = useTeamContext();
 
-  const player = useVideoPlayer(videoUrl, player => {
+  // Prefer the on-device cached file at player init; fall back to remote URL
+  // if the manifest doesn't have an entry (or we're on web).
+  const initialSource = (videoId ? getCachedPathSync(videoId) : null) ?? remoteUrl;
+
+  const player = useVideoPlayer(initialSource, player => {
     player.pause();
     if (startAt !== null) {
       setTimeout(() => { player.currentTime = startAt; }, 800);
     }
   });
+
+  useEffect(() => {
+    if (videoId) touchVideoCache(videoId).catch(() => {});
+  }, [videoId]);
 
   const [startTime, setStartTime] = useState<number | null>(null);
   const [endTime, setEndTime] = useState<number | null>(null);

@@ -1,5 +1,6 @@
 import { TeamProvider } from '@/context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { reconcile as reconcileVideoCache } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, router } from 'expo-router';
@@ -29,6 +30,12 @@ export default function RootLayout() {
       if (!session) router.replace('/login');
       else router.replace('/select-team');
     });
+  }, []);
+
+  // Hydrate the video-cache manifest and drop entries for files iOS evicted.
+  // Independent of auth — runs once per app launch regardless of session state.
+  useEffect(() => {
+    reconcileVideoCache().catch(e => console.warn('[video-cache] reconcile failed:', e));
   }, []);
 
   return (

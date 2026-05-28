@@ -152,6 +152,17 @@ export async function getCachedPath(videoId: string): Promise<string | null> {
   return info.exists ? pathFor(videoId) : null;
 }
 
+// Sync variant for initial-render decisions (useVideoPlayer needs a URL
+// synchronously). Returns null if the manifest hasn't been hydrated yet —
+// relies on _layout.tsx's startup reconcile() to load the manifest before
+// any tagging screen mounts. No disk check; if iOS evicted the file since
+// reconcile, the player errors and the caller falls back to the remote URL.
+export function getCachedPathSync(videoId: string): string | null {
+  if (isWeb || manifestCache === null) return null;
+  if (!manifestCache.some(e => e.videoId === videoId)) return null;
+  return pathFor(videoId);
+}
+
 export async function touch(videoId: string): Promise<void> {
   if (isWeb) return;
   const m = await loadManifest();
