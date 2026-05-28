@@ -41,12 +41,12 @@ async function getFreshToken(forceRefresh = false): Promise<string> {
 
 function badgeProps(status: CacheStatus): { label: string; bg: string; fg: string; pressable: boolean } {
   switch (status) {
-    case 'cached':      return { label: '✓ Ready Offline',           bg: '#e8f5e9', fg: '#2e7d32', pressable: true };
-    case 'downloading': return { label: '⋯ Saving…',                  bg: '#ede9fe', fg: '#534AB7', pressable: false };
-    case 'queued':      return { label: '⏸ Queued',                   bg: '#f0f0f0', fg: '#666',    pressable: false };
-    case 'error':       return { label: '↻ Retry',                    bg: '#fdecea', fg: '#c62828', pressable: true };
+    case 'cached':      return { label: '✓ Offline',      bg: '#e8f5e9', fg: '#2e7d32', pressable: true };
+    case 'downloading': return { label: '⋯ Saving',       bg: '#ede9fe', fg: '#534AB7', pressable: false };
+    case 'queued':      return { label: '⏸ Queued',       bg: '#f0f0f0', fg: '#666',    pressable: false };
+    case 'error':       return { label: '↻ Retry',        bg: '#fdecea', fg: '#c62828', pressable: true };
     case 'idle':
-    default:            return { label: '⬇ Save for Offline Tagging', bg: '#ede9fe', fg: '#534AB7', pressable: true };
+    default:            return { label: '⬇ Save Offline', bg: '#ede9fe', fg: '#534AB7', pressable: true };
   }
 }
 
@@ -391,7 +391,7 @@ export default function GameScreen() {
                   disabled={!badge.pressable}
                   activeOpacity={badge.pressable ? 0.6 : 1}
                 >
-                  <Text style={[styles.cacheBadgeText, { color: badge.fg }]}>{badge.label}</Text>
+                  <Text style={[styles.cacheBadgeText, { color: badge.fg }]} numberOfLines={2}>{badge.label}</Text>
                 </TouchableOpacity>
               </View>
             );
@@ -420,7 +420,7 @@ const styles = StyleSheet.create({
   videoCardMain: { flex: 1, padding: 16 },
   videoLabel: { fontSize: 18, fontWeight: '600', marginBottom: 4 },
   videoHint: { fontSize: 12, color: '#aaa' },
-  cacheBadge: { paddingHorizontal: 14, justifyContent: 'center', alignItems: 'center', minWidth: 118 },
-  cacheBadgeText: { fontSize: 13, fontWeight: '600' },
+  cacheBadge: { width: 96, paddingHorizontal: 8, paddingVertical: 8, justifyContent: 'center', alignItems: 'center' },
+  cacheBadgeText: { fontSize: 11, fontWeight: '600', textAlign: 'center' },
   empty: { textAlign: 'center', color: '#888', marginTop: 60, fontSize: 16 },
 });
