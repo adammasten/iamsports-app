@@ -1,10 +1,9 @@
 import { useTeamContext } from '@/context';
 import { computeSortOrderUpdates } from '@/lib/core/tag-reorder';
 import { supabase } from '@/supabase';
-import { useEffect, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
-import { GestureHandlerRootView, ScrollView } from 'react-native-gesture-handler';
+import { useEffect, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 type Tag = { id: string; name: string; category: string; sort_order: number; scope: string; };
 
@@ -21,11 +20,6 @@ export default function TagsScreen() {
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newTagName, setNewTagName] = useState('');
   const [newTagScope, setNewTagScope] = useState<'global' | 'player' | 'team'>('player');
-  // Shared ref so each per-category DraggableFlatList can coordinate its drag
-  // PanGestureHandler with the outer ScrollView via simultaneousHandlers.
-  // Without this, the inner gesture handler eats vertical pans on tag bodies
-  // before the ScrollView ever sees them — breaks flick-to-scroll.
-  const scrollRef = useRef(null);
 
   useEffect(() => { fetchTags(); }, [profileId, teamId]);
 
@@ -66,7 +60,11 @@ export default function TagsScreen() {
     ]);
   }
 
-  async function handleReorder(catKey: string, reordered: Tag[]) {
+  async function moveTag(catKey: string, fromIndex: number, toIndex: number) {
+    const current = tags[catKey];
+    if (toIndex < 0 || toIndex >= current.length) return;
+    const reordered = [...current];
+    [reordered[fromIndex], reordered[toIndex]] = [reordered[toIndex], reordered[fromIndex]];
     // Optimistic update: re-render the new order immediately, then persist diffs.
     setTags(prev => ({ ...prev, [catKey]: reordered }));
     const updates = computeSortOrderUpdates(reordered);
@@ -85,13 +83,13 @@ export default function TagsScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ScrollView ref={scrollRef} contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title}>My Tags</Text>
           <Text style={styles.context}>
             {profileName ? `${profileName}${teamName && teamId !== 'all' ? ` • ${teamName}` : ''}` : 'No team selected'}
           </Text>
-          <Text style={styles.subtitle}>Long press a tag to delete • Long press ☰ to drag • 🌍 Global 👤 Player 🏀 Team</Text>
+          <Text style={styles.subtitle}>Long press a tag to delete • ▲▼ to reorder • 🌍 Global 👤 Player 🏀 Team</Text>
         </View>
 
         {addingTo && (
@@ -149,36 +147,37 @@ export default function TagsScreen() {
                 <Text style={[styles.addBtn, { color: cat.color }]}>+ Add</Text>
               </TouchableOpacity>
             </View>
-            <DraggableFlatList
-              data={tags[cat.key]}
-              keyExtractor={item => item.id}
-              onDragEnd={({ data }) => handleReorder(cat.key, data)}
-              scrollEnabled={false}
-              activationDistance={5}
-              simultaneousHandlers={scrollRef}
-              renderItem={({ item, drag, isActive }: RenderItemParams<Tag>) => (
-                <ScaleDecorator>
-                  <View style={[styles.tagRow, { backgroundColor: cat.bg }, isActive && styles.tagRowActive]}>
-                    <TouchableOpacity
-                      style={styles.tagBody}
-                      onLongPress={() => deleteTag(item.id, item.name)}
-                      delayLongPress={400}
-                    >
-                      <Text style={[styles.tagText, { color: cat.color }]}>
-                        {getScopeLabel(item)} {item.name}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onLongPress={drag}
-                      delayLongPress={150}
-                      style={styles.dragHandle}
-                    >
-                      <Text style={[styles.dragHandleText, { color: cat.color }]}>☰</Text>
-                    </TouchableOpacity>
-                  </View>
-                </ScaleDecorator>
-              )}
-            />
+            {tags[cat.key].map((tag, index) => {
+              const isFirst = index === 0;
+              const isLast = index === tags[cat.key].length - 1;
+              return (
+                <View key={tag.id} style={[styles.tagRow, { backgroundColor: cat.bg }]}>
+                  <TouchableOpacity
+                    style={styles.tagBody}
+                    onLongPress={() => deleteTag(tag.id, tag.name)}
+                    delayLongPress={400}
+                  >
+                    <Text style={[styles.tagText, { color: cat.color }]}>
+                      {getScopeLabel(tag)} {tag.name}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => moveTag(cat.key, index, index - 1)}
+                    disabled={isFirst}
+                    style={[styles.moveBtn, isFirst && styles.moveBtnDisabled]}
+                  >
+                    <Text style={[styles.moveBtnText, { color: cat.color }]}>▲</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => moveTag(cat.key, index, index + 1)}
+                    disabled={isLast}
+                    style={[styles.moveBtn, isLast && styles.moveBtnDisabled]}
+                  >
+                    <Text style={[styles.moveBtnText, { color: cat.color }]}>▼</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
           </View>
         ))}
       </ScrollView>
@@ -210,9 +209,9 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 16, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   addBtn: { fontSize: 14, fontWeight: '600' },
   tagRow: { flexDirection: 'row', alignItems: 'stretch', borderRadius: 8, marginBottom: 4, overflow: 'hidden' },
-  tagRowActive: { opacity: 0.85 },
   tagBody: { flex: 1, paddingHorizontal: 10, paddingVertical: 12, justifyContent: 'center' },
-  dragHandle: { paddingHorizontal: 18, paddingVertical: 12, backgroundColor: 'rgba(0,0,0,0.07)', alignItems: 'center', justifyContent: 'center' },
-  dragHandleText: { fontSize: 22, opacity: 0.7, fontWeight: '600' },
+  moveBtn: { paddingHorizontal: 14, paddingVertical: 12, minWidth: 44, backgroundColor: 'rgba(0,0,0,0.07)', alignItems: 'center', justifyContent: 'center', borderLeftWidth: 1, borderLeftColor: 'rgba(0,0,0,0.08)' },
+  moveBtnDisabled: { opacity: 0.25 },
+  moveBtnText: { fontSize: 18, fontWeight: '700' },
   tagText: { fontSize: 13, fontWeight: '500' },
 });
