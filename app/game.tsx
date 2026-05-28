@@ -41,12 +41,12 @@ async function getFreshToken(forceRefresh = false): Promise<string> {
 
 function badgeProps(status: CacheStatus): { label: string; bg: string; fg: string; pressable: boolean } {
   switch (status) {
-    case 'cached':      return { label: '✓ Cached',       bg: '#e8f5e9', fg: '#2e7d32', pressable: false };
-    case 'downloading': return { label: '⋯ Downloading',  bg: '#ede9fe', fg: '#534AB7', pressable: false };
-    case 'queued':      return { label: '⏸ Queued',       bg: '#f0f0f0', fg: '#666',    pressable: false };
-    case 'error':       return { label: '↻ Retry',        bg: '#fdecea', fg: '#c62828', pressable: true };
+    case 'cached':      return { label: '✓ Ready Offline',           bg: '#e8f5e9', fg: '#2e7d32', pressable: false };
+    case 'downloading': return { label: '⋯ Saving…',                  bg: '#ede9fe', fg: '#534AB7', pressable: false };
+    case 'queued':      return { label: '⏸ Queued',                   bg: '#f0f0f0', fg: '#666',    pressable: false };
+    case 'error':       return { label: '↻ Retry',                    bg: '#fdecea', fg: '#c62828', pressable: true };
     case 'idle':
-    default:            return { label: '⬇ Download',     bg: '#ede9fe', fg: '#534AB7', pressable: true };
+    default:            return { label: '⬇ Save for Offline Tagging', bg: '#ede9fe', fg: '#534AB7', pressable: true };
   }
 }
 
