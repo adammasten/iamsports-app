@@ -1,10 +1,10 @@
 import { useTeamContext } from '@/context';
 import { computeSortOrderUpdates } from '@/lib/core/tag-reorder';
 import { supabase } from '@/supabase';
-import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, ScrollView } from 'react-native-gesture-handler';
 
 type Tag = { id: string; name: string; category: string; sort_order: number; scope: string; };
 
@@ -21,6 +21,11 @@ export default function TagsScreen() {
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newTagName, setNewTagName] = useState('');
   const [newTagScope, setNewTagScope] = useState<'global' | 'player' | 'team'>('player');
+  // Shared ref so each per-category DraggableFlatList can coordinate its drag
+  // PanGestureHandler with the outer ScrollView via simultaneousHandlers.
+  // Without this, the inner gesture handler eats vertical pans on tag bodies
+  // before the ScrollView ever sees them — breaks flick-to-scroll.
+  const scrollRef = useRef(null);
 
   useEffect(() => { fetchTags(); }, [profileId, teamId]);
 
@@ -80,7 +85,7 @@ export default function TagsScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title}>My Tags</Text>
           <Text style={styles.context}>
@@ -150,6 +155,7 @@ export default function TagsScreen() {
               onDragEnd={({ data }) => handleReorder(cat.key, data)}
               scrollEnabled={false}
               activationDistance={5}
+              simultaneousHandlers={scrollRef}
               renderItem={({ item, drag, isActive }: RenderItemParams<Tag>) => (
                 <ScaleDecorator>
                   <View style={[styles.tagRow, { backgroundColor: cat.bg }, isActive && styles.tagRowActive]}>
