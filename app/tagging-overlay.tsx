@@ -338,10 +338,9 @@ export default function TaggingOverlayScreen() {
     });
   }
 
-  // Using seekBy (keyframe-tolerant, ~10x faster than currentTime= which is
-  // frame-accurate). Clips land at keyframe boundaries (0.5-2s granularity);
-  // coaches fine-tune with -1s/+1s after rough seek. Per expo-video docs,
-  // this is the recommended path for non-precise seeks.
+  // Scrubber drag uses seekBy (keyframe-tolerant, ~10x faster than
+  // currentTime=). Coaches accept the keyframe rounding here because they're
+  // dragging to a rough position and the speed matters more than precision.
   function seekToX(x: number) {
     if (barWidth <= 0 || duration <= 0) return;
     const pct = Math.max(0, Math.min(1, x / barWidth));
@@ -350,12 +349,14 @@ export default function TaggingOverlayScreen() {
     player.seekBy(delta);
   }
 
+  // Skip buttons use frame-accurate currentTime= so ±1s actually moves 1.0s
+  // and ±5s moves 5.0s. seekBy here was rounding to the nearest keyframe,
+  // which made ±5s overshoot (~8s) and ±1s often no-op when already near a
+  // keyframe — breaking the fine-tune workflow after a scrubber drag.
   function skip(deltaSeconds: number) {
     if (duration <= 0) return;
-    const currentTime = player.currentTime;
-    const clampedTarget = Math.max(0, Math.min(duration, currentTime + deltaSeconds));
-    const clampedDelta = clampedTarget - currentTime;
-    player.seekBy(clampedDelta);
+    const clampedTarget = Math.max(0, Math.min(duration, player.currentTime + deltaSeconds));
+    player.currentTime = clampedTarget;
   }
 
   // Skip buttons: tap fires once via onPressIn; press-and-hold past 400ms
