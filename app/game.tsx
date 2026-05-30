@@ -1,3 +1,4 @@
+import { useTeamContext } from '@/context';
 import { CacheStatus, getManifest, prefetch, remove as removeFromCache, subscribe } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -54,6 +55,7 @@ export default function GameScreen() {
   const params = useLocalSearchParams();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const title = Array.isArray(params.title) ? params.title[0] : params.title;
+  const { activeTeam, userId } = useTeamContext();
   const [videos, setVideos] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -241,6 +243,13 @@ export default function GameScreen() {
 
   async function uploadVideo() {
     if (!pendingFile || !videoLabel) { Alert.alert('Please add a label'); return; }
+    // V3 requirement: videos.team_id is nullable; omitting it silently
+    // misfiles the video as a personal upload. Both team_id and
+    // uploaded_by_user_id must be wired on every team-context upload.
+    if (!activeTeam || !userId) {
+      Alert.alert('No team selected', 'Pick a team before uploading.');
+      return;
+    }
     setShowLabelForm(false);
     setUploading(true);
     setUploadProgress(0);
@@ -268,6 +277,8 @@ export default function GameScreen() {
 
       const { error } = await supabase.from('videos').insert({
         game_id: id,
+        team_id: activeTeam.id,
+        uploaded_by_user_id: userId,
         url: urlData.publicUrl,
         label: videoLabel,
         sort_order: videos.length,
