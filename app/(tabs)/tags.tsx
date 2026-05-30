@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-type Tag = { id: string; name: string; category: string; sort_order: number; scope: string; };
+type Tag = { id: string; name: string; category: string; sort_order: number; scope: 'global' | 'team'; };
 
 const CATEGORIES = [
   { key: 'offense', label: 'Offense', color: '#1a6fd4', bg: '#e8f0fe' },
@@ -15,20 +15,20 @@ const CATEGORIES = [
 ];
 
 export default function TagsScreen() {
-  const { profileId, profileName, teamId, teamName } = useTeamContext();
+  const { activeTeam } = useTeamContext();
   const [tags, setTags] = useState<Record<string, Tag[]>>({ offense: [], defense: [], plays: [], players: [] });
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newTagName, setNewTagName] = useState('');
-  const [newTagScope, setNewTagScope] = useState<'global' | 'player' | 'team'>('player');
+  const [newTagScope, setNewTagScope] = useState<'global' | 'team'>('team');
 
-  useEffect(() => { fetchTags(); }, [profileId, teamId]);
+  useEffect(() => { fetchTags(); }, [activeTeam]);
 
   async function fetchTags() {
+    // V3 tag scope is global | team only. Global tags are visible to every
+    // team; team tags are visible only when activeTeam is set and matches.
     let query = supabase.from('tags').select('*').order('sort_order');
-    if (profileId && teamId && teamId !== 'all') {
-      query = query.or(`scope.eq.global,and(scope.eq.player,profile_id.eq.${profileId}),and(scope.eq.team,team_id.eq.${teamId})`);
-    } else if (profileId) {
-      query = query.or(`scope.eq.global,and(scope.eq.player,profile_id.eq.${profileId})`);
+    if (activeTeam) {
+      query = query.or(`scope.eq.global,and(scope.eq.team,team_id.eq.${activeTeam.id})`);
     } else {
       query = query.eq('scope', 'global');
     }
@@ -41,10 +41,15 @@ export default function TagsScreen() {
 
   async function addTag() {
     if (!newTagName || !addingTo) return;
+    if (newTagScope === 'team' && !activeTeam) {
+      Alert.alert('No team selected', 'Pick a team to add a team-scoped tag.');
+      return;
+    }
     const existing = tags[addingTo];
+    // tags.profile_id is gone in V3. Only name/category/sort_order/scope are
+    // unconditional; team_id is set IFF scope='team' (DB CHECK enforces this).
     const tagData: any = { name: newTagName, category: addingTo, sort_order: existing.length, scope: newTagScope };
-    if (newTagScope === 'player' && profileId) tagData.profile_id = profileId;
-    if (newTagScope === 'team' && teamId && teamId !== 'all') tagData.team_id = teamId;
+    if (newTagScope === 'team' && activeTeam) tagData.team_id = activeTeam.id;
     const { error } = await supabase.from('tags').insert(tagData);
     if (error) Alert.alert('Error', error.message);
     else { fetchTags(); setNewTagName(''); setAddingTo(null); }
@@ -76,7 +81,6 @@ export default function TagsScreen() {
 
   function getScopeLabel(tag: Tag) {
     if (tag.scope === 'global') return '🌍';
-    if (tag.scope === 'player') return '👤';
     if (tag.scope === 'team') return '🏀';
     return '';
   }
@@ -87,9 +91,9 @@ export default function TagsScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>My Tags</Text>
           <Text style={styles.context}>
-            {profileName ? `${profileName}${teamName && teamId !== 'all' ? ` • ${teamName}` : ''}` : 'No team selected'}
+            {activeTeam ? activeTeam.name : 'No team selected'}
           </Text>
-          <Text style={styles.subtitle}>Long press a tag to delete • ▲▼ to reorder • 🌍 Global 👤 Player 🏀 Team</Text>
+          <Text style={styles.subtitle}>Long press a tag to delete • ▲▼ to reorder • 🌍 Global 🏀 Team</Text>
         </View>
 
         {addingTo && (
@@ -113,18 +117,12 @@ export default function TagsScreen() {
               >
                 <Text style={[styles.scopeBtnText, newTagScope === 'global' && styles.scopeBtnTextActive]}>🌍 Everyone</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.scopeBtn, newTagScope === 'player' && styles.scopeBtnActive]}
-                onPress={() => setNewTagScope('player')}
-              >
-                <Text style={[styles.scopeBtnText, newTagScope === 'player' && styles.scopeBtnTextActive]}>👤 {profileName || 'Player'}</Text>
-              </TouchableOpacity>
-              {teamId && teamId !== 'all' && (
+              {activeTeam && (
                 <TouchableOpacity
                   style={[styles.scopeBtn, newTagScope === 'team' && styles.scopeBtnActive]}
                   onPress={() => setNewTagScope('team')}
                 >
-                  <Text style={[styles.scopeBtnText, newTagScope === 'team' && styles.scopeBtnTextActive]}>🏀 {teamName || 'Team'}</Text>
+                  <Text style={[styles.scopeBtnText, newTagScope === 'team' && styles.scopeBtnTextActive]}>🏀 {activeTeam.name}</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -143,7 +141,7 @@ export default function TagsScreen() {
           <View key={cat.key}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: cat.color }]}>{cat.label}</Text>
-              <TouchableOpacity onPress={() => { setAddingTo(cat.key); setNewTagName(''); }}>
+              <TouchableOpacity onPress={() => { setAddingTo(cat.key); setNewTagName(''); setNewTagScope(activeTeam ? 'team' : 'global'); }}>
                 <Text style={[styles.addBtn, { color: cat.color }]}>+ Add</Text>
               </TouchableOpacity>
             </View>
