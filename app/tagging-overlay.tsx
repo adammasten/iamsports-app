@@ -53,7 +53,7 @@ export default function TaggingOverlayScreen() {
     ? parseFloat(Array.isArray(params.startAt) ? params.startAt[0] : (params.startAt as string))
     : null;
   const insets = useSafeAreaInsets();
-  const { profileId, teamId } = useTeamContext();
+  const { activeTeam, userId } = useTeamContext();
 
   const [startTime, setStartTime] = useState<number | null>(null);
   const [endTime, setEndTime] = useState<number | null>(null);
@@ -217,17 +217,16 @@ export default function TaggingOverlayScreen() {
     }, [])
   );
 
-  // Fetch tags scoped to the current profile/team. The .or(...) syntax must
-  // match app/tagging.tsx exactly — per CLAUDE.md, getting it wrong silently
-  // leaks tags across players.
+  // V3 tag scope is global | team only. Global tags are visible to every team;
+  // team tags are visible only to memberships of activeTeam. The .or(...)
+  // expression must match app/tagging.tsx exactly — per CLAUDE.md, getting it
+  // wrong silently leaks tags across teams.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       let query = supabase.from('tags').select('*').order('sort_order');
-      if (profileId && teamId && teamId !== 'all') {
-        query = query.or(`scope.eq.global,and(scope.eq.player,profile_id.eq.${profileId}),and(scope.eq.team,team_id.eq.${teamId})`);
-      } else if (profileId) {
-        query = query.or(`scope.eq.global,and(scope.eq.player,profile_id.eq.${profileId})`);
+      if (activeTeam) {
+        query = query.or(`scope.eq.global,and(scope.eq.team,team_id.eq.${activeTeam.id})`);
       } else {
         query = query.eq('scope', 'global');
       }
@@ -244,7 +243,7 @@ export default function TaggingOverlayScreen() {
       setTags(grouped);
     })();
     return () => { cancelled = true; };
-  }, [profileId, teamId]);
+  }, [activeTeam]);
 
   function toggleTag(tagId: string) {
     if (activeSection === 'clip') {
@@ -426,12 +425,21 @@ export default function TaggingOverlayScreen() {
       Alert.alert('Invalid clip', 'End time must be after start time.');
       return;
     }
+    // V3 requirement: clips.team_id is nullable; omitting it silently misfiles
+    // the clip as a personal upload. Both team_id and created_by_user_id must
+    // be wired on every team-context save.
+    if (!activeTeam || !userId) {
+      Alert.alert('No team selected', 'Pick a team before saving clips.');
+      return;
+    }
     setSaving(true);
 
     const { data: clip, error: clipError } = await supabase
       .from('clips')
       .insert({
         video_id: videoId,
+        team_id: activeTeam.id,
+        created_by_user_id: userId,
         start_time: startTime,
         end_time: endTime,
         is_starred: isHighlight,

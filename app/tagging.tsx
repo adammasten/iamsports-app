@@ -13,7 +13,7 @@ export default function TaggingScreen() {
   const videoLabel = Array.isArray(params.label) ? params.label[0] : params.label;
   const startAt = params.startAt ? parseFloat(Array.isArray(params.startAt) ? params.startAt[0] : params.startAt as string) : null;
 
-  const { profileId, teamId } = useTeamContext();
+  const { activeTeam, userId } = useTeamContext();
 
   // Prefer the on-device cached file at player init; fall back to remote URL
   // if the manifest doesn't have an entry (or we're on web).
@@ -39,14 +39,15 @@ export default function TaggingScreen() {
   const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [] });
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { fetchTags(); }, [profileId, teamId]);
+  useEffect(() => { fetchTags(); }, [activeTeam]);
 
   async function fetchTags() {
+    // V3 tag scope is global | team only. Global tags are visible to every
+    // team; team tags are visible only to memberships of activeTeam. The
+    // 'player' scope value and tags.profile_id column are both gone.
     let query = supabase.from('tags').select('*').order('sort_order');
-    if (profileId && teamId && teamId !== 'all') {
-      query = query.or(`scope.eq.global,and(scope.eq.player,profile_id.eq.${profileId}),and(scope.eq.team,team_id.eq.${teamId})`);
-    } else if (profileId) {
-      query = query.or(`scope.eq.global,and(scope.eq.player,profile_id.eq.${profileId})`);
+    if (activeTeam) {
+      query = query.or(`scope.eq.global,and(scope.eq.team,team_id.eq.${activeTeam.id})`);
     } else {
       query = query.eq('scope', 'global');
     }
@@ -138,12 +139,21 @@ export default function TaggingScreen() {
       Alert.alert('Invalid clip', 'End time must be after start time.');
       return;
     }
+    // V3 requirement: clips.team_id is nullable; omitting it silently misfiles
+    // the clip as a personal upload. Both team_id and created_by_user_id must
+    // be wired on every team-context save.
+    if (!activeTeam || !userId) {
+      Alert.alert('No team selected', 'Pick a team before saving clips.');
+      return;
+    }
     setSaving(true);
 
     const { data: clip, error: clipError } = await supabase
       .from('clips')
       .insert({
         video_id: videoId,
+        team_id: activeTeam.id,
+        created_by_user_id: userId,
         start_time: startTime,
         end_time: endTime,
         is_starred: isHighlight,
