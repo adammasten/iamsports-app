@@ -1,60 +1,97 @@
+import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
-import { router, useLocalSearchParams } from 'expo-router';
+import DateTimePicker, { DateTimePickerAndroid, DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+
+// Extract local YYYY-MM-DD from a Date. Never use .toISOString() — that
+// converts via UTC and shifts the date by a day for users west of UTC
+// (this app's users are US/Central, where any local date before 6am turns
+// into the previous day in UTC). All three getters below return LOCAL time.
+function dateToLocalYMD(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Single source of truth for date display. Postgres returns the date column
+// as a YYYY-MM-DD string; we split and reorder to DD/MM/YYYY without ever
+// instantiating a Date object (which would re-introduce timezone risk).
+function formatDate(ymd: string | null): string {
+  if (!ymd) return 'No date set';
+  const [y, m, d] = ymd.split('-');
+  return `${d}/${m}/${y}`;
+}
 
 export default function HomeScreen() {
-  const params = useLocalSearchParams();
-  const teamId = Array.isArray(params.teamId) ? params.teamId[0] : params.teamId;
-  const teamName = Array.isArray(params.teamName) ? params.teamName[0] : params.teamName;
-  const profileName = Array.isArray(params.profileName) ? params.profileName[0] : params.profileName;
-  const profileId = Array.isArray(params.profileId) ? params.profileId[0] : params.profileId;
+  const { activeTeam } = useTeamContext();
 
   const [games, setGames] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [opponent, setOpponent] = useState('');
-  const [gameDate, setGameDate] = useState('');
+  const [gameDate, setGameDate] = useState<Date>(new Date());
 
   useEffect(() => {
-    fetchGames();
-  }, [teamId, profileId]);
-
-  async function fetchGames() {
-    setLoading(true);
-    let query = supabase.from('games').select('*').order('created_at', { ascending: false });
-
-    if (teamId && teamId !== 'all') {
-      query = query.eq('team_id', teamId);
-    } else if (profileId) {
-      const { data: profileTeams } = await supabase.from('teams').select('id').eq('profile_id', profileId);
-      const teamIds = (profileTeams || []).map((t: any) => t.id);
-      if (teamIds.length > 0) {
-        query = query.in('team_id', teamIds);
-      } else {
-        setGames([]);
-        setLoading(false);
-        return;
-      }
+    if (activeTeam) {
+      fetchGames(activeTeam.id);
+    } else {
+      setGames([]);
+      setLoading(false);
     }
+  }, [activeTeam]);
 
-    const { data, error } = await query;
+  async function fetchGames(teamId: string) {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('games')
+      .select('*')
+      .eq('team_id', teamId)
+      .order('game_date', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false });
     if (error) Alert.alert('Error', error.message);
     else setGames(data || []);
     setLoading(false);
   }
 
+  function toggleForm() {
+    // Reset the picker default to "today" each time the form opens, so a
+    // session that spans midnight doesn't show yesterday on the next open.
+    if (!showForm) setGameDate(new Date());
+    setShowForm(!showForm);
+  }
+
+  function onDateChange(_: DateTimePickerEvent, selected?: Date) {
+    if (selected) setGameDate(selected);
+  }
+
+  function openAndroidPicker() {
+    DateTimePickerAndroid.open({
+      value: gameDate,
+      mode: 'date',
+      onChange: onDateChange,
+    });
+  }
+
   async function createGame() {
-    if (!opponent || !gameDate) { Alert.alert('Please fill in all fields'); return; }
-    const gameData: any = { title: `vs ${opponent}`, opponent, game_date: gameDate };
-    if (teamId && teamId !== 'all') gameData.team_id = teamId;
-    const { error } = await supabase.from('games').insert(gameData);
+    if (!opponent.trim()) { Alert.alert('Enter an opponent'); return; }
+    if (!activeTeam) { Alert.alert('No team selected'); return; }
+    const { error } = await supabase
+      .from('games')
+      .insert({
+        title: `vs ${opponent.trim()}`,
+        opponent: opponent.trim(),
+        game_date: dateToLocalYMD(gameDate),
+        team_id: activeTeam.id,
+      });
     if (error) Alert.alert('Error', error.message);
     else {
-      fetchGames();
+      await fetchGames(activeTeam.id);
       setShowForm(false);
       setOpponent('');
-      setGameDate('');
+      setGameDate(new Date());
     }
   }
 
@@ -64,7 +101,7 @@ export default function HomeScreen() {
       { text: 'Delete', style: 'destructive', onPress: async () => {
         const { error } = await supabase.from('games').delete().eq('id', id);
         if (error) Alert.alert('Error', error.message);
-        else fetchGames();
+        else if (activeTeam) fetchGames(activeTeam.id);
       }}
     ]);
   }
@@ -73,11 +110,29 @@ export default function HomeScreen() {
     await supabase.auth.signOut();
   }
 
+  if (!activeTeam) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <View />
+          <TouchableOpacity onPress={signOut}>
+            <Text style={styles.signOut}>Sign out</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.title}>🏀 IamSports</Text>
+        <Text style={styles.empty}>No team selected.</Text>
+        <TouchableOpacity style={styles.newGame} onPress={() => router.replace('/select-team')}>
+          <Text style={styles.newGameText}>Pick a team</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.replace('/select-team')}>
-          <Text style={styles.profileBtn}>← {profileName || 'Switch'}</Text>
+          <Text style={styles.switchBtn}>← Switch team</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={signOut}>
           <Text style={styles.signOut}>Sign out</Text>
@@ -85,10 +140,10 @@ export default function HomeScreen() {
       </View>
 
       <Text style={styles.title}>🏀 IamSports</Text>
-      <Text style={styles.teamName}>{teamName || 'All Teams'}</Text>
+      <Text style={styles.teamName}>{activeTeam.name}</Text>
 
       <View style={styles.buttonRow}>
-        <TouchableOpacity style={styles.newGame} onPress={() => setShowForm(!showForm)}>
+        <TouchableOpacity style={styles.newGame} onPress={toggleForm}>
           <Text style={styles.newGameText}>{showForm ? 'Cancel' : '+ New Game'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.exportBtn} onPress={() => router.push('/export')}>
@@ -103,13 +158,23 @@ export default function HomeScreen() {
             placeholder="Opponent name"
             value={opponent}
             onChangeText={setOpponent}
+            autoFocus
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Game date (MM/DD/YYYY)"
-            value={gameDate}
-            onChangeText={setGameDate}
-          />
+          <View style={styles.dateRow}>
+            <Text style={styles.dateLabel}>Game date:</Text>
+            {Platform.OS === 'ios' ? (
+              <DateTimePicker
+                value={gameDate}
+                mode="date"
+                display="compact"
+                onChange={onDateChange}
+              />
+            ) : (
+              <TouchableOpacity style={styles.dateBtn} onPress={openAndroidPicker}>
+                <Text style={styles.dateBtnText}>{formatDate(dateToLocalYMD(gameDate))}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           <TouchableOpacity style={styles.saveBtn} onPress={createGame}>
             <Text style={styles.saveBtnText}>Save Game</Text>
           </TouchableOpacity>
@@ -131,7 +196,7 @@ export default function HomeScreen() {
               onLongPress={() => deleteGame(item.id, item.title)}
             >
               <Text style={styles.gameTitle}>{item.title}</Text>
-              <Text style={styles.gameDate}>{item.game_date || 'No date set'}</Text>
+              <Text style={styles.gameDate}>{formatDate(item.game_date)}</Text>
               <Text style={styles.hint}>Tap to open • Hold to delete</Text>
             </TouchableOpacity>
           )}
@@ -144,7 +209,7 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: '#fff' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  profileBtn: { color: '#534AB7', fontSize: 14, fontWeight: '600' },
+  switchBtn: { color: '#534AB7', fontSize: 14, fontWeight: '600' },
   signOut: { color: '#888', fontSize: 14 },
   title: { fontSize: 28, fontWeight: '700', marginBottom: 2 },
   teamName: { fontSize: 16, color: '#534AB7', fontWeight: '600', marginBottom: 20 },
@@ -155,6 +220,10 @@ const styles = StyleSheet.create({
   exportBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   form: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 16 },
   input: { backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 10, fontSize: 16, borderWidth: 1, borderColor: '#ddd' },
+  dateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
+  dateLabel: { fontSize: 16, color: '#333' },
+  dateBtn: { backgroundColor: '#fff', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: '#ddd', flex: 1 },
+  dateBtnText: { fontSize: 16, color: '#333' },
   saveBtn: { backgroundColor: '#534AB7', borderRadius: 8, padding: 14, alignItems: 'center' },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   gameCard: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 12 },
