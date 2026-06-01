@@ -32,11 +32,14 @@ export default function TaggingScreen() {
 
   const [startTime, setStartTime] = useState<number | null>(null);
   const [endTime, setEndTime] = useState<number | null>(null);
-  const [isHighlight, setIsHighlight] = useState(false);
   const [clipLevelTags, setClipLevelTags] = useState<string[]>([]);
   const [bundles, setBundles] = useState<string[][]>([]);
   const [activeSection, setActiveSection] = useState<'clip' | number>('clip');
   const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [] });
+  // Special-category tags ('★ Highlight', 'POE') are looked up by name and
+  // surfaced only via dedicated buttons — never rendered in the category
+  // columns. The ★ button is just a tag toggle in disguise.
+  const [specialTagIds, setSpecialTagIds] = useState<{ highlight: string | null; poe: string | null }>({ highlight: null, poe: null });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { fetchTags(); }, [activeTeam]);
@@ -54,8 +57,18 @@ export default function TaggingScreen() {
     const { data } = await query;
     if (!data) return;
     const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [] };
-    data.forEach((t: any) => { if (grouped[t.category]) grouped[t.category].push(t); });
+    let highlightId: string | null = null;
+    let poeId: string | null = null;
+    data.forEach((t: any) => {
+      if (t.category === 'special') {
+        if (t.name === '★ Highlight') highlightId = t.id;
+        else if (t.name === 'POE') poeId = t.id;
+      } else if (grouped[t.category]) {
+        grouped[t.category].push(t);
+      }
+    });
     setTags(grouped);
+    setSpecialTagIds({ highlight: highlightId, poe: poeId });
   }
 
   function formatTime(seconds: number) {
@@ -80,6 +93,8 @@ export default function TaggingScreen() {
       const t = cat.find((tag: any) => tag.id === tagId);
       if (t) return t.name;
     }
+    if (specialTagIds.highlight === tagId) return '★ Highlight';
+    if (specialTagIds.poe === tagId) return 'POE';
     return '?';
   }
 
@@ -156,7 +171,6 @@ export default function TaggingScreen() {
         created_by_user_id: userId,
         start_time: startTime,
         end_time: endTime,
-        is_starred: isHighlight,
         note: '',
       })
       .select()
@@ -198,7 +212,6 @@ export default function TaggingScreen() {
         onPress: () => {
           setStartTime(null);
           setEndTime(null);
-          setIsHighlight(false);
           setClipLevelTags([]);
           setBundles([]);
           setActiveSection('clip');
@@ -217,6 +230,7 @@ export default function TaggingScreen() {
 
   const hasClipMarked = startTime !== null && endTime !== null;
   const activeTags = getActiveTags();
+  const isHighlightLit = !!specialTagIds.highlight && activeTags.includes(specialTagIds.highlight);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
@@ -258,11 +272,14 @@ export default function TaggingScreen() {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.highlightBtn, isHighlight && styles.highlightActive]}
-          onPress={() => setIsHighlight(!isHighlight)}
+          style={[styles.highlightBtn, isHighlightLit && styles.highlightActive]}
+          onPress={() => {
+            const id = specialTagIds.highlight;
+            if (id) toggleTag(id);
+          }}
         >
-          <Text style={[styles.highlightText, isHighlight && { color: '#fff' }]}>
-            {isHighlight ? 'Highlighted!' : 'Highlight'}
+          <Text style={[styles.highlightText, isHighlightLit && { color: '#fff' }]}>
+            {isHighlightLit ? 'Highlighted!' : 'Highlight'}
           </Text>
         </TouchableOpacity>
       </View>

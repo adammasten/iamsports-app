@@ -57,14 +57,16 @@ export default function TaggingOverlayScreen() {
 
   const [startTime, setStartTime] = useState<number | null>(null);
   const [endTime, setEndTime] = useState<number | null>(null);
-  const [isHighlight, setIsHighlight] = useState(false);
-  const [isPOE, setIsPOE] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [clipLevelTags, setClipLevelTags] = useState<string[]>([]);
   const [bundles, setBundles] = useState<string[][]>([]);
   const [activeSection, setActiveSection] = useState<'clip' | number>('clip');
   const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [] });
+  // Special-category tags ('★ Highlight', 'POE') are looked up by name and
+  // surfaced only via dedicated buttons in markGroup — never rendered in the
+  // category columns. The ★ and POE buttons are just tag toggles in disguise.
+  const [specialTagIds, setSpecialTagIds] = useState<{ highlight: string | null; poe: string | null }>({ highlight: null, poe: null });
 
   // Chrome visibility — pointerEvents flips synchronously via React state; the
   // opacity transition is driven by Reanimated over 200ms. Both must move
@@ -237,10 +239,18 @@ export default function TaggingOverlayScreen() {
         return;
       }
       const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [] };
+      let highlightId: string | null = null;
+      let poeId: string | null = null;
       (data || []).forEach((t: any) => {
-        if (grouped[t.category]) grouped[t.category].push(t);
+        if (t.category === 'special') {
+          if (t.name === '★ Highlight') highlightId = t.id;
+          else if (t.name === 'POE') poeId = t.id;
+        } else if (grouped[t.category]) {
+          grouped[t.category].push(t);
+        }
       });
       setTags(grouped);
+      setSpecialTagIds({ highlight: highlightId, poe: poeId });
     })();
     return () => { cancelled = true; };
   }, [activeTeam]);
@@ -293,12 +303,18 @@ export default function TaggingOverlayScreen() {
     ? clipLevelTags
     : (bundles[activeSection] ?? []);
 
+  // Derived button states: lit iff the special tag is present in the active
+  // section (clip-level or current bundle), matching how any normal tag chip
+  // shows selected. Falls back to false if specialTagIds haven't loaded.
+  const highlightLit = !!specialTagIds.highlight && activeTags.includes(specialTagIds.highlight);
+  const poeLit = !!specialTagIds.poe && activeTags.includes(specialTagIds.poe);
+
   const hasClipMarked = startTime !== null && endTime !== null;
   const videoReady = statusEvent.status === 'readyToPlay';
   const retriesExhausted = statusEvent.status === 'error' && retryCountRef.current >= 3;
   const canSave = hasClipMarked && !saving && videoReady;
 
-  // Highlight ★ button scale-pulse — fires only on enable (false → true).
+  // Highlight ★ button scale-pulse — fires only on enable (un-lit → lit).
   // Coaches frequently miss this button, so the pulse + larger size + label
   // are the visual reinforcement for the highlight → export feedback loop.
   const highlightScale = useSharedValue(1);
@@ -306,35 +322,33 @@ export default function TaggingOverlayScreen() {
     transform: [{ scale: highlightScale.value }],
   }));
   function toggleHighlight() {
-    setIsHighlight(prev => {
-      if (!prev) {
-        highlightScale.value = withSequence(
-          withTiming(1.15, { duration: 100 }),
-          withTiming(1, { duration: 100 })
-        );
-      }
-      return !prev;
-    });
+    const id = specialTagIds.highlight;
+    if (!id) return;
+    if (!highlightLit) {
+      highlightScale.value = withSequence(
+        withTiming(1.15, { duration: 100 }),
+        withTiming(1, { duration: 100 })
+      );
+    }
+    toggleTag(id);
   }
 
   // POE button — red counterpart to ★. Same toggle behavior, same scale-pulse
-  // on enable, same disable-during-load. Writes is_point_of_emphasis on save.
-  // (point_of_emphasis_for_users[] left at DB default '{}' — forward-looking
-  // for V3 multi-tenant scoping; no code reads/writes it yet.)
+  // on enable, same disable-during-load.
   const poeScale = useSharedValue(1);
   const poeAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: poeScale.value }],
   }));
   function togglePOE() {
-    setIsPOE(prev => {
-      if (!prev) {
-        poeScale.value = withSequence(
-          withTiming(1.15, { duration: 100 }),
-          withTiming(1, { duration: 100 })
-        );
-      }
-      return !prev;
-    });
+    const id = specialTagIds.poe;
+    if (!id) return;
+    if (!poeLit) {
+      poeScale.value = withSequence(
+        withTiming(1.15, { duration: 100 }),
+        withTiming(1, { duration: 100 })
+      );
+    }
+    toggleTag(id);
   }
 
   // Scrubber drag uses seekBy (keyframe-tolerant, ~10x faster than
@@ -442,8 +456,6 @@ export default function TaggingOverlayScreen() {
         created_by_user_id: userId,
         start_time: startTime,
         end_time: endTime,
-        is_starred: isHighlight,
-        is_point_of_emphasis: isPOE,
         note: '',
       })
       .select()
@@ -490,15 +502,11 @@ export default function TaggingOverlayScreen() {
       message = 'Clip saved with no tags.';
     }
 
-    // Reset state synchronously on save success — POE / Highlight / tag chips
-    // visually clear immediately, not on Alert dismissal. Previously these were
-    // in the Alert OK onPress, which made it look like POE was "staying lit
-    // across saves" because the button stayed red-filled behind the modal until
-    // the user tapped OK.
+    // Reset state synchronously on save success — tag chips (incl. ★ / POE
+    // via clipLevelTags + bundles) visually clear immediately, not on Alert
+    // dismissal.
     setStartTime(null);
     setEndTime(null);
-    setIsHighlight(false);
-    setIsPOE(false);
     setClipLevelTags([]);
     setBundles([]);
     setActiveSection('clip');
@@ -782,23 +790,23 @@ export default function TaggingOverlayScreen() {
                   the natural flow is "just marked the end → star this clip?". */}
               <Animated.View style={[!videoReady && styles.disabledBtn, highlightAnimatedStyle]}>
                 <TouchableOpacity
-                  style={[styles.highlightBtn, isHighlight && styles.highlightBtnActive]}
+                  style={[styles.highlightBtn, highlightLit && styles.highlightBtnActive]}
                   onPress={toggleHighlight}
                   hitSlop={8}
                   disabled={!videoReady}
                 >
-                  <Text style={styles.highlightStar}>{isHighlight ? '★' : '☆'}</Text>
+                  <Text style={styles.highlightStar}>{highlightLit ? '★' : '☆'}</Text>
                 </TouchableOpacity>
               </Animated.View>
               {/* POE ! — red counterpart to ★, sits next to Highlight. */}
               <Animated.View style={[!videoReady && styles.disabledBtn, poeAnimatedStyle]}>
                 <TouchableOpacity
-                  style={[styles.poeBtn, isPOE && styles.poeBtnActive]}
+                  style={[styles.poeBtn, poeLit && styles.poeBtnActive]}
                   onPress={togglePOE}
                   hitSlop={8}
                   disabled={!videoReady}
                 >
-                  <Text style={[styles.poeText, isPOE && styles.poeTextActive]}>!</Text>
+                  <Text style={[styles.poeText, poeLit && styles.poeTextActive]}>!</Text>
                 </TouchableOpacity>
               </Animated.View>
             </View>
