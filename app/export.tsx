@@ -592,7 +592,7 @@ export default function ExportScreen() {
                   <TouchableOpacity
                     style={styles.previewBtn}
                     onPress={() => router.push({
-                      pathname: '/tagging',
+                      pathname: '/tagging-overlay',
                       params: { videoId: clip.video_id, url: clip.videoUrl, label: clip.videoLabel, startAt: clip.start_time }
                     })}
                   >
