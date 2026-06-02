@@ -86,6 +86,14 @@ export default function TaggingOverlayScreen() {
   // mid-session recovers via network on the next replace().
   const initialSource = (videoId ? getCachedPathSync(videoId) : null) ?? remoteUrl;
 
+  // Initial seek-to-startAt is fired from a setTimeout inside the useVideoPlayer
+  // setup callback. If the component unmounts within 800ms (back-navigate from
+  // export preview, Fast Refresh, etc.), the native player is released but the
+  // timer still fires, and p.currentTime = startAt crashes with
+  // NativeSharedObjectNotFoundException. Hold the timer id in a ref so the
+  // unmount cleanup below can clear it.
+  const initialSeekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const player = useVideoPlayer(initialSource, p => {
     // Phase C: pause on entry. User starts playback via the bottom-row button.
     p.pause();
@@ -93,9 +101,21 @@ export default function TaggingOverlayScreen() {
     // set explicitly so the bottom-row timestamp ticks during playback.
     p.timeUpdateEventInterval = 0.5;
     if (startAt !== null) {
-      setTimeout(() => { p.currentTime = startAt; }, 800);
+      initialSeekTimeoutRef.current = setTimeout(() => {
+        initialSeekTimeoutRef.current = null;
+        p.currentTime = startAt;
+      }, 800);
     }
   });
+
+  useEffect(() => {
+    return () => {
+      if (initialSeekTimeoutRef.current) {
+        clearTimeout(initialSeekTimeoutRef.current);
+        initialSeekTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Reactive player state. timeUpdate fires every
   // player.timeUpdateEventInterval seconds (set explicitly in the useVideoPlayer
