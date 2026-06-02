@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/supabase';
-import { clipMatchesGroup, HIGHLIGHT_FILTER_ID, POE_FILTER_ID } from '@/lib/core/clip-filtering';
+import { clipMatchesGroup } from '@/lib/core/clip-filtering';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
@@ -176,6 +176,13 @@ export default function ExportScreen() {
     setTags(data || []);
   }
 
+  // Special-category tags ('★ Highlight', 'POE') are surfaced only via the
+  // dedicated HIGHLIGHTS / EMPHASIS buttons below. Derived from `tags` on
+  // every render — cheap O(n) and avoids a separate state. Undefined until
+  // the fetch completes; button onPress no-ops in that window.
+  const highlightTagId = tags.find(t => t.category === 'special' && t.name === '★ Highlight')?.id;
+  const poeTagId = tags.find(t => t.category === 'special' && t.name === 'POE')?.id;
+
   function toggleGame(id: string) {
     setSelectedGames(prev => prev.includes(id) ? prev.filter(g => g !== id) : [...prev, id]);
   }
@@ -195,8 +202,6 @@ export default function ExportScreen() {
   }
 
   function getTagName(id: string) {
-    if (id === HIGHLIGHT_FILTER_ID) return '★ Highlight';
-    if (id === POE_FILTER_ID) return '! POE';
     return tags.find(t => t.id === id)?.name || id;
   }
 
@@ -415,6 +420,8 @@ export default function ExportScreen() {
 
   if (step === 'tags') {
     const categories = ['offense', 'defense', 'plays', 'players'];
+    const highlightSelected = !!highlightTagId && currentGroup.includes(highlightTagId);
+    const poeSelected = !!poeTagId && currentGroup.includes(poeTagId);
     return (
       <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
         <TouchableOpacity onPress={() => setStep('games')} style={styles.back}>
@@ -453,10 +460,10 @@ export default function ExportScreen() {
           <Text style={styles.sectionTitle}>HIGHLIGHTS</Text>
           <View style={styles.tagGrid}>
             <TouchableOpacity
-              style={[styles.tagBtnHighlight, currentGroup.includes(HIGHLIGHT_FILTER_ID) && styles.tagBtnHighlightSelected]}
-              onPress={() => toggleTagInGroup(HIGHLIGHT_FILTER_ID)}
+              style={[styles.tagBtnHighlight, highlightSelected && styles.tagBtnHighlightSelected]}
+              onPress={() => highlightTagId && toggleTagInGroup(highlightTagId)}
             >
-              <Text style={[styles.tagBtnHighlightText, currentGroup.includes(HIGHLIGHT_FILTER_ID) && styles.tagBtnHighlightTextSelected]}>
+              <Text style={[styles.tagBtnHighlightText, highlightSelected && styles.tagBtnHighlightTextSelected]}>
                 ★ Highlight
               </Text>
             </TouchableOpacity>
@@ -467,10 +474,10 @@ export default function ExportScreen() {
           <Text style={styles.sectionTitle}>EMPHASIS</Text>
           <View style={styles.tagGrid}>
             <TouchableOpacity
-              style={[styles.tagBtnPOE, currentGroup.includes(POE_FILTER_ID) && styles.tagBtnPOESelected]}
-              onPress={() => toggleTagInGroup(POE_FILTER_ID)}
+              style={[styles.tagBtnPOE, poeSelected && styles.tagBtnPOESelected]}
+              onPress={() => poeTagId && toggleTagInGroup(poeTagId)}
             >
-              <Text style={[styles.tagBtnPOEText, currentGroup.includes(POE_FILTER_ID) && styles.tagBtnPOETextSelected]}>
+              <Text style={[styles.tagBtnPOEText, poeSelected && styles.tagBtnPOETextSelected]}>
                 ! POE
               </Text>
             </TouchableOpacity>
