@@ -9,8 +9,32 @@ export default function ClipsScreen() {
   const videoLabel = Array.isArray(params.label) ? params.label[0] : params.label;
   const [clips, setClips] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // Resolved from tags by name + category='special'. The ★/POE display badges
+  // and card border styles read tag-presence via these IDs instead of the
+  // (dead, no-longer-written) is_starred / is_point_of_emphasis columns.
+  const [specialTagIds, setSpecialTagIds] = useState<{ highlight: string | null; poe: string | null }>({ highlight: null, poe: null });
 
   useEffect(() => { if (videoId) fetchClips(); }, [videoId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('tags')
+        .select('id, name')
+        .eq('category', 'special')
+        .eq('scope', 'global');
+      if (cancelled || !data) return;
+      let highlightId: string | null = null;
+      let poeId: string | null = null;
+      data.forEach((t: any) => {
+        if (t.name === '★ Highlight') highlightId = t.id;
+        else if (t.name === 'POE') poeId = t.id;
+      });
+      setSpecialTagIds({ highlight: highlightId, poe: poeId });
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   async function fetchClips() {
     const { data: clipsData, error } = await supabase
@@ -26,11 +50,11 @@ export default function ClipsScreen() {
         .select('tag_id')
         .eq('clip_id', clip.id);
 
-      if (!tagData || tagData.length === 0) return { ...clip, tagNames: [] };
+      if (!tagData || tagData.length === 0) return { ...clip, tagIds: [], tagNames: [] };
 
       const tagIds = tagData.map((t: any) => t.tag_id);
       const { data: tags } = await supabase.from('tags').select('name').in('id', tagIds);
-      return { ...clip, tagNames: (tags || []).map((t: any) => t.name) };
+      return { ...clip, tagIds, tagNames: (tags || []).map((t: any) => t.name) };
     }));
 
     setClips(clipsWithTags);
@@ -77,13 +101,17 @@ export default function ClipsScreen() {
         <FlatList
           data={clips}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
+          renderItem={({ item }) => {
+            const ids: string[] = item.tagIds ?? [];
+            const isHighlighted = !!specialTagIds.highlight && ids.includes(specialTagIds.highlight);
+            const isPOE = !!specialTagIds.poe && ids.includes(specialTagIds.poe);
+            return (
             <TouchableOpacity
               style={[
                 styles.clipCard,
                 // POE first, starred second — when both true, starred (gold) wins the card.
-                item.is_point_of_emphasis && styles.poeCard,
-                item.is_starred && styles.starredCard,
+                isPOE && styles.poeCard,
+                isHighlighted && styles.starredCard,
               ]}
               onLongPress={() => deleteClip(item.id)}
             >
@@ -92,14 +120,15 @@ export default function ClipsScreen() {
                   {formatTime(item.start_time)} → {formatTime(item.end_time)}
                 </Text>
                 <View style={styles.badges}>
-                  {item.is_starred && <Text style={styles.star}>★ Highlight</Text>}
-                  {item.is_point_of_emphasis && <Text style={styles.poe}>! POE</Text>}
+                  {isHighlighted && <Text style={styles.star}>★ Highlight</Text>}
+                  {isPOE && <Text style={styles.poe}>! POE</Text>}
                 </View>
               </View>
               <Text style={styles.clipTags}>{getTagNames(item)}</Text>
               {item.note ? <Text style={styles.clipNote}>{item.note}</Text> : null}
             </TouchableOpacity>
-          )}
+          );
+          }}
         />
       )}
     </View>

@@ -583,7 +583,7 @@ export default function ExportScreen() {
                         {formatTime(clip.start_time)} → {formatTime(clip.end_time)}
                       </Text>
                       <Text style={styles.clipDuration}>{getDuration(clip.start_time, clip.end_time)}</Text>
-                      {clip.is_starred && <Text style={styles.star}>★</Text>}
+                      {!!highlightTagId && clip.tagIds?.includes(highlightTagId) && <Text style={styles.star}>★</Text>}
                     </View>
                     <Text style={[styles.clipMeta, excluded && styles.excludedText]}>
                       {clip.gameTitle} • {clip.videoLabel}
