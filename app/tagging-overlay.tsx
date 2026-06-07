@@ -5,6 +5,7 @@
 // bottom controls row. Toggle is in the bottom controls row (rightmost).
 import { useTeamContext } from '@/context';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
+import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { useEvent } from 'expo';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -58,6 +59,9 @@ export default function TaggingOverlayScreen() {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [endTime, setEndTime] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  // True when getSignedVideoUrl returned null (couldn't mint a signed URL for
+  // network playback). Routed into the existing error/retry overlay below.
+  const [signFailed, setSignFailed] = useState(false);
 
   const [clipLevelTags, setClipLevelTags] = useState<string[]>([]);
   const [bundles, setBundles] = useState<string[][]>([]);
@@ -80,19 +84,23 @@ export default function TaggingOverlayScreen() {
     chromeOpacity.value = withTiming(controlsVisible ? 1 : 0, { duration: 200 });
   }, [controlsVisible, chromeOpacity]);
 
-  // Prefer the on-device cached file at player init; fall back to remote URL
-  // if the manifest doesn't have an entry (or we're on web). All retry paths
-  // below still use remoteUrl explicitly, so a corrupted/evicted cache file
-  // mid-session recovers via network on the next replace().
-  const initialSource = (videoId ? getCachedPathSync(videoId) : null) ?? remoteUrl;
+  // Prefer the on-device cached file at player init. If there's no cached file,
+  // the player starts empty (null) and we mint a signed URL from the storage
+  // path (remoteUrl is now a bare object key, not a playable URL) in an effect
+  // below — see loadSignedSource. A cached file plays directly with no signed
+  // URL needed (offline playback). All network (re)loads go through
+  // loadSignedSource, so a corrupted/evicted cache file mid-session recovers by
+  // re-minting a signed URL on the next retry.
+  const cachedPath = videoId ? getCachedPathSync(videoId) : null;
+  const initialSource = cachedPath;
 
-  // Initial seek-to-startAt is fired from a setTimeout inside the useVideoPlayer
-  // setup callback. If the component unmounts within 800ms (back-navigate from
-  // export preview, Fast Refresh, etc.), the native player is released but the
-  // timer still fires, and p.currentTime = startAt crashes with
-  // NativeSharedObjectNotFoundException. Hold the timer id in a ref so the
-  // unmount cleanup below can clear it.
-  const initialSeekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Initial seek-to-startAt now fires once on the first 'readyToPlay' (in the
+  // statusChange effect below) instead of a fixed 800ms timer. With signed-URL
+  // minting, the source can load well after player creation, so a fixed timer
+  // could fire before the media is ready and lose the seek; gating on
+  // readyToPlay is both correct and avoids the post-unmount timer crash the old
+  // approach guarded against.
+  const didInitialSeekRef = useRef(false);
 
   const player = useVideoPlayer(initialSource, p => {
     // Phase C: pause on entry. User starts playback via the bottom-row button.
@@ -100,22 +108,7 @@ export default function TaggingOverlayScreen() {
     // expo-video defaults timeUpdateEventInterval to 0 (event never fires) —
     // set explicitly so the bottom-row timestamp ticks during playback.
     p.timeUpdateEventInterval = 0.5;
-    if (startAt !== null) {
-      initialSeekTimeoutRef.current = setTimeout(() => {
-        initialSeekTimeoutRef.current = null;
-        p.currentTime = startAt;
-      }, 800);
-    }
   });
-
-  useEffect(() => {
-    return () => {
-      if (initialSeekTimeoutRef.current) {
-        clearTimeout(initialSeekTimeoutRef.current);
-        initialSeekTimeoutRef.current = null;
-      }
-    };
-  }, []);
 
   // Reactive player state. timeUpdate fires every
   // player.timeUpdateEventInterval seconds (set explicitly in the useVideoPlayer
@@ -155,10 +148,10 @@ export default function TaggingOverlayScreen() {
   // Video load observation + bounded auto-retry. On "first session of the day"
   // Supabase's CDN edge can be cold and expo-video transitions silently into
   // 'error'. We log every status transition for diagnosis, and on 'error' we
-  // call player.replace(remoteUrl) up to 3 times (2s apart) before surfacing an
-  // Alert with a manual Retry button. Counter only resets on 'readyToPlay' —
-  // 'error' → 'idle' happens DURING our retry sequence (via replace) so
-  // resetting there would loop forever.
+  // re-mint a signed URL and replace the source up to 3 times (2s apart) before
+  // surfacing a manual tap-to-retry overlay. Counter only resets on
+  // 'readyToPlay' — 'error' → 'idle' happens DURING our retry sequence (via
+  // replace) so resetting there would loop forever.
   const statusEvent = useEvent(player, 'statusChange', {
     status: 'idle' as const,
     oldStatus: undefined,
@@ -180,6 +173,27 @@ export default function TaggingOverlayScreen() {
     if (videoId) touchVideoCache(videoId).catch(() => {});
   }, [videoId]);
 
+  // Mint a signed URL from the storage path and hand it to the player. Used for
+  // the initial network load (no cached file) and for every retry/reload —
+  // re-minting each time, since an expired/stale signed URL is a likely reason
+  // the load failed. On failure, flag signFailed so the error overlay surfaces.
+  const loadSignedSource = useCallback(async () => {
+    if (!remoteUrl) return;
+    setSignFailed(false);
+    const signed = await getSignedVideoUrl(remoteUrl);
+    if (signed) {
+      player.replace(signed);
+    } else {
+      setSignFailed(true);
+    }
+  }, [remoteUrl, player]);
+
+  // Initial network load: only when there's no cached file to play directly.
+  useEffect(() => {
+    if (!cachedPath) loadSignedSource();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const { status, oldStatus, error } = statusEvent;
     const urlTail = remoteUrl ? `...${remoteUrl.slice(-30)}` : 'none';
@@ -189,6 +203,12 @@ export default function TaggingOverlayScreen() {
 
     if (status === 'readyToPlay') {
       retryCountRef.current = 0;
+      // Fire the initial seek-to-startAt exactly once, now that the media is
+      // actually loaded (works regardless of how long the signed-URL mint took).
+      if (startAt !== null && !didInitialSeekRef.current) {
+        didInitialSeekRef.current = true;
+        player.currentTime = startAt;
+      }
       return;
     }
 
@@ -200,8 +220,8 @@ export default function TaggingOverlayScreen() {
         if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
         retryTimeoutRef.current = setTimeout(() => {
           retryTimeoutRef.current = null;
-          console.log(`[video-load] retry ${attempt}/3: calling player.replace`);
-          player.replace(remoteUrl);
+          console.log(`[video-load] retry ${attempt}/3: re-minting signed URL`);
+          loadSignedSource();
         }, 2000);
       } else {
         // Retries exhausted — the loading overlay's tap-to-retry surfaces this
@@ -210,7 +230,7 @@ export default function TaggingOverlayScreen() {
         console.log(`[video-load] retries exhausted (3/3) — overlay surfaces tap-to-retry`);
       }
     }
-  }, [statusEvent, remoteUrl, player]);
+  }, [statusEvent, remoteUrl, player, loadSignedSource, startAt]);
 
   // Lock landscape on focus, restore portrait on blur. useFocusEffect (not
   // useEffect) so the restore fires before the previous screen re-renders,
@@ -331,7 +351,7 @@ export default function TaggingOverlayScreen() {
 
   const hasClipMarked = startTime !== null && endTime !== null;
   const videoReady = statusEvent.status === 'readyToPlay';
-  const retriesExhausted = statusEvent.status === 'error' && retryCountRef.current >= 3;
+  const retriesExhausted = (statusEvent.status === 'error' && retryCountRef.current >= 3) || signFailed;
   const canSave = hasClipMarked && !saving && videoReady;
 
   // Highlight ★ button scale-pulse — fires only on enable (un-lit → lit).
@@ -566,7 +586,7 @@ export default function TaggingOverlayScreen() {
           onPress={() => {
             if (retriesExhausted && remoteUrl) {
               retryCountRef.current = 0;
-              player.replace(remoteUrl);
+              loadSignedSource();
             }
           }}
         >
