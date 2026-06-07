@@ -273,13 +273,14 @@ export default function GameScreen() {
         await uploadVideoMobile(fileName, pendingFile.uri, fileSize);
       }
 
-      const { data: urlData } = supabase.storage.from('Videos').getPublicUrl(fileName);
-
+      // Store the bare storage path (object key), not a public URL. The bucket
+      // is private; consumers mint a signed URL from this path via
+      // getSignedVideoUrl(). Matches the format existing rows were migrated to.
       const { error } = await supabase.from('videos').insert({
         game_id: id,
         team_id: activeTeam.id,
         uploaded_by_user_id: userId,
-        url: urlData.publicUrl,
+        url: fileName,
         label: videoLabel,
         sort_order: videos.length,
       });
