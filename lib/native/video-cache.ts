@@ -14,6 +14,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
+import { getSignedVideoUrl } from './video-url';
 import {
   CacheEntry,
   DEFAULT_BUDGET_BYTES,
@@ -193,7 +194,7 @@ export function subscribe(listener: StatusListener): () => void {
 
 async function runPrefetch(
   videoId: string,
-  remoteUrl: string
+  path: string
 ): Promise<PrefetchResult> {
   await ensureCacheDir();
   let manifest = await loadManifest();
@@ -212,7 +213,19 @@ async function runPrefetch(
     await saveManifest(manifest);
   }
 
-  const headSize = await headContentLength(remoteUrl);
+  // Mint a signed URL from the storage path for the network calls below — the
+  // bucket is private, so the bare path isn't directly fetchable. Cached-file
+  // naming and the manifest are keyed by videoId and are unaffected; only the
+  // fetch source changes.
+  const signedUrl = await getSignedVideoUrl(path);
+  if (!signedUrl) {
+    // Couldn't mint — abort without caching. Not fatal for the caller: the
+    // players fall back to a freshly-minted URL for playback.
+    setStatus(videoId, 'error');
+    return { ok: false, reason: 'network' };
+  }
+
+  const headSize = await headContentLength(signedUrl);
   const incoming = headSize ?? 0;
   const plan = planEvictions(manifest, BUDGET_BYTES, incoming);
 
@@ -228,7 +241,7 @@ async function runPrefetch(
 
   const dest = pathFor(videoId);
   try {
-    const download = FileSystem.createDownloadResumable(remoteUrl, dest);
+    const download = FileSystem.createDownloadResumable(signedUrl, dest);
     const result = await download.downloadAsync();
     if (!result || result.status >= 400) {
       throw new Error(`Download failed: status ${result?.status ?? 'unknown'}`);
@@ -270,7 +283,7 @@ async function runPrefetch(
 
 export function prefetch(
   videoId: string,
-  remoteUrl: string
+  path: string
 ): Promise<PrefetchResult> {
   if (isWeb) return Promise.resolve({ ok: false, reason: 'web' });
 
@@ -279,7 +292,7 @@ export function prefetch(
 
   setStatus(videoId, 'queued');
   const p = serialQueue
-    .then(() => runPrefetch(videoId, remoteUrl))
+    .then(() => runPrefetch(videoId, path))
     .finally(() => {
       inflight.delete(videoId);
     });
