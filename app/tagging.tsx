@@ -6,7 +6,10 @@ import { useEvent } from 'expo';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+// Shared so styles.video.height and the loading cover's height can't drift.
+const VIDEO_HEIGHT = 200;
 
 export default function TaggingScreen() {
   const params = useLocalSearchParams();
@@ -80,6 +83,9 @@ export default function TaggingScreen() {
     oldStatus: undefined,
     error: undefined,
   });
+  // Gates the opaque loading cover over the VideoView until the first frame is
+  // ready, so users never see the half-initialized native surface.
+  const videoReady = status === 'readyToPlay';
   useEffect(() => {
     if (status === 'readyToPlay' && startAt !== null && !didInitialSeekRef.current) {
       didInitialSeekRef.current = true;
@@ -314,12 +320,20 @@ export default function TaggingScreen() {
 
       <Text style={styles.title}>{videoLabel}</Text>
 
-      <VideoView
-        player={player}
-        style={styles.video}
-        allowsFullscreen
-        allowsPictureInPicture
-      />
+      <View style={styles.videoWrapper}>
+        <VideoView
+          player={player}
+          style={styles.video}
+          allowsFullscreen
+          allowsPictureInPicture
+        />
+        {!videoReady && (
+          <View style={styles.videoLoading}>
+            <ActivityIndicator size="large" color="#534AB7" />
+            <Text style={styles.videoLoadingText}>Loading…</Text>
+          </View>
+        )}
+      </View>
 
       {signFailed && (
         <Text style={styles.loadError}>Couldn&apos;t load video — go back and try again</Text>
@@ -465,9 +479,22 @@ const styles = StyleSheet.create({
   saveBtnDisabled: { backgroundColor: '#ccc' },
   saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   title: { fontSize: 20, fontWeight: '700', marginBottom: 12 },
-  video: { width: '100%', height: 200, backgroundColor: '#000', borderRadius: 12, marginBottom: 8 },
+  video: { width: '100%', height: VIDEO_HEIGHT, backgroundColor: '#000', borderRadius: 12, marginBottom: 8 },
   previewNote: { fontSize: 12, color: '#534AB7', marginBottom: 8, textAlign: 'center' },
   loadError: { fontSize: 12, color: '#c0392b', marginBottom: 8, textAlign: 'center' },
+  videoWrapper: { position: 'relative' },
+  videoLoading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: VIDEO_HEIGHT,
+    borderRadius: 12,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  videoLoadingText: { color: '#fff', fontSize: 13, fontWeight: '500', marginTop: 10 },
   controls: { flexDirection: 'row', gap: 8, marginBottom: 16 },
   startBtn: { flex: 1, backgroundColor: '#1D9E75', borderRadius: 8, padding: 10, alignItems: 'center' },
   endBtn: { flex: 1, backgroundColor: '#D85A30', borderRadius: 8, padding: 10, alignItems: 'center' },
