@@ -30,6 +30,10 @@ export default function TaggingScreen() {
   // ready and lose the seek.
   const didInitialSeekRef = useRef(false);
 
+  // Tracks whether the component is still mounted, so loadSignedSource doesn't
+  // call into a released player after its async mint resolves.
+  const isMountedRef = useRef(true);
+
   // True when getSignedVideoUrl returned null — drives the inline error line
   // under the VideoView (this screen has no retry overlay).
   const [signFailed, setSignFailed] = useState(false);
@@ -45,8 +49,15 @@ export default function TaggingScreen() {
     if (!remoteUrl) return;
     setSignFailed(false);
     const signed = await getSignedVideoUrl(remoteUrl);
+    // Bail if unmounted during the mint round-trip — calling into a released
+    // player throws NativeSharedObjectNotFoundException.
+    if (!isMountedRef.current) return;
     if (signed) {
-      player.replace(signed);
+      try {
+        player.replace(signed);
+      } catch (e) {
+        console.warn('[video-url] player.replace skipped (released):', e);
+      }
     } else {
       setSignFailed(true);
     }
@@ -55,6 +66,11 @@ export default function TaggingScreen() {
   useEffect(() => {
     if (!cachedPath) loadSignedSource();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Mark unmounted so async callbacks above don't touch a released player.
+  useEffect(() => {
+    return () => { isMountedRef.current = false; };
   }, []);
 
   // Fire the initial seek-to-startAt exactly once, when the media is actually
@@ -67,7 +83,11 @@ export default function TaggingScreen() {
   useEffect(() => {
     if (status === 'readyToPlay' && startAt !== null && !didInitialSeekRef.current) {
       didInitialSeekRef.current = true;
-      player.currentTime = startAt;
+      try {
+        player.currentTime = startAt;
+      } catch (e) {
+        console.warn('[video-load] initial seek skipped (released):', e);
+      }
     }
   }, [status, startAt, player]);
 

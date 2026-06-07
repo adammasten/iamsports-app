@@ -159,9 +159,13 @@ export default function TaggingOverlayScreen() {
   });
   const retryCountRef = useRef(0);
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks whether the component is still mounted, so async callbacks
+  // (loadSignedSource after its mint await) don't call into a released player.
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current);
         retryTimeoutRef.current = null;
@@ -181,8 +185,17 @@ export default function TaggingOverlayScreen() {
     if (!remoteUrl) return;
     setSignFailed(false);
     const signed = await getSignedVideoUrl(remoteUrl);
+    // Bail if the component unmounted during the mint round-trip — calling into
+    // a released player throws NativeSharedObjectNotFoundException.
+    if (!isMountedRef.current) return;
     if (signed) {
-      player.replace(signed);
+      try {
+        player.replace(signed);
+      } catch (e) {
+        // Player released between the mount check and this call (rare race) —
+        // swallow rather than crash; nothing left to play into.
+        console.warn('[video-url] player.replace skipped (released):', e);
+      }
     } else {
       setSignFailed(true);
     }
@@ -207,7 +220,12 @@ export default function TaggingOverlayScreen() {
       // actually loaded (works regardless of how long the signed-URL mint took).
       if (startAt !== null && !didInitialSeekRef.current) {
         didInitialSeekRef.current = true;
-        player.currentTime = startAt;
+        try {
+          player.currentTime = startAt;
+        } catch (e) {
+          // Player released — ignore the seek rather than crash.
+          console.warn('[video-load] initial seek skipped (released):', e);
+        }
       }
       return;
     }
