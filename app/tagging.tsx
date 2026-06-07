@@ -1,9 +1,11 @@
 import { useTeamContext } from '@/context';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
+import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
+import { useEvent } from 'expo';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function TaggingScreen() {
@@ -15,16 +17,59 @@ export default function TaggingScreen() {
 
   const { activeTeam, userId } = useTeamContext();
 
-  // Prefer the on-device cached file at player init; fall back to remote URL
-  // if the manifest doesn't have an entry (or we're on web).
-  const initialSource = (videoId ? getCachedPathSync(videoId) : null) ?? remoteUrl;
+  // Prefer the on-device cached file at player init. If there's no cached file,
+  // the player starts empty (null) and we mint a signed URL from the storage
+  // path (remoteUrl is now a bare object key, not a playable URL) in an effect
+  // below. A cached file plays directly with no signed URL needed (offline).
+  const cachedPath = videoId ? getCachedPathSync(videoId) : null;
+  const initialSource = cachedPath;
+
+  // Initial seek-to-startAt fires once on the first 'readyToPlay' (effect below)
+  // instead of a fixed 800ms timer: with signed-URL minting the source can load
+  // well after player creation, so a fixed timer could fire before the media is
+  // ready and lose the seek.
+  const didInitialSeekRef = useRef(false);
+
+  // True when getSignedVideoUrl returned null — drives the inline error line
+  // under the VideoView (this screen has no retry overlay).
+  const [signFailed, setSignFailed] = useState(false);
 
   const player = useVideoPlayer(initialSource, player => {
     player.pause();
-    if (startAt !== null) {
-      setTimeout(() => { player.currentTime = startAt; }, 800);
-    }
   });
+
+  // Mint a signed URL from the storage path and hand it to the player, for the
+  // initial network load when there's no cached file. On failure, flag
+  // signFailed (renders the inline error line below); never crashes.
+  const loadSignedSource = useCallback(async () => {
+    if (!remoteUrl) return;
+    setSignFailed(false);
+    const signed = await getSignedVideoUrl(remoteUrl);
+    if (signed) {
+      player.replace(signed);
+    } else {
+      setSignFailed(true);
+    }
+  }, [remoteUrl, player]);
+
+  useEffect(() => {
+    if (!cachedPath) loadSignedSource();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fire the initial seek-to-startAt exactly once, when the media is actually
+  // loaded (works regardless of how long the signed-URL mint took).
+  const { status } = useEvent(player, 'statusChange', {
+    status: 'idle' as const,
+    oldStatus: undefined,
+    error: undefined,
+  });
+  useEffect(() => {
+    if (status === 'readyToPlay' && startAt !== null && !didInitialSeekRef.current) {
+      didInitialSeekRef.current = true;
+      player.currentTime = startAt;
+    }
+  }, [status, startAt, player]);
 
   useEffect(() => {
     if (videoId) touchVideoCache(videoId).catch(() => {});
@@ -256,6 +301,10 @@ export default function TaggingScreen() {
         allowsPictureInPicture
       />
 
+      {signFailed && (
+        <Text style={styles.loadError}>Couldn&apos;t load video — go back and try again</Text>
+      )}
+
       {startAt !== null && (
         <Text style={styles.previewNote}>Previewing from {formatTime(startAt)}</Text>
       )}
@@ -398,6 +447,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: '700', marginBottom: 12 },
   video: { width: '100%', height: 200, backgroundColor: '#000', borderRadius: 12, marginBottom: 8 },
   previewNote: { fontSize: 12, color: '#534AB7', marginBottom: 8, textAlign: 'center' },
+  loadError: { fontSize: 12, color: '#c0392b', marginBottom: 8, textAlign: 'center' },
   controls: { flexDirection: 'row', gap: 8, marginBottom: 16 },
   startBtn: { flex: 1, backgroundColor: '#1D9E75', borderRadius: 8, padding: 10, alignItems: 'center' },
   endBtn: { flex: 1, backgroundColor: '#D85A30', borderRadius: 8, padding: 10, alignItems: 'center' },
