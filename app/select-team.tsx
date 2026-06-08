@@ -18,14 +18,14 @@ const ROLE_RANK: Record<string, number> = {
   admin: 6, head_coach: 5, coach: 4, parent: 3, player: 2, follower: 1,
 };
 
-function teamColor(seed: string): string {
+export function teamColor(seed: string): string {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
 // Initials for a kid avatar when there's no jersey number (and no photo yet).
-function initials(name: string): string {
+export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '🏀';
   if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
