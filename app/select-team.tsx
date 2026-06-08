@@ -198,14 +198,18 @@ export default function SelectTeamScreen() {
           contentContainerStyle={styles.rail}
         >
           {userKids.map(kid => (
-            <View key={kid.player_id} style={styles.teamItem}>
+            <TouchableOpacity
+              key={kid.player_id}
+              style={styles.teamItem}
+              onPress={() => router.push({ pathname: '/kid', params: { playerId: kid.player_id } })}
+            >
               <View style={[styles.avatar, { backgroundColor: teamColor(kid.player_id) }]}>
                 <Text style={styles.avatarText}>
                   {kid.jersey_number ? kid.jersey_number : initials(kid.name)}
                 </Text>
               </View>
               <Text style={styles.teamName} numberOfLines={2}>{kid.name}</Text>
-            </View>
+            </TouchableOpacity>
           ))}
           <TouchableOpacity style={styles.teamItem} onPress={() => setShowNewKid(true)}>
             <View style={[styles.avatar, styles.avatarAdd]}>
