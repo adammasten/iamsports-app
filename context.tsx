@@ -25,6 +25,8 @@ export type UserTeamRow = {
 
 type TeamContext = {
   userId: string | null;
+  sessionResolved: boolean;
+  membershipsLoaded: boolean;
   activeTeam: { id: string; name: string; sport: string } | null;
   activeRole: Role | null;
   userTeams: UserTeamRow[];
@@ -34,6 +36,8 @@ type TeamContext = {
 
 const TeamCtx = createContext<TeamContext>({
   userId: null,
+  sessionResolved: false,
+  membershipsLoaded: false,
   activeTeam: null,
   activeRole: null,
   userTeams: [],
@@ -45,14 +49,23 @@ export function TeamProvider({ children }: { children: any }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [userTeams, setUserTeams] = useState<UserTeamRow[]>([]);
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
+  // True once the initial getSession() resolves — lets the router tell
+  // "not logged in" apart from "session not determined yet".
+  const [sessionResolved, setSessionResolved] = useState(false);
+  // Which userId the current userTeams belong to (undefined = never loaded).
+  // membershipsLoaded is DERIVED from this (below) so it flips false
+  // synchronously the moment userId changes — no stale-"loaded" race.
+  const [loadedForUserId, setLoadedForUserId] = useState<string | null | undefined>(undefined);
 
   // Track auth session — userId drives the team query below.
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUserId(session?.user?.id ?? null);
+      setSessionResolved(true);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserId(session?.user?.id ?? null);
+      setSessionResolved(true);
     });
     return () => { subscription.unsubscribe(); };
   }, []);
@@ -64,6 +77,7 @@ export function TeamProvider({ children }: { children: any }) {
   const refreshTeams = useCallback(async () => {
     if (!userId) {
       setUserTeams([]);
+      setLoadedForUserId(null);
       return;
     }
     const { data, error } = await supabase
@@ -73,6 +87,7 @@ export function TeamProvider({ children }: { children: any }) {
       .eq('status', 'confirmed');
     if (error || !data) {
       setUserTeams([]);
+      setLoadedForUserId(userId);
       return;
     }
     const flattened: UserTeamRow[] = (data as any[])
@@ -84,6 +99,7 @@ export function TeamProvider({ children }: { children: any }) {
         role: r.role as Role,
       }));
     setUserTeams(flattened);
+    setLoadedForUserId(userId);
   }, [userId]);
 
   useEffect(() => {
@@ -109,12 +125,15 @@ export function TeamProvider({ children }: { children: any }) {
         .sort((a, b) => ROLE_RANK[b] - ROLE_RANK[a])[0] ?? null)
     : null;
 
+  // Derived (NOT state) so it tracks userId synchronously — see loadedForUserId.
+  const membershipsLoaded = loadedForUserId === userId;
+
   const setActiveTeam = (teamId: string | null) => {
     setActiveTeamId(teamId);
   };
 
   return (
-    <TeamCtx.Provider value={{ userId, activeTeam, activeRole, userTeams, setActiveTeam, refreshTeams }}>
+    <TeamCtx.Provider value={{ userId, sessionResolved, membershipsLoaded, activeTeam, activeRole, userTeams, setActiveTeam, refreshTeams }}>
       {children}
     </TeamCtx.Provider>
   );
