@@ -34,12 +34,15 @@ function initials(name: string): string {
 
 export default function SelectTeamScreen() {
   const insets = useSafeAreaInsets();
-  const { userId, userTeams, userKids, setActiveTeam, refreshTeams } = useTeamContext();
+  const { userId, userTeams, userKids, setActiveTeam, refreshTeams, refreshKids } = useTeamContext();
   const [showNewTeam, setShowNewTeam] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamSport, setNewTeamSport] = useState('Basketball');
   const [creating, setCreating] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('All');
+  const [showNewKid, setShowNewKid] = useState(false);
+  const [newKidName, setNewKidName] = useState('');
+  const [creatingKid, setCreatingKid] = useState(false);
 
   // One entry per team, keeping the HIGHEST-ranked role (a user can hold several
   // roles on one team — UNIQUE key is (team_id, user_id, role)).
@@ -95,6 +98,25 @@ export default function SelectTeamScreen() {
     router.replace('/');
   }
 
+  // Add a kid via the create_kid RPC (SECURITY DEFINER) — it creates a teamless
+  // player and links the current user as 'parent' atomically, bypassing the
+  // teamless-insert RLS. Stays on home; refreshKids() updates the rail in place.
+  async function addKid() {
+    if (!newKidName.trim()) { Alert.alert("Enter the kid's name"); return; }
+    if (!userId) { Alert.alert('Not signed in'); return; }
+    setCreatingKid(true);
+    const { error } = await supabase.rpc('create_kid', { name: newKidName.trim() });
+    if (error) {
+      Alert.alert('Error adding kid', error.message);
+      setCreatingKid(false);
+      return;
+    }
+    await refreshKids();
+    setNewKidName('');
+    setShowNewKid(false);
+    setCreatingKid(false);
+  }
+
   // Create-team form (unchanged logic, dark-themed).
   if (showNewTeam) {
     return (
@@ -127,6 +149,30 @@ export default function SelectTeamScreen() {
     );
   }
 
+  // Add-kid form (mirrors the create-team form).
+  if (showNewKid) {
+    return (
+      <View style={[styles.formScreen, { paddingTop: insets.top + 20 }]}>
+        <Text style={styles.formTitle}>Add kid</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Kid's name"
+          placeholderTextColor="#888"
+          value={newKidName}
+          onChangeText={setNewKidName}
+          autoFocus
+          editable={!creatingKid}
+        />
+        <TouchableOpacity style={styles.saveBtn} onPress={addKid} disabled={creatingKid}>
+          <Text style={styles.saveBtnText}>{creatingKid ? 'Adding…' : 'Add kid'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setShowNewKid(false)} disabled={creatingKid}>
+          <Text style={styles.cancel}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
@@ -143,28 +189,31 @@ export default function SelectTeamScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        {/* Your kids — hidden entirely when the user has no linked kids. */}
-        {userKids.length > 0 && (
-          <>
-            <Text style={styles.sectionLabel}>Your kids</Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.rail}
-            >
-              {userKids.map(kid => (
-                <View key={kid.player_id} style={styles.teamItem}>
-                  <View style={[styles.avatar, { backgroundColor: teamColor(kid.player_id) }]}>
-                    <Text style={styles.avatarText}>
-                      {kid.jersey_number ? kid.jersey_number : initials(kid.name)}
-                    </Text>
-                  </View>
-                  <Text style={styles.teamName} numberOfLines={2}>{kid.name}</Text>
-                </View>
-              ))}
-            </ScrollView>
-          </>
-        )}
+        {/* Your kids — always shown so "+ Add kid" is reachable even with zero
+            kids (mirrors the teams rail's "+ New team"). */}
+        <Text style={styles.sectionLabel}>Your kids</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.rail}
+        >
+          {userKids.map(kid => (
+            <View key={kid.player_id} style={styles.teamItem}>
+              <View style={[styles.avatar, { backgroundColor: teamColor(kid.player_id) }]}>
+                <Text style={styles.avatarText}>
+                  {kid.jersey_number ? kid.jersey_number : initials(kid.name)}
+                </Text>
+              </View>
+              <Text style={styles.teamName} numberOfLines={2}>{kid.name}</Text>
+            </View>
+          ))}
+          <TouchableOpacity style={styles.teamItem} onPress={() => setShowNewKid(true)}>
+            <View style={[styles.avatar, styles.avatarAdd]}>
+              <Ionicons name="add" size={28} color="#534AB7" />
+            </View>
+            <Text style={styles.teamName}>Add kid</Text>
+          </TouchableOpacity>
+        </ScrollView>
 
         <Text style={styles.sectionLabel}>Your teams</Text>
 
