@@ -23,32 +23,47 @@ export type UserTeamRow = {
   role: Role;
 };
 
+export type UserKidRow = {
+  player_id: string;
+  name: string;
+  jersey_number: string | null;
+  team_id: string;
+  relationship: string | null;
+};
+
 type TeamContext = {
   userId: string | null;
   sessionResolved: boolean;
   membershipsLoaded: boolean;
+  kidsLoaded: boolean;
   activeTeam: { id: string; name: string; sport: string } | null;
   activeRole: Role | null;
   userTeams: UserTeamRow[];
+  userKids: UserKidRow[];
   setActiveTeam: (teamId: string | null) => void;
   refreshTeams: () => Promise<void>;
+  refreshKids: () => Promise<void>;
 };
 
 const TeamCtx = createContext<TeamContext>({
   userId: null,
   sessionResolved: false,
   membershipsLoaded: false,
+  kidsLoaded: false,
   activeTeam: null,
   activeRole: null,
   userTeams: [],
+  userKids: [],
   setActiveTeam: () => {},
   refreshTeams: async () => {},
+  refreshKids: async () => {},
 });
 
 export function TeamProvider({ children }: { children: any }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [userTeams, setUserTeams] = useState<UserTeamRow[]>([]);
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
+  const [userKids, setUserKids] = useState<UserKidRow[]>([]);
   // True once the initial getSession() resolves — lets the router tell
   // "not logged in" apart from "session not determined yet".
   const [sessionResolved, setSessionResolved] = useState(false);
@@ -56,6 +71,8 @@ export function TeamProvider({ children }: { children: any }) {
   // membershipsLoaded is DERIVED from this (below) so it flips false
   // synchronously the moment userId changes — no stale-"loaded" race.
   const [loadedForUserId, setLoadedForUserId] = useState<string | null | undefined>(undefined);
+  // Mirror of loadedForUserId for the kids query (drives derived kidsLoaded).
+  const [kidsLoadedForUserId, setKidsLoadedForUserId] = useState<string | null | undefined>(undefined);
 
   // Track auth session — userId drives the team query below.
   useEffect(() => {
@@ -106,6 +123,43 @@ export function TeamProvider({ children }: { children: any }) {
     refreshTeams();
   }, [refreshTeams]);
 
+  // Read parent_player_links joined to players for the current user — the kids
+  // this user is a guardian of. Mirrors refreshTeams exactly.
+  // NOTE: the nested players select is subject to players_read RLS, so a kid
+  // whose team this user is NOT a confirmed member of will be filtered out
+  // (players_read has no linked-parent branch).
+  const refreshKids = useCallback(async () => {
+    if (!userId) {
+      setUserKids([]);
+      setKidsLoadedForUserId(null);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('parent_player_links')
+      .select('relationship, players ( id, name, jersey_number, team_id )')
+      .eq('parent_user_id', userId);
+    if (error || !data) {
+      setUserKids([]);
+      setKidsLoadedForUserId(userId);
+      return;
+    }
+    const flattened: UserKidRow[] = (data as any[])
+      .filter(r => r.players)
+      .map(r => ({
+        player_id: r.players.id,
+        name: r.players.name,
+        jersey_number: r.players.jersey_number ?? null,
+        team_id: r.players.team_id,
+        relationship: r.relationship ?? null,
+      }));
+    setUserKids(flattened);
+    setKidsLoadedForUserId(userId);
+  }, [userId]);
+
+  useEffect(() => {
+    refreshKids();
+  }, [refreshKids]);
+
   // activeTeam is derived from activeTeamId + the latest userTeams. If the
   // selected team disappears from userTeams (membership revoked, team
   // deleted), activeTeam naturally goes null without the caller having to
@@ -128,12 +182,15 @@ export function TeamProvider({ children }: { children: any }) {
   // Derived (NOT state) so it tracks userId synchronously — see loadedForUserId.
   const membershipsLoaded = loadedForUserId === userId;
 
+  // Same derived pattern for the kids query.
+  const kidsLoaded = kidsLoadedForUserId === userId;
+
   const setActiveTeam = (teamId: string | null) => {
     setActiveTeamId(teamId);
   };
 
   return (
-    <TeamCtx.Provider value={{ userId, sessionResolved, membershipsLoaded, activeTeam, activeRole, userTeams, setActiveTeam, refreshTeams }}>
+    <TeamCtx.Provider value={{ userId, sessionResolved, membershipsLoaded, kidsLoaded, activeTeam, activeRole, userTeams, userKids, setActiveTeam, refreshTeams, refreshKids }}>
       {children}
     </TeamCtx.Provider>
   );

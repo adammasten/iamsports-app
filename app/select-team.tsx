@@ -24,9 +24,17 @@ function teamColor(seed: string): string {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
+// Initials for a kid avatar when there's no jersey number (and no photo yet).
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '🏀';
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
+
 export default function SelectTeamScreen() {
   const insets = useSafeAreaInsets();
-  const { userId, userTeams, setActiveTeam, refreshTeams } = useTeamContext();
+  const { userId, userTeams, userKids, setActiveTeam, refreshTeams } = useTeamContext();
   const [showNewTeam, setShowNewTeam] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamSport, setNewTeamSport] = useState('Basketball');
@@ -135,6 +143,29 @@ export default function SelectTeamScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        {/* Your kids — hidden entirely when the user has no linked kids. */}
+        {userKids.length > 0 && (
+          <>
+            <Text style={styles.sectionLabel}>Your kids</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.rail}
+            >
+              {userKids.map(kid => (
+                <View key={kid.player_id} style={styles.teamItem}>
+                  <View style={[styles.avatar, { backgroundColor: teamColor(kid.player_id) }]}>
+                    <Text style={styles.avatarText}>
+                      {kid.jersey_number ? kid.jersey_number : initials(kid.name)}
+                    </Text>
+                  </View>
+                  <Text style={styles.teamName} numberOfLines={2}>{kid.name}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </>
+        )}
+
         <Text style={styles.sectionLabel}>Your teams</Text>
 
         {/* Team rail */}
