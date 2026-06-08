@@ -1,22 +1,48 @@
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+// Visual-only filter chips for now — wiring to real data is a later task.
+const FILTERS = ['All', 'Lars', 'Highlights', 'Sent', 'Games'];
+
+// Stable palette for team avatars (hashed by team id below).
+const AVATAR_COLORS = ['#534AB7', '#1D9E75', '#D85A30', '#1A6FD4', '#7D3C98', '#C0392B'];
+
+// Mirrors context.tsx's ROLE_RANK (not exported there). Used only to show the
+// HIGHEST role per team in the rail. Keep in sync if the enum changes.
+const ROLE_RANK: Record<string, number> = {
+  admin: 6, head_coach: 5, coach: 4, parent: 3, player: 2, follower: 1,
+};
+
+function teamColor(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
 
 export default function SelectTeamScreen() {
+  const insets = useSafeAreaInsets();
   const { userId, userTeams, setActiveTeam, refreshTeams } = useTeamContext();
   const [showNewTeam, setShowNewTeam] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamSport, setNewTeamSport] = useState('Basketball');
   const [creating, setCreating] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState('All');
 
-  // userTeams can have duplicate team_id when the user holds multiple roles on
-  // the same team (UNIQUE key is (team_id, user_id, role)). Show one card per
-  // team; role chip / highest-role display is a future polish.
-  const uniqueTeams = Array.from(
-    new Map(userTeams.map(t => [t.team_id, t])).values()
-  );
+  // One entry per team, keeping the HIGHEST-ranked role (a user can hold several
+  // roles on one team — UNIQUE key is (team_id, user_id, role)).
+  const teamMap = new Map<string, (typeof userTeams)[number]>();
+  for (const t of userTeams) {
+    const existing = teamMap.get(t.team_id);
+    if (!existing || (ROLE_RANK[t.role] ?? 0) > (ROLE_RANK[existing.role] ?? 0)) {
+      teamMap.set(t.team_id, t);
+    }
+  }
+  const uniqueTeams = Array.from(teamMap.values());
 
   async function createTeam() {
     if (!newTeamName.trim()) { Alert.alert('Enter a team name'); return; }
@@ -35,12 +61,9 @@ export default function SelectTeamScreen() {
       return;
     }
 
-    // Two-step write: team insert succeeded. If the membership insert fails,
-    // best-effort delete the just-created team to avoid leaving an orphan.
-    // The cleanup delete itself isn't guaranteed (network may stay flaky),
-    // but the common case — a transient failure on the second write — is
-    // covered. Right long-term fix is a DB trigger that creates the admin
-    // membership atomically on team insert; belongs in Step 3 alongside RLS.
+    // Two-step write: if the membership insert fails, best-effort delete the
+    // just-created team to avoid an orphan. (Long-term fix: a DB trigger that
+    // creates the admin membership atomically on team insert.)
     const { error: memberError } = await supabase
       .from('team_memberships')
       .insert({ team_id: team.id, user_id: userId, role: 'admin', status: 'confirmed' });
@@ -64,74 +87,195 @@ export default function SelectTeamScreen() {
     router.replace('/');
   }
 
-  return (
-    <View style={styles.container}>
-      <Text style={styles.title}>🏀 IamSports</Text>
-      <Text style={styles.subtitle}>Pick a team</Text>
+  // Create-team form (unchanged logic, dark-themed).
+  if (showNewTeam) {
+    return (
+      <View style={[styles.formScreen, { paddingTop: insets.top + 20 }]}>
+        <Text style={styles.formTitle}>New team</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Team name (e.g. Travel Team)"
+          placeholderTextColor="#888"
+          value={newTeamName}
+          onChangeText={setNewTeamName}
+          autoFocus
+          editable={!creating}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Sport (e.g. Basketball)"
+          placeholderTextColor="#888"
+          value={newTeamSport}
+          onChangeText={setNewTeamSport}
+          editable={!creating}
+        />
+        <TouchableOpacity style={styles.saveBtn} onPress={createTeam} disabled={creating}>
+          <Text style={styles.saveBtnText}>{creating ? 'Creating…' : 'Create Team'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setShowNewTeam(false)} disabled={creating}>
+          <Text style={styles.cancel}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
-      {showNewTeam ? (
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Team name (e.g. Travel Team)"
-            value={newTeamName}
-            onChangeText={setNewTeamName}
-            autoFocus
-            editable={!creating}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Sport (e.g. Basketball)"
-            value={newTeamSport}
-            onChangeText={setNewTeamSport}
-            editable={!creating}
-          />
-          <TouchableOpacity style={styles.saveBtn} onPress={createTeam} disabled={creating}>
-            <Text style={styles.saveBtnText}>{creating ? 'Creating…' : 'Create Team'}</Text>
+  return (
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.brand}>🏀 IamSports</Text>
+        <View style={styles.headerIcons}>
+          <TouchableOpacity style={styles.iconBtn}>
+            <Ionicons name="search-outline" size={22} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setShowNewTeam(false)} disabled={creating}>
-            <Text style={styles.cancel}>Cancel</Text>
+          <TouchableOpacity style={styles.iconBtn}>
+            <Ionicons name="notifications-outline" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
-      ) : (
-        <>
-          <FlatList
-            data={uniqueTeams}
-            keyExtractor={item => item.team_id}
-            renderItem={({ item }) => (
-              <TouchableOpacity style={styles.card} onPress={() => selectTeam(item.team_id)}>
-                <View>
-                  <Text style={styles.cardTitle}>{item.name}</Text>
-                  <Text style={styles.cardSub}>{item.sport}</Text>
-                </View>
-                <Text style={styles.cardArrow}>→</Text>
-              </TouchableOpacity>
-            )}
-            ListEmptyComponent={<Text style={styles.empty}>No teams yet. Create your first one below!</Text>}
-          />
-          <TouchableOpacity style={styles.newBtn} onPress={() => setShowNewTeam(true)}>
-            <Text style={styles.newBtnText}>+ Create Team</Text>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <Text style={styles.sectionLabel}>Your teams</Text>
+
+        {/* Team rail */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.rail}
+        >
+          {uniqueTeams.map(team => (
+            <TouchableOpacity
+              key={team.team_id}
+              style={styles.teamItem}
+              onPress={() => selectTeam(team.team_id)}
+            >
+              <View style={[styles.avatar, { backgroundColor: teamColor(team.team_id) }]}>
+                <Text style={styles.avatarText}>
+                  {team.name.trim().charAt(0).toUpperCase() || '🏀'}
+                </Text>
+              </View>
+              <Text style={styles.teamName} numberOfLines={2}>{team.name}</Text>
+              <Text style={styles.teamRole}>{team.role}</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={styles.teamItem} onPress={() => setShowNewTeam(true)}>
+            <View style={[styles.avatar, styles.avatarAdd]}>
+              <Ionicons name="add" size={28} color="#534AB7" />
+            </View>
+            <Text style={styles.teamName}>New team</Text>
           </TouchableOpacity>
-        </>
-      )}
+        </ScrollView>
+
+        {/* Filter chips (visual only) */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}
+        >
+          {FILTERS.map(f => {
+            const active = selectedFilter === f;
+            return (
+              <TouchableOpacity
+                key={f}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => setSelectedFilter(f)}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{f}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {/* Body placeholder */}
+        {uniqueTeams.length === 0 ? (
+          <Text style={styles.empty}>No teams yet — tap “New team” to get started.</Text>
+        ) : (
+          <View style={styles.feedPlaceholder}>
+            <Text style={styles.feedPlaceholderText}>Your feed will appear here.</Text>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Bottom nav */}
+      <View style={[styles.bottomNav, { paddingBottom: insets.bottom + 8 }]}>
+        <TouchableOpacity style={styles.navItem}>
+          <Ionicons name="home" size={24} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.navItem}>
+          <Ionicons name="search" size={24} color="#888" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.navCenter} onPress={() => setShowNewTeam(true)}>
+          <Ionicons name="add" size={30} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.navItem}>
+          <Ionicons name="folder-outline" size={24} color="#888" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.navItem}>
+          <Ionicons name="person-outline" size={24} color="#888" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: '#fff' },
-  title: { fontSize: 32, fontWeight: '700', marginBottom: 4 },
-  subtitle: { fontSize: 18, color: '#666', marginBottom: 32 },
-  card: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardTitle: { fontSize: 18, fontWeight: '600' },
-  cardSub: { fontSize: 13, color: '#888', marginTop: 2 },
-  cardArrow: { fontSize: 20, color: '#888' },
-  form: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 16 },
-  input: { backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 10, fontSize: 16, borderWidth: 1, borderColor: '#ddd' },
-  saveBtn: { backgroundColor: '#534AB7', borderRadius: 8, padding: 14, alignItems: 'center', marginBottom: 8 },
+  container: { flex: 1, backgroundColor: '#000' },
+  header: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingVertical: 12,
+  },
+  brand: { fontSize: 22, fontWeight: '700', color: '#fff' },
+  headerIcons: { flexDirection: 'row', gap: 4 },
+  iconBtn: { padding: 6 },
+
+  body: { paddingHorizontal: 20, paddingBottom: 24 },
+  sectionLabel: {
+    color: '#aaa', fontSize: 13, fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 8, marginBottom: 14,
+  },
+
+  rail: { gap: 16, paddingRight: 8 },
+  teamItem: { alignItems: 'center', width: 96 },
+  avatar: {
+    width: 60, height: 60, borderRadius: 30,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 6,
+  },
+  avatarText: { color: '#fff', fontSize: 24, fontWeight: '700' },
+  avatarAdd: { backgroundColor: 'transparent', borderWidth: 2, borderColor: '#534AB7', borderStyle: 'dashed' },
+  teamName: { color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  teamRole: { color: '#888', fontSize: 11, textAlign: 'center', textTransform: 'capitalize' },
+
+  chipRow: { gap: 8, paddingVertical: 18, paddingRight: 8 },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18,
+    backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333',
+  },
+  chipActive: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
+  chipText: { color: '#aaa', fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: '#fff' },
+
+  feedPlaceholder: { paddingVertical: 60, alignItems: 'center' },
+  feedPlaceholderText: { color: '#555', fontSize: 14 },
+  empty: { color: '#888', textAlign: 'center', marginTop: 40, fontSize: 15 },
+
+  bottomNav: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around',
+    borderTopWidth: 1, borderTopColor: '#222', backgroundColor: '#0a0a0a', paddingTop: 8,
+  },
+  navItem: { padding: 8, minWidth: 48, alignItems: 'center' },
+  navCenter: {
+    width: 56, height: 56, borderRadius: 28, backgroundColor: '#534AB7',
+    alignItems: 'center', justifyContent: 'center', marginTop: -20,
+    shadowColor: '#534AB7', shadowOpacity: 0.5, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 6,
+  },
+
+  formScreen: { flex: 1, backgroundColor: '#000', paddingHorizontal: 20 },
+  formTitle: { color: '#fff', fontSize: 28, fontWeight: '700', marginBottom: 24 },
+  input: {
+    backgroundColor: '#1a1a1a', borderRadius: 8, padding: 14, marginBottom: 12,
+    fontSize: 16, borderWidth: 1, borderColor: '#333', color: '#fff',
+  },
+  saveBtn: { backgroundColor: '#534AB7', borderRadius: 8, padding: 16, alignItems: 'center', marginTop: 8, marginBottom: 12 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   cancel: { textAlign: 'center', color: '#888', fontSize: 14 },
-  newBtn: { backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
-  newBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  empty: { textAlign: 'center', color: '#888', marginTop: 40, fontSize: 16 },
 });
