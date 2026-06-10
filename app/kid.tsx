@@ -22,7 +22,7 @@ const TABS = [
 
 export default function KidWallScreen() {
   const insets = useSafeAreaInsets();
-  const { refreshKids } = useTeamContext();
+  const { refreshKids, userTeams } = useTeamContext();
   const params = useLocalSearchParams();
   const playerId = Array.isArray(params.playerId) ? params.playerId[0] : params.playerId;
 
@@ -35,6 +35,20 @@ export default function KidWallScreen() {
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [kidTeams, setKidTeams] = useState<{ team_id: string; name: string; jersey_number: string | null }[]>([]);
+  const [showAddTeam, setShowAddTeam] = useState(false);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [jerseyInput, setJerseyInput] = useState('');
+  const [attaching, setAttaching] = useState(false);
+
+  // Viewer's teams where they can attach players (coaching roles), deduped.
+  const coachingTeams = Array.from(
+    new Map(
+      userTeams
+        .filter(t => t.role === 'admin' || t.role === 'head_coach' || t.role === 'coach')
+        .map(t => [t.team_id, t])
+    ).values()
+  );
 
   // Load this one kid's row (read allowed via the is_linked_parent branch),
   // then mint a signed URL for the photo if there is one.
@@ -64,6 +78,47 @@ export default function KidWallScreen() {
     })();
     return () => { cancelled = true; };
   }, [playerId]);
+
+  // Load the kid's current teams (player_teams → teams). The team NAME is gated
+  // by teams_read RLS, so teams the viewer can't read are filtered out.
+  async function loadTeams() {
+    if (!playerId) return;
+    const { data } = await supabase
+      .from('player_teams')
+      .select('team_id, jersey_number, teams ( name )')
+      .eq('player_id', playerId);
+    const rows = (data || [])
+      .filter((r: any) => r.teams)
+      .map((r: any) => ({ team_id: r.team_id, name: r.teams.name, jersey_number: r.jersey_number ?? null }));
+    setKidTeams(rows);
+  }
+
+  useEffect(() => {
+    loadTeams();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerId]);
+
+  // Attach the kid to the selected team (coach/admin only — enforced by the
+  // attach_kid_to_team RPC). Idempotent: re-attaching updates the jersey.
+  async function attachToTeam() {
+    if (!playerId || !selectedTeamId) return;
+    setAttaching(true);
+    const { error } = await supabase.rpc('attach_kid_to_team', {
+      p_player_id: playerId,
+      p_team_id: selectedTeamId,
+      p_jersey_number: jerseyInput.trim() || null,
+    });
+    if (error) {
+      Alert.alert('Error', error.message);
+      setAttaching(false);
+      return;
+    }
+    await loadTeams();
+    setAttaching(false);
+    setShowAddTeam(false);
+    setSelectedTeamId(null);
+    setJerseyInput('');
+  }
 
   // Pick → one-shot upload to the private Videos bucket (kid-photos/<id>/<ts>.jpg)
   // with the user's JWT (mirrors game.tsx) → save the path via set_kid_photo RPC
@@ -179,6 +234,60 @@ export default function KidWallScreen() {
     );
   }
 
+  // Add-to-team picker (coaching teams + optional jersey).
+  if (showAddTeam) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
+        <TouchableOpacity
+          onPress={() => { setShowAddTeam(false); setSelectedTeamId(null); setJerseyInput(''); }}
+          style={styles.back}
+        >
+          <Text style={styles.backText}>← Cancel</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>Add to team</Text>
+        {coachingTeams.length === 0 ? (
+          <Text style={styles.sports}>You don&apos;t coach or admin any teams.</Text>
+        ) : (
+          <ScrollView keyboardShouldPersistTaps="handled">
+            {coachingTeams.map(t => {
+              const selected = selectedTeamId === t.team_id;
+              const already = kidTeams.some(kt => kt.team_id === t.team_id);
+              return (
+                <TouchableOpacity
+                  key={t.team_id}
+                  style={[styles.teamRow, selected && styles.teamRowActive]}
+                  onPress={() => setSelectedTeamId(t.team_id)}
+                >
+                  <View>
+                    <Text style={styles.teamRowName}>{t.name}</Text>
+                    <Text style={styles.teamRowRole}>{t.role}{already ? ' · already added' : ''}</Text>
+                  </View>
+                  {selected && <Ionicons name="checkmark-circle" size={20} color="#534AB7" />}
+                </TouchableOpacity>
+              );
+            })}
+            <Text style={styles.label}>Jersey number (optional)</Text>
+            <TextInput
+              style={styles.input}
+              value={jerseyInput}
+              onChangeText={setJerseyInput}
+              placeholder="e.g. 32"
+              placeholderTextColor="#888"
+              editable={!attaching}
+            />
+            <TouchableOpacity
+              style={[styles.saveBtn, (!selectedTeamId || attaching) && styles.saveBtnDisabled]}
+              onPress={attachToTeam}
+              disabled={!selectedTeamId || attaching}
+            >
+              <Text style={styles.saveBtnText}>{attaching ? 'Adding…' : 'Add to team'}</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        )}
+      </View>
+    );
+  }
+
   // Wall.
   return (
     <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
@@ -219,8 +328,24 @@ export default function KidWallScreen() {
         </TouchableOpacity>
         <Text style={styles.name}>{name}</Text>
         {gradClass ? <Text style={styles.grad}>{gradClass}</Text> : null}
-        {/* Sports row — placeholder until sports data is wired. */}
-        <Text style={styles.sports}>No sports yet</Text>
+        {/* Teams the kid is on (player_teams), with per-team jersey. */}
+        {kidTeams.length > 0 ? (
+          <View style={styles.teamChips}>
+            {kidTeams.map(t => (
+              <View key={t.team_id} style={styles.teamChip}>
+                <Text style={styles.teamChipText}>
+                  {t.name}{t.jersey_number ? ` · #${t.jersey_number}` : ''}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.sports}>No sports yet</Text>
+        )}
+        <TouchableOpacity style={styles.addTeamBtn} onPress={() => setShowAddTeam(true)}>
+          <Ionicons name="add" size={16} color="#534AB7" />
+          <Text style={styles.addTeamText}>Add to team</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Filter bar */}
@@ -277,6 +402,16 @@ const styles = StyleSheet.create({
   name: { color: '#fff', fontSize: 26, fontWeight: '700', textAlign: 'center' },
   grad: { color: '#aaa', fontSize: 14, marginTop: 4, textAlign: 'center' },
   sports: { color: '#666', fontSize: 13, marginTop: 8, textAlign: 'center' },
+  teamChips: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6, marginTop: 8 },
+  teamChip: { backgroundColor: '#1a1a1a', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#333' },
+  teamChipText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  addTeamBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12, paddingVertical: 6 },
+  addTeamText: { color: '#534AB7', fontSize: 14, fontWeight: '600' },
+  teamRow: { backgroundColor: '#1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#333', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  teamRowActive: { borderColor: '#534AB7', backgroundColor: '#1f1a33' },
+  teamRowName: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  teamRowRole: { color: '#888', fontSize: 12, textTransform: 'capitalize' },
+  saveBtnDisabled: { opacity: 0.5 },
 
   filterBarWrap: { flexGrow: 0, borderBottomWidth: 1, borderBottomColor: '#222' },
   filterBar: { gap: 20, paddingRight: 8 },
