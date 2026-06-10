@@ -313,7 +313,7 @@ export default function SelectTeamScreen() {
         <TouchableOpacity style={styles.navItem}>
           <Ionicons name="search" size={24} color="#888" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navCenter} onPress={() => setShowNewTeam(true)}>
+        <TouchableOpacity style={styles.navCenter} onPress={() => router.push('/upload')}>
           <Ionicons name="add" size={30} color="#fff" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.navItem}>

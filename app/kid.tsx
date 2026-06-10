@@ -8,7 +8,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getFreshToken, SUPABASE_STORAGE_URL } from './game';
+import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
 import { initials, teamColor } from './select-team';
 
 // Wall filter tabs — placeholders for now (selecting just highlights).
@@ -345,6 +345,13 @@ export default function KidWallScreen() {
         <TouchableOpacity style={styles.addTeamBtn} onPress={() => setShowAddTeam(true)}>
           <Ionicons name="add" size={16} color="#534AB7" />
           <Text style={styles.addTeamText}>Add to team</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.addTeamBtn}
+          onPress={() => router.push({ pathname: '/upload', params: { playerId } })}
+        >
+          <Ionicons name="cloud-upload-outline" size={16} color="#534AB7" />
+          <Text style={styles.addTeamText}>Upload to {name || 'this kid'}</Text>
         </TouchableOpacity>
       </View>
 

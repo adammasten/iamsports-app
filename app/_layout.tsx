@@ -98,6 +98,7 @@ export default function RootLayout() {
           <Stack.Screen name="export" options={{ headerShown: false }} />
           <Stack.Screen name="select-team" options={{ headerShown: false }} />
           <Stack.Screen name="kid" options={{ headerShown: false }} />
+          <Stack.Screen name="upload" options={{ headerShown: false }} />
         </Stack>
         <AuthGate />
         <StatusBar style="auto" />

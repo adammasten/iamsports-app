@@ -50,6 +50,9 @@ export default function TaggingOverlayScreen() {
   const params = useLocalSearchParams();
   const remoteUrl = Array.isArray(params.url) ? params.url[0] : params.url;
   const videoId = Array.isArray(params.videoId) ? params.videoId[0] : params.videoId;
+  // Personal (no-team) tagging session — forces clip team_id null regardless of
+  // whether the user happens to have an activeTeam selected.
+  const isPersonal = (Array.isArray(params.personal) ? params.personal[0] : params.personal) === '1';
   const startAt = params.startAt
     ? parseFloat(Array.isArray(params.startAt) ? params.startAt[0] : (params.startAt as string))
     : null;
@@ -500,8 +503,8 @@ export default function TaggingOverlayScreen() {
     // V3 requirement: clips.team_id is nullable; omitting it silently misfiles
     // the clip as a personal upload. Both team_id and created_by_user_id must
     // be wired on every team-context save.
-    if (!activeTeam || !userId) {
-      Alert.alert('No team selected', 'Pick a team before saving clips.');
+    if (!userId) {
+      Alert.alert('Not signed in');
       return;
     }
     setSaving(true);
@@ -510,7 +513,7 @@ export default function TaggingOverlayScreen() {
       .from('clips')
       .insert({
         video_id: videoId,
-        team_id: activeTeam.id,
+        team_id: isPersonal ? null : (activeTeam ? activeTeam.id : null),
         created_by_user_id: userId,
         start_time: startTime,
         end_time: endTime,
