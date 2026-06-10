@@ -40,6 +40,13 @@ export default function KidWallScreen() {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [jerseyInput, setJerseyInput] = useState('');
   const [attaching, setAttaching] = useState(false);
+  // Inbox ("Shared with you") — player-audience shares targeting this kid.
+  const [inbox, setInbox] = useState<{
+    shareId: string; contentType: string; contentId: string;
+    sharedBy: string | null; createdAt: string; title: string;
+    storagePath: string | null; startTime: number | null; endTime: number | null;
+  }[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
 
   // Viewer's teams where they can attach players (coaching roles), deduped.
   const coachingTeams = Array.from(
@@ -118,6 +125,68 @@ export default function KidWallScreen() {
     setShowAddTeam(false);
     setSelectedTeamId(null);
     setJerseyInput('');
+  }
+
+  // Load the kid's inbox: shares to them (audience='player'), each resolved to
+  // its content via the resolve_shared_content RPC (title + storage path).
+  async function loadInbox() {
+    if (!playerId) return;
+    setInboxLoading(true);
+    const { data: rows } = await supabase
+      .from('shares')
+      .select('id, content_type, content_id, shared_by_user_id, created_at')
+      .eq('target_player_id', playerId)
+      .eq('audience', 'player')
+      .order('created_at', { ascending: false });
+    const items = await Promise.all((rows || []).map(async (r: any) => {
+      const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
+      const c = Array.isArray(resolved) ? resolved[0] : null;
+      return {
+        shareId: r.id,
+        contentType: r.content_type,
+        contentId: r.content_id,
+        sharedBy: r.shared_by_user_id ?? null,
+        createdAt: r.created_at,
+        title: c?.title ?? '(content unavailable)',
+        storagePath: c?.storage_path ?? null,
+        startTime: c?.start_time ?? null,
+        endTime: c?.end_time ?? null,
+      };
+    }));
+    setInbox(items);
+    setInboxLoading(false);
+  }
+
+  // Load the inbox when the "Shared with you" tab is active.
+  useEffect(() => {
+    if (selectedTab === 'shared') loadInbox();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTab, playerId]);
+
+  function openShared(item: typeof inbox[number]) {
+    if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
+    router.push({
+      pathname: '/shared-viewer',
+      params: {
+        title: item.title,
+        storagePath: item.storagePath,
+        startTime: item.startTime != null ? String(item.startTime) : '',
+        endTime: item.endTime != null ? String(item.endTime) : '',
+      },
+    });
+  }
+
+  // Save an inbox item to the kid's wall (audience 'public' for now).
+  async function saveToWall(item: typeof inbox[number]) {
+    if (!playerId) return;
+    const { error } = await supabase.rpc('post_to_wall', {
+      p_content_type: item.contentType,
+      p_content_id: item.contentId,
+      p_audience: 'public',
+      p_target_player_id: playerId,
+    });
+    if (error) Alert.alert('Error', error.message);
+    else Alert.alert('Saved to wall', `“${item.title}” is on ${name || 'the'} wall.`);
   }
 
   // Pick → one-shot upload to the private Videos bucket (kid-photos/<id>/<ts>.jpg)
@@ -375,8 +444,32 @@ export default function KidWallScreen() {
       </ScrollView>
 
       {/* Content */}
-      <View style={styles.content}>
-        <Text style={styles.empty}>Nothing here yet</Text>
+      <View style={[styles.content, selectedTab === 'shared' && inbox.length > 0 && styles.contentTop]}>
+        {selectedTab === 'shared' ? (
+          inboxLoading ? (
+            <ActivityIndicator size="large" color="#534AB7" />
+          ) : inbox.length === 0 ? (
+            <Text style={styles.empty}>Nothing shared yet</Text>
+          ) : (
+            <ScrollView style={styles.inboxList} contentContainerStyle={{ paddingBottom: 20 }}>
+              {inbox.map(item => (
+                <View key={item.shareId} style={styles.inboxCard}>
+                  <TouchableOpacity style={styles.inboxMain} onPress={() => openShared(item)}>
+                    <Text style={styles.inboxTitle} numberOfLines={1}>{item.title}</Text>
+                    <Text style={styles.inboxMeta}>
+                      From {item.sharedBy ? item.sharedBy.slice(0, 8) + '…' : 'unknown'} · {new Date(item.createdAt).toLocaleDateString()}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.saveWallBtn} onPress={() => saveToWall(item)}>
+                    <Text style={styles.saveWallText}>Save to wall</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          )
+        ) : (
+          <Text style={styles.empty}>Nothing here yet</Text>
+        )}
       </View>
     </View>
   );
@@ -428,7 +521,15 @@ const styles = StyleSheet.create({
   tabUnderline: { height: 2, backgroundColor: '#534AB7', alignSelf: 'stretch', marginTop: 8 },
 
   content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  contentTop: { alignItems: 'stretch', justifyContent: 'flex-start', paddingTop: 16 },
   empty: { color: '#555', fontSize: 15 },
+  inboxList: { alignSelf: 'stretch' },
+  inboxCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#333' },
+  inboxMain: { flex: 1, paddingRight: 10 },
+  inboxTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  inboxMeta: { color: '#888', fontSize: 12, marginTop: 4 },
+  saveWallBtn: { backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12 },
+  saveWallText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
   badge: { minWidth: 16, height: 16, borderRadius: 8, backgroundColor: '#D85A30', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
