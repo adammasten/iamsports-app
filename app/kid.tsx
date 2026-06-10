@@ -1,10 +1,14 @@
 import { useTeamContext } from '@/context';
+import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getFreshToken, SUPABASE_STORAGE_URL } from './game';
 import { initials, teamColor } from './select-team';
 
 // Wall filter tabs — placeholders for now (selecting just highlights).
@@ -28,15 +32,19 @@ export default function KidWallScreen() {
   const [name, setName] = useState('');
   const [gradClass, setGradClass] = useState('');
   const [selectedTab, setSelectedTab] = useState('shared');
+  const [photoPath, setPhotoPath] = useState<string | null>(null);
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
-  // Load this one kid's row (read allowed via the is_linked_parent branch).
+  // Load this one kid's row (read allowed via the is_linked_parent branch),
+  // then mint a signed URL for the photo if there is one.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!playerId) { setLoading(false); return; }
       const { data, error } = await supabase
         .from('players')
-        .select('id, name, grad_class')
+        .select('id, name, grad_class, photo_path')
         .eq('id', playerId)
         .single();
       if (cancelled) return;
@@ -47,13 +55,69 @@ export default function KidWallScreen() {
       }
       setName(data.name ?? '');
       setGradClass(data.grad_class ?? '');
+      setPhotoPath(data.photo_path ?? null);
       setLoading(false);
+      if (data.photo_path) {
+        const signed = await getSignedVideoUrl(data.photo_path);
+        if (!cancelled) setPhotoUri(signed);
+      }
     })();
     return () => { cancelled = true; };
   }, [playerId]);
 
-  // Save via update_kid RPC (SECURITY DEFINER) — direct UPDATE is blocked for a
-  // parent by players_update RLS. Returns to the wall view (no navigation).
+  // Pick → one-shot upload to the private Videos bucket (kid-photos/<id>/<ts>.jpg)
+  // with the user's JWT (mirrors game.tsx) → save the path via set_kid_photo RPC
+  // → re-sign for immediate display.
+  async function pickAndUploadPhoto() {
+    if (!playerId) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Allow photo access to set a photo.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+
+    setUploadingPhoto(true);
+    try {
+      const token = await getFreshToken();
+      const dest = `kid-photos/${playerId}/${Date.now()}.jpg`;
+      const res = await FileSystem.uploadAsync(
+        `${SUPABASE_STORAGE_URL}/storage/v1/object/Videos/${dest}`,
+        asset.uri,
+        {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          headers: {
+            authorization: `Bearer ${token}`,
+            'content-type': 'image/jpeg',
+            'x-upsert': 'true',
+          },
+        }
+      );
+      if (res.status !== 200) {
+        throw new Error(`Upload failed: ${res.status} ${(res.body || '').slice(0, 200)}`);
+      }
+      const { error } = await supabase.rpc('set_kid_photo', { player_id: playerId, photo_path: dest });
+      if (error) throw new Error(error.message);
+
+      setPhotoPath(dest);
+      const signed = await getSignedVideoUrl(dest);
+      setPhotoUri(signed);
+    } catch (e: any) {
+      Alert.alert('Photo error', e?.message ?? 'Could not set photo');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
+
+  // Save name/grad via update_kid RPC. Returns to the wall view.
   async function save() {
     if (!name.trim()) { Alert.alert("Enter the kid's name"); return; }
     if (!playerId) return;
@@ -81,7 +145,7 @@ export default function KidWallScreen() {
     );
   }
 
-  // Edit form (name + grad class) — mirrors the create/add-kid forms.
+  // Edit form (name + grad class).
   if (editing) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
@@ -115,7 +179,7 @@ export default function KidWallScreen() {
     );
   }
 
-  // Wall (stub).
+  // Wall.
   return (
     <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
       <View style={styles.topRow}>
@@ -128,12 +192,31 @@ export default function KidWallScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Header: avatar + name + grad class + sports row */}
+      {/* Header: tappable avatar (photo or initials) + name + grad + sports */}
       <View style={styles.headerBlock}>
-        <View style={[styles.avatar, { backgroundColor: teamColor(playerId || name) }]}>
-          {/* A photo could replace this initials text later. */}
-          <Text style={styles.avatarText}>{initials(name)}</Text>
-        </View>
+        <TouchableOpacity
+          onPress={pickAndUploadPhoto}
+          disabled={uploadingPhoto}
+          activeOpacity={0.8}
+          style={styles.avatarWrap}
+        >
+          {photoUri ? (
+            <Image source={{ uri: photoUri }} style={styles.avatarImage} />
+          ) : (
+            <View style={[styles.avatar, { backgroundColor: teamColor(playerId || name) }]}>
+              <Text style={styles.avatarText}>{initials(name)}</Text>
+            </View>
+          )}
+          {uploadingPhoto ? (
+            <View style={styles.avatarOverlay}>
+              <ActivityIndicator color="#fff" />
+            </View>
+          ) : (
+            <View style={styles.cameraBadge}>
+              <Ionicons name="camera" size={14} color="#fff" />
+            </View>
+          )}
+        </TouchableOpacity>
         <Text style={styles.name}>{name}</Text>
         {gradClass ? <Text style={styles.grad}>{gradClass}</Text> : null}
         {/* Sports row — placeholder until sports data is wired. */}
@@ -178,8 +261,19 @@ const styles = StyleSheet.create({
   editText: { color: '#534AB7', fontSize: 16 },
 
   headerBlock: { alignItems: 'center', marginTop: 8, marginBottom: 20 },
-  avatar: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  avatarWrap: { width: 84, height: 84, marginBottom: 12 },
+  avatar: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center' },
+  avatarImage: { width: 84, height: 84, borderRadius: 42, backgroundColor: '#1a1a1a' },
   avatarText: { color: '#fff', fontSize: 32, fontWeight: '700' },
+  avatarOverlay: {
+    position: 'absolute', width: 84, height: 84, borderRadius: 42,
+    backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center',
+  },
+  cameraBadge: {
+    position: 'absolute', right: 0, bottom: 0, width: 26, height: 26, borderRadius: 13,
+    backgroundColor: '#534AB7', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#000',
+  },
   name: { color: '#fff', fontSize: 26, fontWeight: '700', textAlign: 'center' },
   grad: { color: '#aaa', fontSize: 14, marginTop: 4, textAlign: 'center' },
   sports: { color: '#666', fontSize: 13, marginTop: 8, textAlign: 'center' },
@@ -194,11 +288,9 @@ const styles = StyleSheet.create({
   content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   empty: { color: '#555', fontSize: 15 },
 
-  // Reserved for future unseen-count badges on the filter tabs (not rendered yet).
   badge: { minWidth: 16, height: 16, borderRadius: 8, backgroundColor: '#D85A30', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
 
-  // Edit form (reused from the previous kid.tsx).
   title: { color: '#fff', fontSize: 28, fontWeight: '700', marginBottom: 24, marginTop: 8 },
   label: { color: '#aaa', fontSize: 13, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
   input: { backgroundColor: '#1a1a1a', borderRadius: 8, padding: 14, marginBottom: 18, fontSize: 16, borderWidth: 1, borderColor: '#333', color: '#fff' },

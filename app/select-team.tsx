@@ -1,9 +1,10 @@
 import { useTeamContext } from '@/context';
+import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Visual-only filter chips for now — wiring to real data is a later task.
@@ -43,6 +44,8 @@ export default function SelectTeamScreen() {
   const [showNewKid, setShowNewKid] = useState(false);
   const [newKidName, setNewKidName] = useState('');
   const [creatingKid, setCreatingKid] = useState(false);
+  // player_id -> signed photo URL, minted from each kid's photo_path.
+  const [kidPhotoUris, setKidPhotoUris] = useState<Record<string, string>>({});
 
   // One entry per team, keeping the HIGHEST-ranked role (a user can hold several
   // roles on one team — UNIQUE key is (team_id, user_id, role)).
@@ -97,6 +100,24 @@ export default function SelectTeamScreen() {
     setActiveTeam(teamId);
     router.replace('/');
   }
+
+  // Mint signed URLs for kids that have a photo. Re-runs when userKids changes
+  // (e.g. after refreshKids); signed URLs are short-lived so re-minting is fine.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const withPhotos = userKids.filter(k => k.photo_path);
+      if (withPhotos.length === 0) { setKidPhotoUris({}); return; }
+      const entries = await Promise.all(
+        withPhotos.map(async k => [k.player_id, await getSignedVideoUrl(k.photo_path as string)] as const)
+      );
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      for (const [id, url] of entries) { if (url) map[id] = url; }
+      setKidPhotoUris(map);
+    })();
+    return () => { cancelled = true; };
+  }, [userKids]);
 
   // Add a kid via the create_kid RPC (SECURITY DEFINER) — it creates a teamless
   // player and links the current user as 'parent' atomically, bypassing the
@@ -203,11 +224,15 @@ export default function SelectTeamScreen() {
               style={styles.teamItem}
               onPress={() => router.push({ pathname: '/kid', params: { playerId: kid.player_id } })}
             >
-              <View style={[styles.avatar, { backgroundColor: teamColor(kid.player_id) }]}>
-                <Text style={styles.avatarText}>
-                  {kid.jersey_number ? kid.jersey_number : initials(kid.name)}
-                </Text>
-              </View>
+              {kidPhotoUris[kid.player_id] ? (
+                <Image source={{ uri: kidPhotoUris[kid.player_id] }} style={styles.avatarImage} />
+              ) : (
+                <View style={[styles.avatar, { backgroundColor: teamColor(kid.player_id) }]}>
+                  <Text style={styles.avatarText}>
+                    {kid.jersey_number ? kid.jersey_number : initials(kid.name)}
+                  </Text>
+                </View>
+              )}
               <Text style={styles.teamName} numberOfLines={2}>{kid.name}</Text>
             </TouchableOpacity>
           ))}
@@ -324,6 +349,7 @@ const styles = StyleSheet.create({
     width: 60, height: 60, borderRadius: 30,
     alignItems: 'center', justifyContent: 'center', marginBottom: 6,
   },
+  avatarImage: { width: 60, height: 60, borderRadius: 30, marginBottom: 6, backgroundColor: '#1a1a1a' },
   avatarText: { color: '#fff', fontSize: 24, fontWeight: '700' },
   avatarAdd: { backgroundColor: 'transparent', borderWidth: 2, borderColor: '#534AB7', borderStyle: 'dashed' },
   teamName: { color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' },

@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as tus from 'tus-js-client';
 
-const SUPABASE_STORAGE_URL = 'https://wscfpkaltajnrhiusoze.storage.supabase.co';
+export const SUPABASE_STORAGE_URL = 'https://wscfpkaltajnrhiusoze.storage.supabase.co';
 const CHUNK_SIZE = 15 * 1024 * 1024; // 15MB chunks
 const TOKEN_REFRESH_THRESHOLD_SEC = 300; // refresh if < 5 min left on token
 
@@ -22,7 +22,7 @@ function base64ToBytes(base64: string): Uint8Array {
 }
 
 // Get a fresh token, refreshing if it's close to expiring
-async function getFreshToken(forceRefresh = false): Promise<string> {
+export async function getFreshToken(forceRefresh = false): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Not logged in');
 

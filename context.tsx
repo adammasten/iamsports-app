@@ -27,6 +27,7 @@ export type UserKidRow = {
   player_id: string;
   name: string;
   jersey_number: string | null;
+  photo_path: string | null;
   team_id: string;
   relationship: string | null;
 };
@@ -136,7 +137,7 @@ export function TeamProvider({ children }: { children: any }) {
     }
     const { data, error } = await supabase
       .from('parent_player_links')
-      .select('relationship, players ( id, name, jersey_number, team_id )')
+      .select('relationship, players ( id, name, jersey_number, team_id, photo_path )')
       .eq('parent_user_id', userId);
     if (error || !data) {
       setUserKids([]);
@@ -149,6 +150,7 @@ export function TeamProvider({ children }: { children: any }) {
         player_id: r.players.id,
         name: r.players.name,
         jersey_number: r.players.jersey_number ?? null,
+        photo_path: r.players.photo_path ?? null,
         team_id: r.players.team_id,
         relationship: r.relationship ?? null,
       }));
