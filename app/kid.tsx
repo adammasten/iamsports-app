@@ -22,7 +22,7 @@ const TABS = [
 
 export default function KidWallScreen() {
   const insets = useSafeAreaInsets();
-  const { refreshKids, userTeams } = useTeamContext();
+  const { refreshKids, userTeams, userId } = useTeamContext();
   const params = useLocalSearchParams();
   const playerId = Array.isArray(params.playerId) ? params.playerId[0] : params.playerId;
 
@@ -47,6 +47,13 @@ export default function KidWallScreen() {
     storagePath: string | null; startTime: number | null; endTime: number | null;
   }[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
+  // Wall — shares I posted for this kid (audience public/team).
+  const [wall, setWall] = useState<{
+    shareId: string; contentType: string; audience: string; teamName: string | null;
+    createdAt: string; title: string; storagePath: string | null;
+    startTime: number | null; endTime: number | null;
+  }[]>([]);
+  const [wallLoading, setWallLoading] = useState(false);
   // Save-to-wall tier picker.
   const [pickerItem, setPickerItem] = useState<typeof inbox[number] | null>(null);
   const [pickerStage, setPickerStage] = useState<'tier' | 'team'>('tier');
@@ -167,7 +174,58 @@ export default function KidWallScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTab, playerId]);
 
-  function openShared(item: typeof inbox[number]) {
+  // Load the wall: shares I (the current user) posted for this kid, audience
+  // public/team, newest first, each resolved to its content (reuses the inbox
+  // pattern). teams(name) is embedded for the badge (falls back to "Team").
+  async function loadWall() {
+    if (!playerId || !userId) return;
+    setWallLoading(true);
+    const { data: rows } = await supabase
+      .from('shares')
+      .select('id, content_type, audience, team_id, created_at, teams ( name )')
+      .eq('target_player_id', playerId)
+      .eq('shared_by_user_id', userId)
+      .in('audience', ['public'])
+      .order('created_at', { ascending: false });
+    const items = await Promise.all((rows || []).map(async (r: any) => {
+      const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
+      const c = Array.isArray(resolved) ? resolved[0] : null;
+      return {
+        shareId: r.id,
+        contentType: r.content_type,
+        audience: r.audience as string,
+        teamName: r.teams?.name ?? null,
+        createdAt: r.created_at,
+        title: c?.title ?? '(content unavailable)',
+        storagePath: c?.storage_path ?? null,
+        startTime: c?.start_time ?? null,
+        endTime: c?.end_time ?? null,
+      };
+    }));
+    setWall(items);
+    setWallLoading(false);
+  }
+
+  useEffect(() => {
+    if (selectedTab === 'wall') loadWall();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTab, playerId]);
+
+  // Take a post off the wall — delete the share row (RLS allows deleting own).
+  function removeFromWall(shareId: string, title: string) {
+    Alert.alert('Take off wall', `Remove “${title}” from ${name || 'the'} wall?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove', style: 'destructive', onPress: async () => {
+          const { error } = await supabase.from('shares').delete().eq('id', shareId);
+          if (error) Alert.alert('Error', error.message);
+          else loadWall();
+        },
+      },
+    ]);
+  }
+
+  function openShared(item: { title: string; storagePath: string | null; startTime: number | null; endTime: number | null }) {
     if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
     router.push({
       pathname: '/shared-viewer',
@@ -478,7 +536,7 @@ export default function KidWallScreen() {
       </ScrollView>
 
       {/* Content */}
-      <View style={[styles.content, selectedTab === 'shared' && inbox.length > 0 && styles.contentTop]}>
+      <View style={[styles.content, ((selectedTab === 'shared' && inbox.length > 0) || (selectedTab === 'wall' && wall.length > 0)) && styles.contentTop]}>
         {selectedTab === 'shared' ? (
           inboxLoading ? (
             <ActivityIndicator size="large" color="#534AB7" />
@@ -496,6 +554,33 @@ export default function KidWallScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.saveWallBtn} onPress={() => openSaveToWall(item)}>
                     <Text style={styles.saveWallText}>Save to wall</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          )
+        ) : selectedTab === 'wall' ? (
+          wallLoading ? (
+            <ActivityIndicator size="large" color="#534AB7" />
+          ) : wall.length === 0 ? (
+            <Text style={styles.empty}>Nothing on the wall yet</Text>
+          ) : (
+            <ScrollView style={styles.inboxList} contentContainerStyle={{ paddingBottom: 20 }}>
+              {wall.map(item => (
+                <View key={item.shareId} style={styles.inboxCard}>
+                  <TouchableOpacity style={styles.inboxMain} onPress={() => openShared(item)}>
+                    <Text style={styles.inboxTitle} numberOfLines={1}>{item.title}</Text>
+                    <View style={styles.wallMetaRow}>
+                      <View style={styles.audienceBadge}>
+                        <Text style={styles.audienceBadgeText}>
+                          {item.audience === 'public' ? 'Public' : (item.teamName || 'Team')}
+                        </Text>
+                      </View>
+                      <Text style={styles.inboxMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.removeBtn} onPress={() => removeFromWall(item.shareId, item.title)}>
+                    <Ionicons name="trash-outline" size={18} color="#c0392b" />
                   </TouchableOpacity>
                 </View>
               ))}
@@ -599,6 +684,11 @@ const styles = StyleSheet.create({
   inboxMain: { flex: 1, paddingRight: 10 },
   inboxTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   inboxMeta: { color: '#888', fontSize: 12, marginTop: 4 },
+  wallMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
+  audienceBadge: { backgroundColor: '#2a2350', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
+  audienceBadgeText: { color: '#a99cf0', fontSize: 11, fontWeight: '600' },
+  wallDate: { color: '#888', fontSize: 12 },
+  removeBtn: { padding: 8, marginLeft: 6 },
   saveWallBtn: { backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12 },
   saveWallText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
