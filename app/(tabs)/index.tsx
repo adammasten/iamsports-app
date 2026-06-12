@@ -151,6 +151,13 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
+      <TouchableOpacity
+        style={styles.wallBtn}
+        onPress={() => router.push({ pathname: '/team', params: { teamId: activeTeam.id, teamName: activeTeam.name } })}
+      >
+        <Text style={styles.wallBtnText}>Team Wall</Text>
+      </TouchableOpacity>
+
       {showForm && (
         <View style={styles.form}>
           <TextInput
@@ -218,6 +225,8 @@ const styles = StyleSheet.create({
   newGameText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   exportBtn: { flex: 1, backgroundColor: '#1D9E75', borderRadius: 12, padding: 16, alignItems: 'center' },
   exportBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  wallBtn: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: '#534AB7' },
+  wallBtnText: { color: '#534AB7', fontSize: 16, fontWeight: '600' },
   form: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 16 },
   input: { backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 10, fontSize: 16, borderWidth: 1, borderColor: '#ddd' },
   dateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
