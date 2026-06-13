@@ -24,6 +24,19 @@ async function saveActiveJob(jobId: string) {
   } catch {}
 }
 
+// Derive the bare storage object key from a finished-job URL. videos.url stores
+// the object key (path within the private 'Videos' bucket), NOT a full URL —
+// see app/game.tsx. Railway writes exports to the exports/ subfolder, so the key
+// is e.g. "exports/<file>.mp4". Strips everything up to and including "/Videos/"
+// plus any query string (signed-URL token). Falls back to the query-stripped
+// input if no bucket marker is present.
+function deriveStoragePath(url: string): string {
+  const marker = '/Videos/';
+  const idx = url.indexOf(marker);
+  const afterBucket = idx >= 0 ? url.slice(idx + marker.length) : url;
+  return afterBucket.split('?')[0];
+}
+
 async function readActiveJob(): Promise<{ jobId: string; startedAt: number } | null> {
   try {
     const raw = await AsyncStorage.getItem(ACTIVE_JOB_KEY);
@@ -88,6 +101,46 @@ export default function ExportScreen() {
       Alert.alert('Saved! 🎉', 'Your highlight reel has been saved to your camera roll!');
     } else {
       Alert.alert('Export Ready! 🎉', 'Video exported successfully!');
+    }
+  }
+
+  // After a render finishes, persist the export as a highlight_reels row so it
+  // becomes a findable reel. Best-effort: never throws, never blocks the
+  // camera-roll save or success UI. team_id is null for now (reels are
+  // creator-owned; team association is derived later from source clips).
+  async function saveReelRecord(videoUrl: string, includedClipObjects: any[]) {
+    try {
+      if (includedClipObjects.length === 0) return;
+
+      // created_by_user_id is REQUIRED — the RLS creator branch depends on it.
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.warn('[reel] No session user — skipping highlight_reels insert');
+        return;
+      }
+
+      const gameTitles = [...new Set(includedClipObjects.map(c => c.gameTitle).filter(Boolean))];
+      const reelName = gameTitles.length > 0
+        ? `${gameTitles.join(' · ')} Highlights`
+        : `Highlights · ${new Date().toLocaleDateString()}`;
+      const durationSeconds = includedClipObjects.reduce(
+        (sum, c) => sum + Math.max(0, (c.end_time ?? 0) - (c.start_time ?? 0)),
+        0,
+      );
+
+      const { error } = await supabase.from('highlight_reels').insert({
+        created_by_user_id: user.id,
+        team_id: null,
+        name: reelName,
+        storage_path: deriveStoragePath(videoUrl),
+        source_clip_ids: includedClipObjects.map(c => c.id),
+        duration_seconds: durationSeconds,
+        overlay_mode: 'clean',
+        status: 'ready',
+      });
+      if (error) console.warn('[reel] highlight_reels insert failed:', error.message);
+    } catch (e: any) {
+      console.warn('[reel] highlight_reels insert threw:', e?.message || e);
     }
   }
 
@@ -321,15 +374,19 @@ export default function ExportScreen() {
   }
 
   async function handleExport() {
+    console.log('[export] handleExport called');
     setExporting(true);
     setExportStatus('Starting export...');
     setExportProgress(0);
 
-    const includedClips = clips
-      .filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`))
+    const includedClipObjects = clips
+      .filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`));
+    const includedClips = includedClipObjects
       .map(c => ({ url: c.videoUrl, start_time: c.start_time, end_time: c.end_time }));
+    console.log('[export] includedClips count:', includedClips.length, 'first clip:', includedClips[0]);
 
     try {
+      console.log('[export] POSTing to Railway', `${SERVER_URL}/export`, 'clips:', includedClips.length);
       const response = await fetch(`${SERVER_URL}/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -337,7 +394,7 @@ export default function ExportScreen() {
       });
 
       const data = await response.json();
-      if (!response.ok) { Alert.alert('Export failed', data.error || 'Something went wrong'); setExporting(false); return; }
+      if (!response.ok) { console.log('[export] server rejected:', response.status, data); Alert.alert('Export failed', data.error || 'Something went wrong'); setExporting(false); return; }
 
       // Persist before polling so a backgrounded app can resume this job.
       await saveActiveJob(data.jobId);
@@ -345,8 +402,12 @@ export default function ExportScreen() {
       setExportStatus('Processing clips...');
       const videoUrl = await pollJob(data.jobId);
 
+      // Persist the export as a reel (best-effort — must not block the save).
+      await saveReelRecord(videoUrl, includedClipObjects);
+
       await saveExportToLibrary(videoUrl);
     } catch (e: any) {
+      console.log('[export] FAILED:', e);
       Alert.alert('Export error', e.message);
     }
     setExporting(false);
