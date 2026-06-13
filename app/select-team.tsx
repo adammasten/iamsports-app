@@ -319,7 +319,7 @@ export default function SelectTeamScreen() {
         <TouchableOpacity style={styles.navItem}>
           <Ionicons name="folder-outline" size={24} color="#888" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
+        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/my-work')}>
           <Ionicons name="person-outline" size={24} color="#888" />
         </TouchableOpacity>
       </View>
