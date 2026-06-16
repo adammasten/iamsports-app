@@ -293,7 +293,7 @@ export default function MyWorkScreen() {
             {visibleReels.map(reel => (
               <View key={reel.id} style={styles.card}>
                 <TouchableOpacity style={styles.thumb} onPress={() => openReel(reel)}>
-                  <Ionicons name="film-outline" size={22} color="#666" />
+                  <Ionicons name="film-outline" size={30} color="#666" />
                 </TouchableOpacity>
 
                 <View style={styles.cardBody}>
@@ -315,20 +315,23 @@ export default function MyWorkScreen() {
                   )}
 
                   <TouchableOpacity onPress={() => openReel(reel)} activeOpacity={0.7}>
-                    <Text style={styles.cardMeta}>
+                    <Text style={styles.cardMeta} numberOfLines={1}>
                       {formatDuration(reel.durationSeconds)} · {new Date(reel.createdAt).toLocaleDateString()}
                     </Text>
-                    <View style={styles.badgeRow}>{renderBadges(reel.destinations)}</View>
                   </TouchableOpacity>
+
+                  <View style={styles.badgeRow}>{renderBadges(reel.destinations)}</View>
+
+                  <View style={styles.actions}>
+                    <TouchableOpacity style={styles.postBtn} onPress={() => confirmPostToWall(reel)}>
+                      <Text style={styles.postBtnText}>Post to wall</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.trashBtn} onPress={() => confirmDelete(reel)}>
+                      <Ionicons name="trash-outline" size={18} color="#a55" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-
-                <TouchableOpacity style={styles.postBtn} onPress={() => confirmPostToWall(reel)}>
-                  <Text style={styles.postBtnText}>Post to wall</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.trashBtn} onPress={() => confirmDelete(reel)}>
-                  <Ionicons name="trash-outline" size={18} color="#a55" />
-                </TouchableOpacity>
               </View>
             ))}
           </ScrollView>
@@ -367,15 +370,16 @@ const styles = StyleSheet.create({
   list: { alignSelf: 'stretch' },
 
   card: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
+    flexDirection: 'row', alignItems: 'stretch', gap: 12,
     backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginBottom: 10,
     borderWidth: 1, borderColor: '#333',
   },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 },
   thumb: {
-    width: 56, height: 56, borderRadius: 8, backgroundColor: '#0d0d0d',
+    width: 92, minHeight: 92, borderRadius: 10, backgroundColor: '#0d0d0d',
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2a2a2a',
   },
-  cardBody: { flex: 1, gap: 4 },
+  cardBody: { flex: 1, gap: 6 },
   cardTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   cardTitleInput: {
     color: '#fff', fontSize: 15, fontWeight: '600', padding: 0,
@@ -383,7 +387,7 @@ const styles = StyleSheet.create({
   },
   cardMeta: { color: '#888', fontSize: 12 },
 
-  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   badge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, maxWidth: 160,
@@ -397,7 +401,7 @@ const styles = StyleSheet.create({
 
   postBtn: {
     backgroundColor: '#534AB7', borderRadius: 14,
-    paddingHorizontal: 12, paddingVertical: 7,
+    paddingHorizontal: 14, paddingVertical: 6,
   },
   postBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   trashBtn: { padding: 8 },
