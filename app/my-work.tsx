@@ -34,7 +34,7 @@ type SortKey = 'date' | 'name' | 'duration';
 
 export default function MyWorkScreen() {
   const insets = useSafeAreaInsets();
-  const { userId } = useTeamContext();
+  const { userId, userKids } = useTeamContext();
 
   const [reels, setReels] = useState<Reel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,6 +148,40 @@ export default function MyWorkScreen() {
       Alert.alert('Error', error.message);
       setReels(prev => prev.map(r => r.id === reel.id ? { ...r, name: reel.name } : r));
     }
+  }
+
+  // Pick which kid's wall to post to, then post. A reel can be posted to
+  // multiple kids' walls over time, so the button stays available.
+  function confirmPostToWall(reel: Reel) {
+    if (userKids.length === 0) {
+      Alert.alert('No kids yet', 'Add a kid first to post a reel to their wall.');
+      return;
+    }
+    const buttons: any[] = userKids.map(kid => ({
+      text: kid.name,
+      onPress: () => postReelToKid(reel, kid.player_id, kid.name),
+    }));
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Post to wall', 'Whose wall?', buttons);
+  }
+
+  async function postReelToKid(reel: Reel, playerId: string, kidName: string) {
+    // post_to_wall (SECURITY DEFINER) requires the caller be a linked parent of
+    // the target player — true for the user's own kids.
+    const { error } = await supabase.rpc('post_to_wall', {
+      p_content_type: 'reel',
+      p_content_id: reel.id,
+      p_audience: 'public',
+      p_target_player_id: playerId,
+    });
+    if (error) { Alert.alert('Error', error.message); return; }
+    Alert.alert('Posted', `Posted to ${kidName}'s wall`);
+    // Reflect the public placement locally — no full reload.
+    setReels(prev => prev.map(r =>
+      r.id === reel.id && !r.destinations.some(d => d.kind === 'public')
+        ? { ...r, destinations: [...r.destinations, { kind: 'public' }] }
+        : r
+    ));
   }
 
   function confirmDelete(reel: Reel) {
@@ -288,6 +322,10 @@ export default function MyWorkScreen() {
                   </TouchableOpacity>
                 </View>
 
+                <TouchableOpacity style={styles.postBtn} onPress={() => confirmPostToWall(reel)}>
+                  <Text style={styles.postBtnText}>Post to wall</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity style={styles.trashBtn} onPress={() => confirmDelete(reel)}>
                   <Ionicons name="trash-outline" size={18} color="#a55" />
                 </TouchableOpacity>
@@ -357,5 +395,10 @@ const styles = StyleSheet.create({
   badgeLock: { backgroundColor: '#222', borderWidth: 1, borderColor: '#333' },
   badgeLockText: { color: '#888', fontSize: 11, fontWeight: '600' },
 
+  postBtn: {
+    backgroundColor: '#534AB7', borderRadius: 14,
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  postBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   trashBtn: { padding: 8 },
 });
