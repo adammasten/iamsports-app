@@ -6,9 +6,10 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
+import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
 import { initials, teamColor } from './select-team';
 
 // Wall filter tabs — placeholders for now (selecting just highlights).
@@ -55,9 +56,8 @@ export default function KidWallScreen() {
   }[]>([]);
   const [wallLoading, setWallLoading] = useState(false);
   // Save-to-wall tier picker.
-  const [pickerItem, setPickerItem] = useState<typeof inbox[number] | null>(null);
-  const [pickerStage, setPickerStage] = useState<'tier' | 'team'>('tier');
-  const [posting, setPosting] = useState(false);
+  // The inbox item awaiting a visibility choice. Non-null = VisibilityPicker open.
+  const [pendingItem, setPendingItem] = useState<typeof inbox[number] | null>(null);
 
   // Viewer's teams where they can attach players (coaching roles), deduped.
   const coachingTeams = Array.from(
@@ -238,47 +238,56 @@ export default function KidWallScreen() {
     });
   }
 
+  // Open the multi-select VisibilityPicker for this inbox item.
   function openSaveToWall(item: typeof inbox[number]) {
-    setPickerItem(item);
-    setPickerStage('tier');
+    setPendingItem(item);
   }
 
-  // Team tier: 0 → alert, 1 → post directly, >1 → choose. Reuses kidTeams.
-  function chooseTeam() {
-    if (kidTeams.length === 0) {
-      Alert.alert('No teams', `${name || 'This kid'} isn't on a team yet.`);
-      return;
-    }
-    if (kidTeams.length === 1) {
-      if (pickerItem) doPost(pickerItem, 'team', kidTeams[0].team_id, kidTeams[0].name);
-      return;
-    }
-    setPickerStage('team');
-  }
+  // Picker resolved a SET of audiences. "Only me" writes nothing; each other
+  // selection is one post_to_wall call. Friends & Family maps to the 'player'
+  // audience (family-only — NEVER 'public'). content_type is threaded from the
+  // inbox item (reel/video/clip), not hardcoded. One failure doesn't abort the rest.
+  async function handleSaveToWall(sel: VisibilitySelection) {
+    const item = pendingItem;
+    setPendingItem(null);
+    if (!item || !playerId) return;
 
-  // Post to the wall at the chosen audience (+ team for 'team'). Public uses the
-  // 4-arg style (no p_team_id); team passes p_team_id. RPC errors are surfaced.
-  async function doPost(
-    item: typeof inbox[number],
-    audience: 'public' | 'team',
-    teamId: string | null,
-    teamName?: string
-  ) {
-    if (!playerId) return;
-    setPosting(true);
-    const params: Record<string, any> = {
-      p_content_type: item.contentType,
-      p_content_id: item.contentId,
-      p_audience: audience,
-      p_target_player_id: playerId,
-    };
-    if (teamId) params.p_team_id = teamId;
-    const { error } = await supabase.rpc('post_to_wall', params);
-    setPosting(false);
-    setPickerItem(null);
-    setPickerStage('tier');
-    if (error) Alert.alert('Error', error.message);
-    else Alert.alert('Saved to wall', audience === 'public' ? 'Posted to public wall.' : `Posted to ${teamName ?? 'team'} wall.`);
+    const targets: { audience: 'player' | 'public' | 'team'; teamId?: string; label: string }[] = [];
+    if (sel.friendsFamily) targets.push({ audience: 'player', label: 'Friends & Family' });
+    if (sel.public) targets.push({ audience: 'public', label: 'Public' });
+    if (sel.teamWall && sel.teamId) {
+      targets.push({ audience: 'team', teamId: sel.teamId, label: `${sel.teamName ?? 'Team'} wall` });
+    }
+
+    // Only-me (or an empty set) means no wall placement at all.
+    if (targets.length === 0) {
+      Alert.alert('Kept private', 'Not saved to any wall.');
+      return;
+    }
+
+    const posted: string[] = [];
+    const failed: string[] = [];
+    for (const t of targets) {
+      const params: Record<string, any> = {
+        p_content_type: item.contentType,
+        p_content_id: item.contentId,
+        p_audience: t.audience,
+        p_target_player_id: playerId,
+      };
+      if (t.audience === 'team' && t.teamId) params.p_team_id = t.teamId;
+
+      const { error } = await supabase.rpc('post_to_wall', params);
+      if (error) { failed.push(`${t.label}: ${error.message}`); continue; }
+      posted.push(t.label);
+    }
+
+    if (failed.length === 0) {
+      Alert.alert('Saved to wall', `Posted: ${posted.join(', ')}.`);
+    } else if (posted.length === 0) {
+      Alert.alert('Error', `Nothing posted.\n${failed.join('\n')}`);
+    } else {
+      Alert.alert('Partly posted', `Posted: ${posted.join(', ')}.\nFailed:\n${failed.join('\n')}`);
+    }
   }
 
   // Pick → one-shot upload to the private Videos bucket (kid-photos/<id>/<ts>.jpg)
@@ -591,42 +600,13 @@ export default function KidWallScreen() {
         )}
       </View>
 
-      <Modal visible={!!pickerItem} transparent animationType="fade" onRequestClose={() => setPickerItem(null)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => { if (!posting) setPickerItem(null); }}>
-          <Pressable style={styles.modalSheet} onPress={() => {}}>
-            {posting ? (
-              <ActivityIndicator size="large" color="#534AB7" />
-            ) : pickerStage === 'tier' ? (
-              <>
-                <Text style={styles.modalTitle}>Save to wall</Text>
-                <TouchableOpacity style={styles.modalOption} onPress={() => pickerItem && doPost(pickerItem, 'public', null)}>
-                  <Ionicons name="globe-outline" size={18} color="#fff" />
-                  <Text style={styles.modalOptionText}>Public</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.modalOption} onPress={chooseTeam}>
-                  <Ionicons name="people-outline" size={18} color="#fff" />
-                  <Text style={styles.modalOptionText}>Team</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.modalCancel} onPress={() => setPickerItem(null)}>
-                  <Text style={styles.modalCancelText}>Cancel</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={styles.modalTitle}>Choose a team</Text>
-                {kidTeams.map(t => (
-                  <TouchableOpacity key={t.team_id} style={styles.modalOption} onPress={() => pickerItem && doPost(pickerItem, 'team', t.team_id, t.name)}>
-                    <Text style={styles.modalOptionText}>{t.name}</Text>
-                  </TouchableOpacity>
-                ))}
-                <TouchableOpacity style={styles.modalCancel} onPress={() => setPickerStage('tier')}>
-                  <Text style={styles.modalCancelText}>← Back</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {pendingItem && (
+        <VisibilityPicker
+          teams={kidTeams.map(t => ({ id: t.team_id, name: t.name }))}
+          onSelect={handleSaveToWall}
+          onCancel={() => setPendingItem(null)}
+        />
+      )}
     </View>
   );
 }
@@ -691,13 +671,6 @@ const styles = StyleSheet.create({
   removeBtn: { padding: 8, marginLeft: 6 },
   saveWallBtn: { backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12 },
   saveWallText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  modalSheet: { backgroundColor: '#1a1a1a', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, paddingBottom: 32 },
-  modalTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 14, textAlign: 'center' },
-  modalOption: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#222', borderRadius: 10, padding: 16, marginBottom: 8 },
-  modalOptionText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  modalCancel: { padding: 14, alignItems: 'center', marginTop: 4 },
-  modalCancelText: { color: '#888', fontSize: 15 },
 
   badge: { minWidth: 16, height: 16, borderRadius: 8, backgroundColor: '#D85A30', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
