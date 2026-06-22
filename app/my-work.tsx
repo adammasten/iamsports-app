@@ -3,7 +3,7 @@ import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
 
@@ -34,6 +34,13 @@ type Reel = {
 
 type SortKey = 'date' | 'name' | 'duration';
 
+// Grouped candidates for the "Post to wall" player picker.
+type PickerPlayer = { player_id: string; name: string };
+type PickerGroup = { key: string; title: string; players: PickerPlayer[] };
+
+// Roles that count as coaching a team (can send to that team's players' inboxes).
+const COACH_ROLES = ['admin', 'head_coach', 'coach'];
+
 export default function MyWorkScreen() {
   const insets = useSafeAreaInsets();
   const { userId, userKids, userTeams } = useTeamContext();
@@ -50,6 +57,12 @@ export default function MyWorkScreen() {
   // Post-to-wall picker state: which reel + kid the user chose in the Alert,
   // held while VisibilityPicker collects the tier. null = picker hidden.
   const [pendingPost, setPendingPost] = useState<{ reel: Reel; playerId: string; kidName: string } | null>(null);
+
+  // Players on teams the user coaches (loaded below) — candidates for the
+  // post-to-wall picker beyond the user's own kids.
+  const [coachedPlayers, setCoachedPlayers] = useState<{ player_id: string; name: string; team_id: string }[]>([]);
+  // Which reel's grouped player-picker sheet is open. null = sheet hidden.
+  const [pickerReel, setPickerReel] = useState<Reel | null>(null);
 
   async function loadReels() {
     if (!userId) { setReels([]); setLoading(false); return; }
@@ -116,6 +129,67 @@ export default function MyWorkScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  // Team ids the user coaches. players_read RLS only returns players on teams the
+  // user is a confirmed member of, so this candidate set and post_to_wall's
+  // permission gate agree by construction.
+  const coachedTeamIds = useMemo(
+    () => userTeams.filter(t => COACH_ROLES.includes(t.role)).map(t => t.team_id),
+    [userTeams],
+  );
+
+  // Load coached-team players. Mirrors refreshKids' style (junction → nested
+  // players select → filter RLS-nulled rows → flatten). Skips the query entirely
+  // when the user coaches no teams. Non-blocking: the screen renders without it.
+  useEffect(() => {
+    if (coachedTeamIds.length === 0) { setCoachedPlayers([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('player_teams')
+        .select('team_id, players ( id, name )')
+        .in('team_id', coachedTeamIds);
+      if (cancelled) return;
+      if (error || !data) { setCoachedPlayers([]); return; }
+      const flattened = (data as any[])
+        .filter(r => r.players)
+        .map(r => ({ player_id: r.players.id, name: r.players.name, team_id: r.team_id }));
+      setCoachedPlayers(flattened);
+    })();
+    return () => { cancelled = true; };
+  }, [coachedTeamIds]);
+
+  // Grouped picker candidates: "Your kids" first, then one group per coached
+  // team. Dedupe by player_id across the whole structure — a kid who's also on a
+  // team you coach shows ONLY under "Your kids"; within a team, each player once.
+  const pickerGroups = useMemo<PickerGroup[]>(() => {
+    const groups: PickerGroup[] = [];
+    const kidIds = new Set(userKids.map(k => k.player_id));
+
+    const kidSeen = new Set<string>();
+    const kidPlayers: PickerPlayer[] = [];
+    for (const k of userKids) {
+      if (kidSeen.has(k.player_id)) continue;
+      kidSeen.add(k.player_id);
+      kidPlayers.push({ player_id: k.player_id, name: k.name });
+    }
+    if (kidPlayers.length > 0) groups.push({ key: 'kids', title: 'Your kids', players: kidPlayers });
+
+    const coachTeams = userTeams.filter(t => COACH_ROLES.includes(t.role));
+    for (const t of coachTeams) {
+      const seen = new Set<string>();
+      const players: PickerPlayer[] = [];
+      for (const p of coachedPlayers) {
+        if (p.team_id !== t.team_id) continue;
+        if (kidIds.has(p.player_id)) continue;   // kid relationship wins
+        if (seen.has(p.player_id)) continue;      // dedupe within team
+        seen.add(p.player_id);
+        players.push({ player_id: p.player_id, name: p.name });
+      }
+      if (players.length > 0) groups.push({ key: `team:${t.team_id}`, title: t.name, players });
+    }
+    return groups;
+  }, [userKids, userTeams, coachedPlayers]);
+
   const visibleReels = useMemo(() => {
     const q = search.trim().toLowerCase();
     const filtered = q ? reels.filter(r => r.name.toLowerCase().includes(q)) : reels;
@@ -164,19 +238,16 @@ export default function MyWorkScreen() {
     }
   }
 
-  // Pick which kid's wall to post to, then post. A reel can be posted to
-  // multiple kids' walls over time, so the button stays available.
+  // Open the grouped player-picker sheet for this reel. Candidates = your kids +
+  // players on teams you coach (built in pickerGroups). postReelToKid does the
+  // actual send, unchanged. Empty-state keeps the prior "No kids yet" alert.
   function confirmPostToWall(reel: Reel) {
-    if (userKids.length === 0) {
+    const total = pickerGroups.reduce((n, g) => n + g.players.length, 0);
+    if (total === 0) {
       Alert.alert('No kids yet', 'Add a kid first to post a reel to their wall.');
       return;
     }
-    const buttons: any[] = userKids.map(kid => ({
-      text: kid.name,
-      onPress: () => postReelToKid(reel, kid.player_id, kid.name),
-    }));
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert('Post to wall', 'Whose wall?', buttons);
+    setPickerReel(reel);
   }
 
   // Kid chosen in the Alert — defer posting and let VisibilityPicker collect
@@ -419,6 +490,35 @@ export default function MyWorkScreen() {
         )}
       </View>
 
+      {pickerReel && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setPickerReel(null)}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setPickerReel(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>Post to wall</Text>
+              <ScrollView style={styles.sheetScroll}>
+                {pickerGroups.map(g => (
+                  <View key={g.key}>
+                    <Text style={styles.sheetSectionHeader}>{g.title}</Text>
+                    {g.players.map(p => (
+                      <TouchableOpacity
+                        key={`${g.key}:${p.player_id}`}
+                        style={styles.sheetRow}
+                        onPress={() => { postReelToKid(pickerReel, p.player_id, p.name); setPickerReel(null); }}
+                      >
+                        <Text style={styles.sheetRowText}>{p.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ))}
+              </ScrollView>
+              <TouchableOpacity style={styles.sheetCancel} onPress={() => setPickerReel(null)}>
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
       {pendingPost && (
         <VisibilityPicker
           teams={userTeams.map(t => ({ id: t.team_id, name: t.name }))}
@@ -495,4 +595,15 @@ const styles = StyleSheet.create({
   },
   postBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   trashBtn: { padding: 8 },
+
+  // Grouped "Post to wall" player-picker bottom sheet (mirrors VisibilityPicker).
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#1a1a1a', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, paddingBottom: 32 },
+  sheetTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  sheetScroll: { maxHeight: 380 },
+  sheetSectionHeader: { color: '#888', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 6 },
+  sheetRow: { backgroundColor: '#222', borderRadius: 10, padding: 16, marginBottom: 8 },
+  sheetRowText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  sheetCancel: { padding: 14, alignItems: 'center', marginTop: 4 },
+  sheetCancelText: { color: '#888', fontSize: 15 },
 });
