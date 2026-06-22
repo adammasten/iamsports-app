@@ -44,7 +44,7 @@ export default function KidWallScreen() {
   // Inbox ("Shared with you") — player-audience shares targeting this kid.
   const [inbox, setInbox] = useState<{
     shareId: string; contentType: string; contentId: string;
-    sharedBy: string | null; createdAt: string; title: string;
+    sharedBy: string | null; sharedByName: string | null; createdAt: string; title: string;
     storagePath: string | null; startTime: number | null; endTime: number | null;
   }[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
@@ -164,7 +164,21 @@ export default function KidWallScreen() {
         endTime: c?.end_time ?? null,
       };
     }));
-    setInbox(items);
+
+    // Resolve each DISTINCT sharer to a display name once (not per row). The RPC
+    // is gated to shared context — it returns the name, or null if out of context
+    // or no name set; the card falls back to "you" / "someone" accordingly.
+    const sharerIds = [...new Set(items.map(i => i.sharedBy).filter((x): x is string => !!x && x !== userId))];
+    const nameEntries = await Promise.all(sharerIds.map(async (id) => {
+      const { data } = await supabase.rpc('get_user_display_name', { p_user_id: id });
+      return [id, typeof data === 'string' ? data : null] as const;
+    }));
+    const nameById = new Map(nameEntries);
+
+    setInbox(items.map(i => ({
+      ...i,
+      sharedByName: i.sharedBy ? nameById.get(i.sharedBy) ?? null : null,
+    })));
     setInboxLoading(false);
   }
 
@@ -558,7 +572,7 @@ export default function KidWallScreen() {
                   <TouchableOpacity style={styles.inboxMain} onPress={() => openShared(item)}>
                     <Text style={styles.inboxTitle} numberOfLines={1}>{item.title}</Text>
                     <Text style={styles.inboxMeta}>
-                      From {item.sharedBy ? item.sharedBy.slice(0, 8) + '…' : 'unknown'} · {new Date(item.createdAt).toLocaleDateString()}
+                      From {item.sharedBy === userId ? 'you' : (item.sharedByName ?? 'someone')} · {new Date(item.createdAt).toLocaleDateString()}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.saveWallBtn} onPress={() => openSaveToWall(item)}>
