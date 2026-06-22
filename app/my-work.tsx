@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
 
 // "My Work" — lists the current user's highlight reels (highlight_reels rows
 // they created). Each card shows WHERE the reel lives (public / team / private)
@@ -19,7 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 type Destination =
   | { kind: 'public' }
   | { kind: 'team'; teamName: string }
-  | { kind: 'coaches' };
+  | { kind: 'coaches' }
+  | { kind: 'player'; kidName: string };
 
 type Reel = {
   id: string;
@@ -34,7 +36,7 @@ type SortKey = 'date' | 'name' | 'duration';
 
 export default function MyWorkScreen() {
   const insets = useSafeAreaInsets();
-  const { userId, userKids } = useTeamContext();
+  const { userId, userKids, userTeams } = useTeamContext();
 
   const [reels, setReels] = useState<Reel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +46,10 @@ export default function MyWorkScreen() {
   // Inline rename state: which reel is being renamed + the working draft.
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
+
+  // Post-to-wall picker state: which reel + kid the user chose in the Alert,
+  // held while VisibilityPicker collects the tier. null = picker hidden.
+  const [pendingPost, setPendingPost] = useState<{ reel: Reel; playerId: string; kidName: string } | null>(null);
 
   async function loadReels() {
     if (!userId) { setReels([]); setLoading(false); return; }
@@ -64,9 +70,12 @@ export default function MyWorkScreen() {
     //    the sharer read their own rows, so this returns where I've published.
     const destByReel = new Map<string, Destination[]>();
     if (reelIds.length > 0) {
+      // Map a player-audience share's target_player_id → the kid's name. Names
+      // aren't joinable on shares, so resolve them client-side from userKids.
+      const kidNameById = new Map(userKids.map(k => [k.player_id, k.name]));
       const { data: shareRows } = await supabase
         .from('shares')
-        .select('content_id, audience, team_id, visible, teams ( name )')
+        .select('content_id, audience, team_id, visible, target_player_id, teams ( name )')
         .eq('content_type', 'reel')
         .in('content_id', reelIds);
       (shareRows || []).forEach((s: any) => {
@@ -80,8 +89,13 @@ export default function MyWorkScreen() {
           }
         } else if (s.audience === 'coaches') {
           if (!list.some(d => d.kind === 'coaches')) list.push({ kind: 'coaches' });
+        } else if (s.audience === 'player') {
+          // A 'player' post lands on the kid's own wall (family-only).
+          const kidName = kidNameById.get(s.target_player_id) ?? 'Kid';
+          if (!list.some(d => d.kind === 'player' && d.kidName === kidName)) {
+            list.push({ kind: 'player', kidName });
+          }
         }
-        // audience === 'player' is an inbox send, not a wall placement — ignored.
         destByReel.set(s.content_id, list);
       });
     }
@@ -165,23 +179,82 @@ export default function MyWorkScreen() {
     Alert.alert('Post to wall', 'Whose wall?', buttons);
   }
 
-  async function postReelToKid(reel: Reel, playerId: string, kidName: string) {
-    // post_to_wall (SECURITY DEFINER) requires the caller be a linked parent of
-    // the target player — true for the user's own kids.
-    const { error } = await supabase.rpc('post_to_wall', {
-      p_content_type: 'reel',
-      p_content_id: reel.id,
-      p_audience: 'public',
-      p_target_player_id: playerId,
-    });
-    if (error) { Alert.alert('Error', error.message); return; }
-    Alert.alert('Posted', `Posted to ${kidName}'s wall`);
-    // Reflect the public placement locally — no full reload.
-    setReels(prev => prev.map(r =>
-      r.id === reel.id && !r.destinations.some(d => d.kind === 'public')
-        ? { ...r, destinations: [...r.destinations, { kind: 'public' }] }
-        : r
-    ));
+  // Kid chosen in the Alert — defer posting and let VisibilityPicker collect
+  // the tier (public / team / private) before any RPC fires.
+  function postReelToKid(reel: Reel, playerId: string, kidName: string) {
+    setPendingPost({ reel, playerId, kidName });
+  }
+
+  // Picker resolved a SET of audiences. "Only me" writes nothing; each other
+  // selection is one post_to_wall call (SECURITY DEFINER — requires the caller
+  // be a linked parent of the target player, true for the user's own kids).
+  // Friends & Family maps to the 'player' audience (family-only — NEVER 'public').
+  async function handleVisibilitySelect(sel: VisibilitySelection) {
+    const pending = pendingPost;
+    if (!pending) return;
+    setPendingPost(null);
+    const { reel, playerId, kidName } = pending;
+
+    // Build the list of audiences to post, each with the badge it maps to.
+    const targets: { audience: 'player' | 'public' | 'team'; teamId?: string; label: string; dest: Destination }[] = [];
+    if (sel.friendsFamily) {
+      targets.push({ audience: 'player', label: 'Friends & Family', dest: { kind: 'player', kidName } });
+    }
+    if (sel.public) {
+      targets.push({ audience: 'public', label: 'Public', dest: { kind: 'public' } });
+    }
+    if (sel.teamWall && sel.teamId) {
+      const teamName = sel.teamName ?? 'Team';
+      targets.push({ audience: 'team', teamId: sel.teamId, label: `${teamName} wall`, dest: { kind: 'team', teamName } });
+    }
+
+    // Only-me (or an empty set) means no wall placement at all.
+    if (targets.length === 0) {
+      Alert.alert('Kept private', `“${reel.name}” stays visible only to you.`);
+      return;
+    }
+
+    // Post each selected audience. One failure doesn't abort the rest.
+    const posted: string[] = [];
+    const failed: string[] = [];
+    const newDests: Destination[] = [];
+    for (const t of targets) {
+      const params: Record<string, any> = {
+        p_content_type: 'reel',
+        p_content_id: reel.id,
+        p_audience: t.audience,
+        p_target_player_id: playerId,
+      };
+      if (t.audience === 'team' && t.teamId) params.p_team_id = t.teamId;
+
+      const { error } = await supabase.rpc('post_to_wall', params);
+      if (error) { failed.push(`${t.label}: ${error.message}`); continue; }
+      posted.push(t.label);
+      newDests.push(t.dest);
+    }
+
+    // Optimistic badges for everything that posted — no full reload. loadReels
+    // reads all three kinds back, so badges survive a refresh. Dedup by kind
+    // (team by name, player by kid).
+    if (newDests.length > 0) {
+      const key = (d: Destination) =>
+        d.kind === 'team' ? `team:${d.teamName}` : d.kind === 'player' ? `player:${d.kidName}` : d.kind;
+      setReels(prev => prev.map(r => {
+        if (r.id !== reel.id) return r;
+        const have = new Set(r.destinations.map(key));
+        const add = newDests.filter(d => !have.has(key(d)));
+        return add.length ? { ...r, destinations: [...r.destinations, ...add] } : r;
+      }));
+    }
+
+    // Summarize what landed.
+    if (failed.length === 0) {
+      Alert.alert('Posted', `Posted to ${kidName}'s wall: ${posted.join(', ')}.`);
+    } else if (posted.length === 0) {
+      Alert.alert('Error', `Nothing posted.\n${failed.join('\n')}`);
+    } else {
+      Alert.alert('Partly posted', `Posted: ${posted.join(', ')}.\nFailed:\n${failed.join('\n')}`);
+    }
   }
 
   function confirmDelete(reel: Reel) {
@@ -220,6 +293,14 @@ export default function MyWorkScreen() {
           <View key={`co-${i}`} style={[styles.badge, styles.badgeCoaches]}>
             <Ionicons name="clipboard-outline" size={11} color="#fff" />
             <Text style={styles.badgeText}>Coaches</Text>
+          </View>
+        );
+      }
+      if (d.kind === 'player') {
+        return (
+          <View key={`player-${i}`} style={[styles.badge, styles.badgePlayer]}>
+            <Ionicons name="lock-closed" size={11} color="#fff" />
+            <Text style={styles.badgeText} numberOfLines={1}>On {d.kidName}'s wall</Text>
           </View>
         );
       }
@@ -337,6 +418,14 @@ export default function MyWorkScreen() {
           </ScrollView>
         )}
       </View>
+
+      {pendingPost && (
+        <VisibilityPicker
+          teams={userTeams.map(t => ({ id: t.team_id, name: t.name }))}
+          onSelect={handleVisibilitySelect}
+          onCancel={() => setPendingPost(null)}
+        />
+      )}
     </View>
   );
 }
@@ -396,6 +485,7 @@ const styles = StyleSheet.create({
   badgePublic: { backgroundColor: '#1D9E75' },   // green = public/personal wall
   badgeTeam: { backgroundColor: '#534AB7' },      // purple = team wall
   badgeCoaches: { backgroundColor: '#C8742B' },   // amber = coaches-only
+  badgePlayer: { backgroundColor: '#4A6B8A' },    // slate = kid's wall (family-only)
   badgeLock: { backgroundColor: '#222', borderWidth: 1, borderColor: '#333' },
   badgeLockText: { color: '#888', fontSize: 11, fontWeight: '600' },
 
