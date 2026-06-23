@@ -149,6 +149,7 @@ export default function RootLayout() {
           <Stack.Screen name="team" options={{ headerShown: false }} />
           <Stack.Screen name="clips-library" options={{ headerShown: false }} />
           <Stack.Screen name="my-work" options={{ headerShown: false }} />
+          <Stack.Screen name="coaches-corner" options={{ headerShown: false }} />
           <Stack.Screen name="upload" options={{ headerShown: false }} />
           <Stack.Screen name="shared-viewer" options={{ headerShown: false }} />
         </Stack>

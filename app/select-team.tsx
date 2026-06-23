@@ -316,11 +316,11 @@ export default function SelectTeamScreen() {
         <TouchableOpacity style={styles.navCenter} onPress={() => router.push('/upload')}>
           <Ionicons name="add" size={30} color="#fff" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/clips-library')}>
+        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/my-work')}>
           <Ionicons name="folder-outline" size={24} color="#888" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/my-work')}>
-          <Ionicons name="person-outline" size={24} color="#888" />
+        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/coaches-corner')}>
+          <Ionicons name="clipboard-outline" size={24} color="#888" />
         </TouchableOpacity>
       </View>
     </View>
