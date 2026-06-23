@@ -240,11 +240,11 @@ export default function MyWorkScreen() {
 
   // Open the grouped player-picker sheet for this reel. Candidates = your kids +
   // players on teams you coach (built in pickerGroups). postReelToKid does the
-  // actual send, unchanged. Empty-state keeps the prior "No kids yet" alert.
+  // actual send, unchanged. Empty-state copy is role-neutral (kid or coach).
   function confirmPostToWall(reel: Reel) {
     const total = pickerGroups.reduce((n, g) => n + g.players.length, 0);
     if (total === 0) {
-      Alert.alert('No kids yet', 'Add a kid first to post a reel to their wall.');
+      Alert.alert('Nothing to post to', 'Add a kid, or join a team as a coach, to post a reel.');
       return;
     }
     setPickerReel(reel);
