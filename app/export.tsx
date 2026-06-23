@@ -128,7 +128,7 @@ export default function ExportScreen() {
         0,
       );
 
-      const { error } = await supabase.from('highlight_reels').insert({
+      const { data: inserted, error } = await supabase.from('highlight_reels').insert({
         created_by_user_id: user.id,
         team_id: null,
         name: reelName,
@@ -137,8 +137,25 @@ export default function ExportScreen() {
         duration_seconds: durationSeconds,
         overlay_mode: 'clean',
         status: 'ready',
-      });
-      if (error) console.warn('[reel] highlight_reels insert failed:', error.message);
+      }).select('id').single();
+      if (error || !inserted?.id) {
+        console.warn('[reel] highlight_reels insert failed:', error?.message || 'no id returned');
+        return;
+      }
+
+      // Auto-attach: copy the distinct tags from the source clips onto the reel.
+      // Tags are already in memory (c.tagIds) — no extra query. Best-effort: a
+      // tag-copy failure must never throw or break the (already-saved) reel.
+      try {
+        const tagIds = [...new Set(includedClipObjects.flatMap((c: any) => c.tagIds || []))];
+        if (tagIds.length > 0) {
+          const rows = tagIds.map(tag_id => ({ reel_id: inserted.id, tag_id }));
+          const { error: tagErr } = await supabase.from('reel_tags').insert(rows);
+          if (tagErr) console.warn('[reel] reel_tags insert failed:', tagErr.message);
+        }
+      } catch (e: any) {
+        console.warn('[reel] reel_tags insert threw:', e?.message || e);
+      }
     } catch (e: any) {
       console.warn('[reel] highlight_reels insert threw:', e?.message || e);
     }
