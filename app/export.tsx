@@ -5,7 +5,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, FlatList, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, FlatList, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
 const ACTIVE_JOB_KEY = 'iamsports.active_export_job';
@@ -50,6 +50,16 @@ async function readActiveJob(): Promise<{ jobId: string; startedAt: number } | n
   }
 }
 
+// Default reel name from the included clips — distinct game titles joined, or a
+// date fallback. Shared by the review-step prefill and saveReelRecord's fallback
+// so an auto-named reel is identical whether or not the user edited the field.
+function defaultReelName(clipObjects: any[]): string {
+  const gameTitles = [...new Set(clipObjects.map((c: any) => c.gameTitle).filter(Boolean))];
+  return gameTitles.length > 0
+    ? `${gameTitles.join(' · ')} Highlights`
+    : `Highlights · ${new Date().toLocaleDateString()}`;
+}
+
 export default function ExportScreen() {
   const [games, setGames] = useState<any[]>([]);
   const [tags, setTags] = useState<any[]>([]);
@@ -66,6 +76,19 @@ export default function ExportScreen() {
   // Tier 1: when resuming a persisted job we skip the clip-selector view and
   // show only the progress card.
   const [resuming, setResuming] = useState(false);
+  // Review-step footer: user-editable reel name (pre-filled with the auto-name)
+  // and whether to ALSO save to the camera roll. The reel always saves to My Work.
+  const [reelName, setReelName] = useState('');
+  const [saveToCameraRoll, setSaveToCameraRoll] = useState(true);
+
+  // Pre-fill the reel name with the auto-name when the review step opens. Only
+  // fills when empty so it never clobbers a name the user has already typed.
+  useEffect(() => {
+    if (step !== 'review' || reelName.trim() !== '') return;
+    const included = clips.filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`));
+    if (included.length > 0) setReelName(defaultReelName(included));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, clips, excludedClips]);
 
   // Polling refs — mountedRef gates setState calls after unmount, intervalRef
   // lets the cleanup effect clear the active poll if the user navigates away
@@ -108,7 +131,7 @@ export default function ExportScreen() {
   // becomes a findable reel. Best-effort: never throws, never blocks the
   // camera-roll save or success UI. team_id is null for now (reels are
   // creator-owned; team association is derived later from source clips).
-  async function saveReelRecord(videoUrl: string, includedClipObjects: any[]) {
+  async function saveReelRecord(videoUrl: string, includedClipObjects: any[], name?: string) {
     try {
       if (includedClipObjects.length === 0) return;
 
@@ -119,10 +142,9 @@ export default function ExportScreen() {
         return;
       }
 
-      const gameTitles = [...new Set(includedClipObjects.map(c => c.gameTitle).filter(Boolean))];
-      const reelName = gameTitles.length > 0
-        ? `${gameTitles.join(' · ')} Highlights`
-        : `Highlights · ${new Date().toLocaleDateString()}`;
+      // Use the name passed from the review-step field; fall back to the
+      // auto-name when empty/undefined (e.g. callers without a name field).
+      const finalName = (name && name.trim()) ? name.trim() : defaultReelName(includedClipObjects);
       const durationSeconds = includedClipObjects.reduce(
         (sum, c) => sum + Math.max(0, (c.end_time ?? 0) - (c.start_time ?? 0)),
         0,
@@ -131,7 +153,7 @@ export default function ExportScreen() {
       const { data: inserted, error } = await supabase.from('highlight_reels').insert({
         created_by_user_id: user.id,
         team_id: null,
-        name: reelName,
+        name: finalName,
         storage_path: deriveStoragePath(videoUrl),
         source_clip_ids: includedClipObjects.map(c => c.id),
         duration_seconds: durationSeconds,
@@ -420,9 +442,14 @@ export default function ExportScreen() {
       const videoUrl = await pollJob(data.jobId);
 
       // Persist the export as a reel (best-effort — must not block the save).
-      await saveReelRecord(videoUrl, includedClipObjects);
+      // Always saves to My Work; the camera-roll save is user-gated below.
+      await saveReelRecord(videoUrl, includedClipObjects, reelName);
 
-      await saveExportToLibrary(videoUrl);
+      if (saveToCameraRoll) {
+        await saveExportToLibrary(videoUrl);
+      } else {
+        Alert.alert('Saved!', 'Your reel is in My Work.');
+      }
     } catch (e: any) {
       console.log('[export] FAILED:', e);
       Alert.alert('Export error', e.message);
@@ -684,9 +711,24 @@ export default function ExportScreen() {
       })}
 
       {totalIncluded > 0 && !exporting && (
-        <TouchableOpacity style={styles.exportBtn} onPress={handleExport}>
-          <Text style={styles.exportBtnText}>🎬 Export {totalIncluded} Clips</Text>
-        </TouchableOpacity>
+        <View style={styles.footer}>
+          <Text style={styles.fieldLabel}>Reel name</Text>
+          <TextInput
+            style={styles.nameInput}
+            value={reelName}
+            onChangeText={setReelName}
+            placeholder="Reel name"
+            placeholderTextColor="#666"
+          />
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>Also save to camera roll</Text>
+            <Switch value={saveToCameraRoll} onValueChange={setSaveToCameraRoll} />
+          </View>
+          <Text style={styles.footerHelper}>Always saved to My Work</Text>
+          <TouchableOpacity style={styles.exportBtn} onPress={handleExport}>
+            <Text style={styles.exportBtnText}>🎬 Export {totalIncluded} Clips</Text>
+          </TouchableOpacity>
+        </View>
       )}
     </ScrollView>
   );
@@ -773,5 +815,11 @@ const styles = StyleSheet.create({
   previewBtnText: { color: '#fff', fontSize: 12 },
   exportBtn: { backgroundColor: '#1D9E75', borderRadius: 12, padding: 18, alignItems: 'center', marginTop: 8 },
   exportBtnText: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  footer: { marginTop: 8 },
+  fieldLabel: { color: '#666', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  nameInput: { backgroundColor: '#1a1a1a', borderRadius: 10, borderWidth: 1, borderColor: '#333', color: '#fff', fontSize: 15, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 14 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  toggleLabel: { color: '#333', fontSize: 15, fontWeight: '600' },
+  footerHelper: { color: '#999', fontSize: 12, marginBottom: 14 },
   empty: { textAlign: 'center', color: '#888', marginTop: 40, fontSize: 16 },
 });
