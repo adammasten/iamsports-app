@@ -64,6 +64,15 @@ export default function MyWorkScreen() {
   // Which reel's grouped player-picker sheet is open. null = sheet hidden.
   const [pickerReel, setPickerReel] = useState<Reel | null>(null);
 
+  // Destination picker state. tierReel drives the top-level chooser (Your Kids /
+  // Your Teams / Coaches' Corner). teamWallReel / coachesReel drive the team
+  // sub-pickers; teamWallChoice holds the chosen team while the user picks
+  // Team-only vs Public for a team-wall post.
+  const [tierReel, setTierReel] = useState<Reel | null>(null);
+  const [teamWallReel, setTeamWallReel] = useState<Reel | null>(null);
+  const [coachesReel, setCoachesReel] = useState<Reel | null>(null);
+  const [teamWallChoice, setTeamWallChoice] = useState<{ reel: Reel; teamId: string; teamName: string } | null>(null);
+
   async function loadReels() {
     if (!userId) { setReels([]); setLoading(false); return; }
     setLoading(true);
@@ -134,6 +143,13 @@ export default function MyWorkScreen() {
   // permission gate agree by construction.
   const coachedTeamIds = useMemo(
     () => userTeams.filter(t => COACH_ROLES.includes(t.role)).map(t => t.team_id),
+    [userTeams],
+  );
+
+  // Teams the user coaches, with names — candidates for the team-wall and
+  // coaches-board destination sub-pickers.
+  const coachedTeams = useMemo(
+    () => userTeams.filter(t => COACH_ROLES.includes(t.role)),
     [userTeams],
   );
 
@@ -238,22 +254,92 @@ export default function MyWorkScreen() {
     }
   }
 
-  // Open the grouped player-picker sheet for this reel. Candidates = your kids +
-  // players on teams you coach (built in pickerGroups). postReelToKid does the
-  // actual send, unchanged. Empty-state copy is role-neutral (kid or coach).
+  // Open the destination tier chooser (Your Kids / Your Teams / Coaches' Corner).
+  // Your Kids routes to the existing player sheet + VisibilityPicker flow; the
+  // two team tiers post player-less, coach-gated shares. Empty-state stands when
+  // the user has neither kids nor coached teams.
   function confirmPostToWall(reel: Reel) {
-    const total = pickerGroups.reduce((n, g) => n + g.players.length, 0);
-    if (total === 0) {
+    const hasKids = pickerGroups.some(g => g.key === 'kids');
+    const hasTeams = coachedTeams.length > 0;
+    if (!hasKids && !hasTeams) {
       Alert.alert('Nothing to post to', 'Add a kid, or join a team as a coach, to post a reel.');
       return;
     }
-    setPickerReel(reel);
+    setTierReel(reel);
   }
 
   // Kid chosen in the Alert — defer posting and let VisibilityPicker collect
   // the tier (public / team / private) before any RPC fires.
   function postReelToKid(reel: Reel, playerId: string, kidName: string) {
     setPendingPost({ reel, playerId, kidName });
+  }
+
+  // Merge new destination badges onto a reel optimistically (dedup by kind; team
+  // by name) so the card reflects the post without a reload — mirrors the
+  // post-to-kid flow's optimistic update.
+  function addReelDestinations(reelId: string, dests: Destination[]) {
+    const keyOf = (d: Destination) =>
+      d.kind === 'team' ? `team:${d.teamName}` : d.kind === 'player' ? `player:${d.kidName}` : d.kind;
+    setReels(prev => prev.map(r => {
+      if (r.id !== reelId) return r;
+      const have = new Set(r.destinations.map(keyOf));
+      const merged = [...r.destinations];
+      for (const d of dests) {
+        const k = keyOf(d);
+        if (!have.has(k)) { have.add(k); merged.push(d); }
+      }
+      return { ...r, destinations: merged };
+    }));
+  }
+
+  // Post a reel to a team WALL (player-less, coach-gated). "Public" ALSO posts a
+  // separate public share — mirroring the kid flow's treatment of public vs team
+  // as independent audiences (so a public team post is visible publicly AND on
+  // the team wall).
+  async function postTeamWall(choice: { reel: Reel; teamId: string; teamName: string }, alsoPublic: boolean) {
+    const { reel, teamId, teamName } = choice;
+    setTeamWallChoice(null);
+
+    const { error: teamErr } = await supabase.rpc('post_to_wall', {
+      p_content_type: 'reel',
+      p_content_id: reel.id,
+      p_audience: 'team',
+      p_target_player_id: null,
+      p_team_id: teamId,
+    });
+    if (teamErr) { Alert.alert('Error', teamErr.message); return; }
+
+    const dests: Destination[] = [{ kind: 'team', teamName }];
+    if (alsoPublic) {
+      const { error: pubErr } = await supabase.rpc('post_to_wall', {
+        p_content_type: 'reel',
+        p_content_id: reel.id,
+        p_audience: 'public',
+        p_target_player_id: null,
+        p_team_id: teamId,
+      });
+      if (pubErr) { Alert.alert('Error', pubErr.message); return; }
+      dests.push({ kind: 'public' });
+    }
+
+    addReelDestinations(reel.id, dests);
+    Alert.alert('Posted', alsoPublic ? `Posted to ${teamName} wall and public.` : `Posted to ${teamName} wall.`);
+  }
+
+  // Post a reel to a team's COACHES' board (player-less, coach-gated). No
+  // visibility choice — selecting the team posts immediately.
+  async function postCoachesBoard(reel: Reel, teamId: string, teamName: string) {
+    setCoachesReel(null);
+    const { error } = await supabase.rpc('post_to_wall', {
+      p_content_type: 'reel',
+      p_content_id: reel.id,
+      p_audience: 'coaches',
+      p_target_player_id: null,
+      p_team_id: teamId,
+    });
+    if (error) { Alert.alert('Error', error.message); return; }
+    addReelDestinations(reel.id, [{ kind: 'coaches' }]);
+    Alert.alert('Posted', `Posted to ${teamName} coaches' board.`);
   }
 
   // Picker resolved a SET of audiences. "Only me" writes nothing; each other
@@ -512,6 +598,111 @@ export default function MyWorkScreen() {
                 ))}
               </ScrollView>
               <TouchableOpacity style={styles.sheetCancel} onPress={() => setPickerReel(null)}>
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Destination tier chooser: Your Kids / Your Teams / Coaches' Corner. */}
+      {tierReel && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setTierReel(null)}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setTierReel(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>Post to wall</Text>
+              <ScrollView style={styles.sheetScroll}>
+                {pickerGroups.some(g => g.key === 'kids') && (
+                  <TouchableOpacity style={styles.sheetRow} onPress={() => { setPickerReel(tierReel); setTierReel(null); }}>
+                    <Text style={styles.sheetRowText}>Your kids</Text>
+                  </TouchableOpacity>
+                )}
+                {coachedTeams.length > 0 && (
+                  <TouchableOpacity style={styles.sheetRow} onPress={() => { setTeamWallReel(tierReel); setTierReel(null); }}>
+                    <Text style={styles.sheetRowText}>Your teams</Text>
+                  </TouchableOpacity>
+                )}
+                {coachedTeams.length > 0 && (
+                  <TouchableOpacity style={styles.sheetRow} onPress={() => { setCoachesReel(tierReel); setTierReel(null); }}>
+                    <Text style={styles.sheetRowText}>Coaches&apos; Corner</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+              <TouchableOpacity style={styles.sheetCancel} onPress={() => setTierReel(null)}>
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Your Teams → pick a coached team for a team-wall post. */}
+      {teamWallReel && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setTeamWallReel(null)}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setTeamWallReel(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>Post to a team wall</Text>
+              <ScrollView style={styles.sheetScroll}>
+                <Text style={styles.sheetSectionHeader}>Your teams</Text>
+                {coachedTeams.map(t => (
+                  <TouchableOpacity
+                    key={t.team_id}
+                    style={styles.sheetRow}
+                    onPress={() => { setTeamWallChoice({ reel: teamWallReel, teamId: t.team_id, teamName: t.name }); setTeamWallReel(null); }}
+                  >
+                    <Text style={styles.sheetRowText}>{t.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity style={styles.sheetCancel} onPress={() => setTeamWallReel(null)}>
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Team-wall visibility: Team only (default) vs Public. */}
+      {teamWallChoice && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setTeamWallChoice(null)}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setTeamWallChoice(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>Post to {teamWallChoice.teamName}</Text>
+              <ScrollView style={styles.sheetScroll}>
+                <TouchableOpacity style={styles.sheetRow} onPress={() => postTeamWall(teamWallChoice, false)}>
+                  <Text style={styles.sheetRowText}>Team only</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.sheetRow} onPress={() => postTeamWall(teamWallChoice, true)}>
+                  <Text style={styles.sheetRowText}>Public</Text>
+                </TouchableOpacity>
+              </ScrollView>
+              <TouchableOpacity style={styles.sheetCancel} onPress={() => setTeamWallChoice(null)}>
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Coaches' Corner → pick a coached team; selecting posts immediately. */}
+      {coachesReel && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setCoachesReel(null)}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setCoachesReel(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>Coaches&apos; Corner</Text>
+              <ScrollView style={styles.sheetScroll}>
+                <Text style={styles.sheetSectionHeader}>Your teams</Text>
+                {coachedTeams.map(t => (
+                  <TouchableOpacity
+                    key={t.team_id}
+                    style={styles.sheetRow}
+                    onPress={() => postCoachesBoard(coachesReel, t.team_id, t.name)}
+                  >
+                    <Text style={styles.sheetRowText}>{t.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity style={styles.sheetCancel} onPress={() => setCoachesReel(null)}>
                 <Text style={styles.sheetCancelText}>Cancel</Text>
               </TouchableOpacity>
             </Pressable>
