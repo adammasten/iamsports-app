@@ -45,6 +45,7 @@ function relativeTime(iso: string): string {
 type Post = {
   shareId: string;
   contentType: string;
+  contentId: string;
   teamId: string;
   teamName: string;
   createdAt: string;
@@ -72,7 +73,7 @@ export default function CoachesCornerScreen() {
     setLoading(true);
     const { data: rows } = await supabase
       .from('shares')
-      .select('id, content_type, team_id, created_at, teams ( name )')
+      .select('id, content_type, content_id, team_id, created_at, teams ( name )')
       .eq('audience', 'coaches')
       .order('created_at', { ascending: false });
     const items = await Promise.all((rows || []).map(async (r: any) => {
@@ -81,6 +82,7 @@ export default function CoachesCornerScreen() {
       return {
         shareId: r.id,
         contentType: r.content_type,
+        contentId: r.content_id,
         teamId: r.team_id,
         teamName: r.teams?.name ?? 'Team',
         createdAt: r.created_at,
