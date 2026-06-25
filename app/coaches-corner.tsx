@@ -28,6 +28,7 @@ function relativeTime(iso: string): string {
 type Post = {
   shareId: string;
   contentType: string;
+  teamId: string;
   teamName: string;
   createdAt: string;
   title: string;
@@ -56,6 +57,7 @@ export default function CoachesCornerScreen() {
       return {
         shareId: r.id,
         contentType: r.content_type,
+        teamId: r.team_id,
         teamName: r.teams?.name ?? 'Team',
         createdAt: r.created_at,
         title: c?.title ?? '(content unavailable)',

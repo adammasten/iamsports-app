@@ -1,4 +1,4 @@
-import { useTeamContext } from '@/context';
+import { COACH_ROLES, useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -37,9 +37,6 @@ type SortKey = 'date' | 'name' | 'duration';
 // Grouped candidates for the "Post to wall" player picker.
 type PickerPlayer = { player_id: string; name: string };
 type PickerGroup = { key: string; title: string; players: PickerPlayer[] };
-
-// Roles that count as coaching a team (can send to that team's players' inboxes).
-const COACH_ROLES = ['admin', 'head_coach', 'coach'];
 
 export default function MyWorkScreen() {
   const insets = useSafeAreaInsets();

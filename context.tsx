@@ -3,6 +3,10 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 
 export type Role = 'admin' | 'head_coach' | 'coach' | 'parent' | 'player' | 'follower';
 
+// Roles that count as coaching a team. Shared across screens that gate on
+// coach-level access (e.g. My Work / Coaches' Corner destination + filter logic).
+export const COACH_ROLES: Role[] = ['admin', 'head_coach', 'coach'];
+
 // Higher number = higher precedence. Used by activeRole to pick a single role
 // when the same user holds multiple roles on the same team (e.g. a parent who
 // is also an assistant coach). Mirrors the membership_role enum in
