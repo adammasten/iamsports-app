@@ -260,7 +260,7 @@ export default function CoachesCornerScreen() {
         )}
       </View>
 
-      <View style={styles.filterRow}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
         <Dropdown compact value={teamFilter} options={teamOptions} onSelect={setTeamFilter} placeholder="Team" />
         <Dropdown compact value={typeFilter} options={TYPE_OPTIONS} onSelect={setTypeFilter} placeholder="Type" />
         <Dropdown compact value={sortBy} options={SORT_OPTIONS} onSelect={setSortBy} placeholder="Sort" />
@@ -279,7 +279,7 @@ export default function CoachesCornerScreen() {
             />
           );
         })}
-      </View>
+      </ScrollView>
 
       <View style={[styles.content, visiblePosts.length > 0 && styles.contentTop]}>
         {loading ? (
@@ -320,7 +320,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, height: 42,
   },
   searchInput: { flex: 1, color: '#fff', fontSize: 15, padding: 0 },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12, marginBottom: 8 },
+  filterRow: { marginTop: 12, marginBottom: 8, flexGrow: 0 },
+  filterRowContent: { flexDirection: 'row', gap: 8, paddingRight: 8 },
 
   content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   contentTop: { alignItems: 'stretch', justifyContent: 'flex-start' },
