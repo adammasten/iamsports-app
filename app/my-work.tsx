@@ -34,11 +34,29 @@ type Reel = {
   destinations: Destination[];
 };
 
+// A "game" in Film Room is derived from videos the user uploaded — there's no
+// owner column on games. Each Game carries its videos pre-grouped so the inline
+// expand can render without a second query.
+type GameVideo = { id: string; label: string; url: string; sortOrder: number };
+type Game = {
+  id: string;
+  title: string;
+  opponent: string | null;
+  gameDate: string | null;
+  teamId: string;
+  createdAt: string;
+  videos: GameVideo[];
+};
+
 // Filter-bar options for My Work. Single-entry teamOptions hides the Team
 // dropdown (reels carry no team); single-entry typeOptions keeps the Type
 // dropdown visible but constrained — reels-only feed today.
 const MY_WORK_TEAM_OPTIONS: DropdownOption[] = [{ value: 'all', label: 'All reels' }];
-const MY_WORK_TYPE_OPTIONS: DropdownOption[] = [{ value: 'all', label: 'All' }];
+const MY_WORK_TYPE_OPTIONS: DropdownOption[] = [
+  { value: 'all', label: 'All' },
+  { value: 'reel', label: 'Reels' },
+  { value: 'game', label: 'Games' },
+];
 const MY_WORK_SORT_OPTIONS: DropdownOption[] = [
   { value: 'newest', label: 'Newest' },
   { value: 'az', label: 'A–Z' },
@@ -54,9 +72,14 @@ export default function MyWorkScreen() {
   const { userId, userKids, userTeams } = useTeamContext();
 
   const [reels, setReels] = useState<Reel[]>([]);
+  // Games derived from the user's own videos (videos.uploaded_by_user_id=me,
+  // grouped by game_id). Tapping a game card expands it inline to reveal
+  // game.videos — no navigation off Film Room until a video row is tapped.
+  const [games, setGames] = useState<Game[]>([]);
+  const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // Filtered+sorted items, produced by FilterBar (a FilterableItem subset; the
-  // full Reel is recovered via reelsById for the card render).
+  // full Reel/Game is recovered via reelsById/gamesById for the card render).
   const [visibleReels, setVisibleReels] = useState<FilterableItem[]>([]);
   // Batch-loaded tag data for the reel feed: each reel's tag set + tag metadata.
   const [tagsById, setTagsById] = useState<Map<string, Set<string>>>(new Map());
@@ -145,8 +168,47 @@ export default function MyWorkScreen() {
     setLoading(false);
   }
 
+  // Games are derived from the user's own video uploads. ONE query: pull every
+  // video the user uploaded, embed games(...) for the parent row, then group
+  // client-side by game_id into a Map. RLS-blocked games come back with
+  // row.games === null and are dropped. Personal uploads (game_id IS NULL) are
+  // also dropped — they're not "games" in the Film Room sense.
+  async function loadGames() {
+    if (!userId) { setGames([]); return; }
+    const { data, error } = await supabase
+      .from('videos')
+      .select('id, label, url, sort_order, game_id, games (id, title, opponent, game_date, team_id, created_at)')
+      .eq('uploaded_by_user_id', userId);
+    if (error) { Alert.alert('Error', error.message); return; }
+
+    const byId = new Map<string, Game>();
+    (data || []).forEach((row: any) => {
+      const g = row.games;
+      if (!g) return;
+      let game = byId.get(row.game_id);
+      if (!game) {
+        game = {
+          id: g.id,
+          title: g.title,
+          opponent: g.opponent ?? null,
+          gameDate: g.game_date ?? null,
+          teamId: g.team_id,
+          createdAt: g.created_at,
+          videos: [],
+        };
+        byId.set(row.game_id, game);
+      }
+      game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order });
+    });
+    for (const game of byId.values()) {
+      game.videos.sort((a, b) => a.sortOrder - b.sortOrder);
+    }
+    setGames([...byId.values()]);
+  }
+
   useEffect(() => {
     loadReels();
+    loadGames();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
@@ -248,25 +310,46 @@ export default function MyWorkScreen() {
     return groups;
   }, [userKids, userTeams, coachedPlayers]);
 
-  // Map reels → FilterableItem for FilterBar. id is the reel id (unique).
-  // teamId/teamName are empty — reels carry no team (no highlight_reels.team_id),
-  // and MY_WORK_TEAM_OPTIONS is single-entry so the Team dropdown is hidden.
-  // reelsById recovers the full Reel for the card render.
+  // Map reels + games → FilterableItem for FilterBar. Reels carry no team
+  // (teamId/teamName empty); games carry game.teamId — teamName stays empty
+  // because MY_WORK_TEAM_OPTIONS is single-entry so the Team dropdown is
+  // hidden regardless. Games have no durationSeconds so 'longest' sort lands
+  // them at the bottom (Math.max chooses (b.duration ?? 0) - (a.duration ?? 0)
+  // in FilterBar — acceptable). reelsById/gamesById recover the full row for
+  // the card render; the list-render branches on fi.contentType.
   const items = useMemo<FilterableItem[]>(
-    () => reels.map(r => ({
-      id: r.id, teamId: '', teamName: '',
-      contentType: 'reel', title: r.name, createdAt: r.createdAt,
-      durationSeconds: r.durationSeconds,
-    })),
-    [reels],
+    () => [
+      ...reels.map(r => ({
+        id: r.id, teamId: '', teamName: '',
+        contentType: 'reel', title: r.name, createdAt: r.createdAt,
+        durationSeconds: r.durationSeconds,
+      })),
+      ...games.map(g => ({
+        id: g.id, teamId: g.teamId, teamName: '',
+        contentType: 'game', title: g.title, createdAt: g.createdAt,
+      })),
+    ],
+    [reels, games],
   );
   const reelsById = useMemo(() => new Map(reels.map(r => [r.id, r])), [reels]);
+  const gamesById = useMemo(() => new Map(games.map(g => [g.id, g])), [games]);
 
   function formatDuration(seconds: number | null) {
     if (seconds == null) return '—';
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  // games.game_date is a DATE (YYYY-MM-DD). new Date('YYYY-MM-DD') parses as
+  // UTC midnight, which renders as the prior day in any timezone west of UTC.
+  // Reconstruct as a local-time date so the displayed date matches what the
+  // user entered on the game-creation screen.
+  function formatGameDate(ymd: string | null) {
+    if (!ymd) return '';
+    const [y, m, d] = ymd.split('-').map(n => parseInt(n, 10));
+    if (!y || !m || !d) return '';
+    return new Date(y, m - 1, d).toLocaleDateString();
   }
 
   function openReel(reel: Reel) {
@@ -536,59 +619,111 @@ export default function MyWorkScreen() {
       <View style={[styles.content, visibleReels.length > 0 && styles.contentTop]}>
         {loading ? (
           <ActivityIndicator size="large" color="#534AB7" />
-        ) : reels.length === 0 ? (
-          <Text style={styles.empty}>No reels yet. Export a highlight to see it here.</Text>
+        ) : reels.length === 0 && games.length === 0 ? (
+          <Text style={styles.empty}>Nothing here yet. Export a reel or upload game film to see it.</Text>
         ) : visibleReels.length === 0 ? (
-          <Text style={styles.empty}>No reels match your filters.</Text>
+          <Text style={styles.empty}>Nothing matches your filters.</Text>
         ) : (
           <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
             {visibleReels.map(fi => {
-              const reel = reelsById.get(fi.id);
-              if (!reel) return null;
-              return (
-              <View key={reel.id} style={styles.card}>
-                <TouchableOpacity style={styles.thumb} onPress={() => openReel(reel)}>
-                  <Ionicons name="film-outline" size={30} color="#666" />
-                </TouchableOpacity>
-
-                <View style={styles.cardBody}>
-                  {renamingId === reel.id ? (
-                    <TextInput
-                      style={styles.cardTitleInput}
-                      value={draftName}
-                      onChangeText={setDraftName}
-                      autoFocus
-                      selectTextOnFocus
-                      returnKeyType="done"
-                      onSubmitEditing={() => commitRename(reel)}
-                      onBlur={() => commitRename(reel)}
-                    />
-                  ) : (
-                    <TouchableOpacity onPress={() => startRename(reel)}>
-                      <Text style={styles.cardTitle} numberOfLines={1}>{reel.name}</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity onPress={() => openReel(reel)} activeOpacity={0.7}>
-                    <Text style={styles.cardMeta} numberOfLines={1}>
-                      {formatDuration(reel.durationSeconds)} · {new Date(reel.createdAt).toLocaleDateString()}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <View style={styles.badgeRow}>{renderBadges(reel.destinations)}</View>
-
-                  <View style={styles.actions}>
-                    <TouchableOpacity style={styles.postBtn} onPress={() => confirmPostToWall(reel)}>
-                      <Text style={styles.postBtnText}>Post to wall</Text>
+              if (fi.contentType === 'reel') {
+                const reel = reelsById.get(fi.id);
+                if (!reel) return null;
+                return (
+                  <View key={`reel:${reel.id}`} style={styles.card}>
+                    <TouchableOpacity style={styles.thumb} onPress={() => openReel(reel)}>
+                      <Ionicons name="film-outline" size={30} color="#666" />
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.trashBtn} onPress={() => confirmDelete(reel)}>
-                      <Ionicons name="trash-outline" size={18} color="#a55" />
-                    </TouchableOpacity>
+                    <View style={styles.cardBody}>
+                      {renamingId === reel.id ? (
+                        <TextInput
+                          style={styles.cardTitleInput}
+                          value={draftName}
+                          onChangeText={setDraftName}
+                          autoFocus
+                          selectTextOnFocus
+                          returnKeyType="done"
+                          onSubmitEditing={() => commitRename(reel)}
+                          onBlur={() => commitRename(reel)}
+                        />
+                      ) : (
+                        <TouchableOpacity onPress={() => startRename(reel)}>
+                          <Text style={styles.cardTitle} numberOfLines={1}>{reel.name}</Text>
+                        </TouchableOpacity>
+                      )}
+
+                      <TouchableOpacity onPress={() => openReel(reel)} activeOpacity={0.7}>
+                        <Text style={styles.cardMeta} numberOfLines={1}>
+                          {formatDuration(reel.durationSeconds)} · {new Date(reel.createdAt).toLocaleDateString()}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <View style={styles.badgeRow}>{renderBadges(reel.destinations)}</View>
+
+                      <View style={styles.actions}>
+                        <TouchableOpacity style={styles.postBtn} onPress={() => confirmPostToWall(reel)}>
+                          <Text style={styles.postBtnText}>Post to wall</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.trashBtn} onPress={() => confirmDelete(reel)}>
+                          <Ionicons name="trash-outline" size={18} color="#a55" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
                   </View>
-                </View>
-              </View>
-              );
+                );
+              }
+              if (fi.contentType === 'game') {
+                const game = gamesById.get(fi.id);
+                if (!game) return null;
+                const expanded = expandedGameId === game.id;
+                const dateStr = formatGameDate(game.gameDate);
+                const videoCount = `${game.videos.length} video${game.videos.length === 1 ? '' : 's'}`;
+                return (
+                  <View key={`game:${game.id}`} style={[styles.card, styles.gameCard]}>
+                    <TouchableOpacity
+                      style={styles.gameHeader}
+                      onPress={() => setExpandedGameId(expanded ? null : game.id)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.gameThumb}>
+                        <Ionicons name="basketball-outline" size={24} color="#666" />
+                      </View>
+                      <View style={styles.cardBody}>
+                        <Text style={styles.cardTitle} numberOfLines={1}>{game.title}</Text>
+                        <Text style={styles.cardMeta} numberOfLines={1}>
+                          {dateStr ? `${dateStr} · ${videoCount}` : videoCount}
+                        </Text>
+                      </View>
+                      <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={20} color="#888" />
+                    </TouchableOpacity>
+                    {expanded && (
+                      <View style={styles.videoList}>
+                        {game.videos.length === 0 ? (
+                          <Text style={styles.videoRowEmpty}>No videos uploaded yet.</Text>
+                        ) : (
+                          game.videos.map(v => (
+                            <TouchableOpacity
+                              key={v.id}
+                              style={styles.videoRow}
+                              onPress={() => Alert.alert(v.label, undefined, [
+                                { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } }) },
+                                { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
+                                { text: 'Cancel', style: 'cancel' },
+                              ])}
+                            >
+                              <Ionicons name="film-outline" size={18} color="#888" />
+                              <Text style={styles.videoRowText} numberOfLines={1}>{v.label}</Text>
+                            </TouchableOpacity>
+                          ))
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              }
+              return null;
             })}
           </ScrollView>
         )}
@@ -756,6 +891,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginBottom: 10,
     borderWidth: 1, borderColor: '#333',
   },
+  // Game cards stack header above the expanded video sub-list — column layout
+  // overrides the reel card's row layout, and gap:0 lets videoList own the
+  // spacing under its top divider.
+  gameCard: { flexDirection: 'column', gap: 0 },
+  gameHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  gameThumb: {
+    width: 72, height: 46, borderRadius: 8, backgroundColor: '#0d0d0d',
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  videoList: {
+    marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#2a2a2a', gap: 2,
+  },
+  videoRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 8, paddingHorizontal: 4,
+  },
+  videoRowText: { color: '#fff', fontSize: 14, fontWeight: '500', flex: 1 },
+  videoRowEmpty: { color: '#555', fontSize: 13, fontStyle: 'italic', paddingVertical: 6 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 },
   thumb: {
     width: 92, minHeight: 92, borderRadius: 10, backgroundColor: '#0d0d0d',
