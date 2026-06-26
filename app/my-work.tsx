@@ -5,6 +5,8 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { type DropdownOption } from './components/Dropdown';
+import FilterBar, { type FilterableItem } from './components/FilterBar';
 import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
 
 // "My Work" — lists the current user's highlight reels (highlight_reels rows
@@ -32,7 +34,16 @@ type Reel = {
   destinations: Destination[];
 };
 
-type SortKey = 'date' | 'name' | 'duration';
+// Filter-bar options for My Work. Single-entry teamOptions hides the Team
+// dropdown (reels carry no team); single-entry typeOptions keeps the Type
+// dropdown visible but constrained — reels-only feed today.
+const MY_WORK_TEAM_OPTIONS: DropdownOption[] = [{ value: 'all', label: 'All reels' }];
+const MY_WORK_TYPE_OPTIONS: DropdownOption[] = [{ value: 'all', label: 'All' }];
+const MY_WORK_SORT_OPTIONS: DropdownOption[] = [
+  { value: 'newest', label: 'Newest' },
+  { value: 'az', label: 'A–Z' },
+  { value: 'longest', label: 'Longest' },
+];
 
 // Grouped candidates for the "Post to wall" player picker.
 type PickerPlayer = { player_id: string; name: string };
@@ -44,8 +55,12 @@ export default function MyWorkScreen() {
 
   const [reels, setReels] = useState<Reel[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState<SortKey>('date');
+  // Filtered+sorted items, produced by FilterBar (a FilterableItem subset; the
+  // full Reel is recovered via reelsById for the card render).
+  const [visibleReels, setVisibleReels] = useState<FilterableItem[]>([]);
+  // Batch-loaded tag data for the reel feed: each reel's tag set + tag metadata.
+  const [tagsById, setTagsById] = useState<Map<string, Set<string>>>(new Map());
+  const [tagMeta, setTagMeta] = useState<Map<string, { name: string; category: string }>>(new Map());
 
   // Inline rename state: which reel is being renamed + the working draft.
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -135,6 +150,36 @@ export default function MyWorkScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  // Batch-load tags for the reel feed whenever reels change. ONE .in() query on
+  // reel_tags, then ONE on tags for names/categories. No N+1. Mirrors the reel
+  // branch of coaches-corner.tsx's tag batch-load — reels-only here.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const reelIds = reels.map(r => r.id);
+      const byId = new Map<string, Set<string>>();
+      const allTagIds = new Set<string>();
+      if (reelIds.length > 0) {
+        const { data } = await supabase.from('reel_tags').select('reel_id, tag_id').in('reel_id', reelIds);
+        (data || []).forEach((r: any) => {
+          const s = byId.get(r.reel_id) ?? new Set<string>();
+          s.add(r.tag_id);
+          byId.set(r.reel_id, s);
+          allTagIds.add(r.tag_id);
+        });
+      }
+      const meta = new Map<string, { name: string; category: string }>();
+      if (allTagIds.size > 0) {
+        const { data } = await supabase.from('tags').select('id, name, category').in('id', [...allTagIds]);
+        (data || []).forEach((t: any) => meta.set(t.id, { name: t.name, category: t.category }));
+      }
+      if (cancelled) return;
+      setTagsById(byId);
+      setTagMeta(meta);
+    })();
+    return () => { cancelled = true; };
+  }, [reels]);
+
   // Team ids the user coaches. players_read RLS only returns players on teams the
   // user is a confirmed member of, so this candidate set and post_to_wall's
   // permission gate agree by construction.
@@ -203,19 +248,19 @@ export default function MyWorkScreen() {
     return groups;
   }, [userKids, userTeams, coachedPlayers]);
 
-  const visibleReels = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const filtered = q ? reels.filter(r => r.name.toLowerCase().includes(q)) : reels;
-    const sorted = [...filtered];
-    if (sortBy === 'name') {
-      sorted.sort((a, b) => a.name.localeCompare(b.name));
-    } else if (sortBy === 'duration') {
-      sorted.sort((a, b) => (b.durationSeconds ?? 0) - (a.durationSeconds ?? 0));
-    } else {
-      sorted.sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // date, newest first
-    }
-    return sorted;
-  }, [reels, search, sortBy]);
+  // Map reels → FilterableItem for FilterBar. id is the reel id (unique).
+  // teamId/teamName are empty — reels carry no team (no highlight_reels.team_id),
+  // and MY_WORK_TEAM_OPTIONS is single-entry so the Team dropdown is hidden.
+  // reelsById recovers the full Reel for the card render.
+  const items = useMemo<FilterableItem[]>(
+    () => reels.map(r => ({
+      id: r.id, teamId: '', teamName: '',
+      contentType: 'reel', title: r.name, createdAt: r.createdAt,
+      durationSeconds: r.durationSeconds,
+    })),
+    [reels],
+  );
+  const reelsById = useMemo(() => new Map(reels.map(r => [r.id, r])), [reels]);
 
   function formatDuration(seconds: number | null) {
     if (seconds == null) return '—';
@@ -467,12 +512,6 @@ export default function MyWorkScreen() {
     });
   }
 
-  const SORTS: { key: SortKey; label: string }[] = [
-    { key: 'date', label: 'Newest' },
-    { key: 'name', label: 'A–Z' },
-    { key: 'duration', label: 'Longest' },
-  ];
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.topRow}>
@@ -483,38 +522,16 @@ export default function MyWorkScreen() {
 
       <Text style={styles.title}>My Work</Text>
 
-      <View style={styles.searchWrap}>
-        <Ionicons name="search" size={16} color="#888" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search reels"
-          placeholderTextColor="#666"
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          returnKeyType="search"
-        />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Ionicons name="close-circle" size={16} color="#666" />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <View style={styles.sortRow}>
-        {SORTS.map(s => {
-          const active = sortBy === s.key;
-          return (
-            <TouchableOpacity
-              key={s.key}
-              style={[styles.sortChip, active && styles.sortChipActive]}
-              onPress={() => setSortBy(s.key)}
-            >
-              <Text style={[styles.sortChipText, active && styles.sortChipTextActive]}>{s.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      <FilterBar
+        items={items}
+        tagsById={tagsById}
+        tagMeta={tagMeta}
+        teamOptions={MY_WORK_TEAM_OPTIONS}
+        typeOptions={MY_WORK_TYPE_OPTIONS}
+        sortOptions={MY_WORK_SORT_OPTIONS}
+        searchPlaceholder="Search reels"
+        onVisibleChange={setVisibleReels}
+      />
 
       <View style={[styles.content, visibleReels.length > 0 && styles.contentTop]}>
         {loading ? (
@@ -522,10 +539,13 @@ export default function MyWorkScreen() {
         ) : reels.length === 0 ? (
           <Text style={styles.empty}>No reels yet. Export a highlight to see it here.</Text>
         ) : visibleReels.length === 0 ? (
-          <Text style={styles.empty}>No reels match “{search}”.</Text>
+          <Text style={styles.empty}>No reels match your filters.</Text>
         ) : (
           <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
-            {visibleReels.map(reel => (
+            {visibleReels.map(fi => {
+              const reel = reelsById.get(fi.id);
+              if (!reel) return null;
+              return (
               <View key={reel.id} style={styles.card}>
                 <TouchableOpacity style={styles.thumb} onPress={() => openReel(reel)}>
                   <Ionicons name="film-outline" size={30} color="#666" />
@@ -568,7 +588,8 @@ export default function MyWorkScreen() {
                   </View>
                 </View>
               </View>
-            ))}
+              );
+            })}
           </ScrollView>
         )}
       </View>
@@ -724,22 +745,6 @@ const styles = StyleSheet.create({
   back: { paddingVertical: 8 },
   backText: { color: '#534AB7', fontSize: 16 },
   title: { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 8, marginBottom: 16 },
-
-  searchWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#1a1a1a', borderRadius: 10, borderWidth: 1, borderColor: '#333',
-    paddingHorizontal: 12, height: 42,
-  },
-  searchInput: { flex: 1, color: '#fff', fontSize: 15, padding: 0 },
-
-  sortRow: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 4 },
-  sortChip: {
-    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16,
-    backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333',
-  },
-  sortChipActive: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
-  sortChipText: { color: '#aaa', fontSize: 13, fontWeight: '600' },
-  sortChipTextActive: { color: '#fff' },
 
   content: { flex: 1, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   contentTop: { alignItems: 'stretch', justifyContent: 'flex-start' },

@@ -12,6 +12,7 @@ export type FilterableItem = {
   contentType: string;
   title: string;
   createdAt: string;
+  durationSeconds?: number | null;
 };
 
 // Tag-filter categories — each renders as a dropdown ONLY when the current items
@@ -99,6 +100,8 @@ export default function FilterBar({
       sorted.sort((a, b) => a.title.localeCompare(b.title));
     } else if (sortBy === 'oldest') {
       sorted.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    } else if (sortBy === 'longest') {
+      sorted.sort((a, b) => (b.durationSeconds ?? 0) - (a.durationSeconds ?? 0));
     } else {
       sorted.sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // newest
     }
@@ -133,7 +136,9 @@ export default function FilterBar({
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
-        <Dropdown compact value={teamFilter} options={teamOptions} onSelect={setTeamFilter} placeholder="Team" />
+        {teamOptions.length > 1 && (
+          <Dropdown compact value={teamFilter} options={teamOptions} onSelect={setTeamFilter} placeholder="Team" />
+        )}
         <Dropdown compact value={typeFilter} options={typeOptions} onSelect={setTypeFilter} placeholder="Type" />
         <Dropdown compact value={sortBy} options={sortOptions} onSelect={setSortBy} placeholder="Sort" />
         {TAG_CATEGORIES.map(cat => {
