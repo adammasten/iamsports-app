@@ -448,7 +448,7 @@ export default function ExportScreen() {
       if (saveToCameraRoll) {
         await saveExportToLibrary(videoUrl);
       } else {
-        Alert.alert('Saved!', 'Your reel is in My Work.');
+        Alert.alert('Saved!', 'Your reel is in Film Room.');
       }
     } catch (e: any) {
       console.log('[export] FAILED:', e);
@@ -724,7 +724,7 @@ export default function ExportScreen() {
             <Text style={styles.toggleLabel}>Also save to camera roll</Text>
             <Switch value={saveToCameraRoll} onValueChange={setSaveToCameraRoll} />
           </View>
-          <Text style={styles.footerHelper}>Always saved to My Work</Text>
+          <Text style={styles.footerHelper}>Always saved to Film Room</Text>
           <TouchableOpacity style={styles.exportBtn} onPress={handleExport}>
             <Text style={styles.exportBtnText}>🎬 Export {totalIncluded} Clips</Text>
           </TouchableOpacity>

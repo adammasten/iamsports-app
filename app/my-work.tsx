@@ -520,7 +520,7 @@ export default function MyWorkScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.title}>My Work</Text>
+      <Text style={styles.title}>Film Room</Text>
 
       <FilterBar
         items={items}
