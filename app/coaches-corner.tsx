@@ -1,11 +1,11 @@
 import { COACH_ROLES, useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
-import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Dropdown, { type DropdownOption } from './components/Dropdown';
+import { type DropdownOption } from './components/Dropdown';
+import FilterBar, { type FilterableItem } from './components/FilterBar';
 
 // Coaches' Corner — feed of coaches'-board posts (shares with audience='coaches')
 // for the teams the user coaches. shares_read RLS already scopes the query to
@@ -29,15 +29,6 @@ const SORT_OPTIONS: DropdownOption[] = [
   { value: 'newest', label: 'Newest' },
   { value: 'oldest', label: 'Oldest' },
   { value: 'az', label: 'A–Z' },
-];
-
-// Tag-filter categories — each renders as a dropdown ONLY when the current feed
-// has at least one tag of that category. Order matches the filter bar.
-const TAG_CATEGORIES: { key: string; label: string; allLabel: string }[] = [
-  { key: 'players', label: 'Player', allLabel: 'All players' },
-  { key: 'offense', label: 'Offense', allLabel: 'All offense' },
-  { key: 'defense', label: 'Defense', allLabel: 'All defense' },
-  { key: 'plays', label: 'Plays', allLabel: 'All plays' },
 ];
 
 function relativeTime(iso: string): string {
@@ -70,18 +61,9 @@ export default function CoachesCornerScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filter-bar state (all in-memory; no refetch on change).
-  const [search, setSearch] = useState('');
-  const [teamFilter, setTeamFilter] = useState('all');
-  const [typeFilter, setTypeFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('newest');
-
-  // Per-category tag filters (single-select; 'all' = no constraint). Rendered
-  // only when the feed has tags of that category.
-  const [playerFilter, setPlayerFilter] = useState('all');
-  const [offenseFilter, setOffenseFilter] = useState('all');
-  const [defenseFilter, setDefenseFilter] = useState('all');
-  const [playsFilter, setPlaysFilter] = useState('all');
+  // Filtered+sorted items, produced by FilterBar (a FilterableItem subset; the
+  // full Post is recovered via postsById for the card render).
+  const [visiblePosts, setVisiblePosts] = useState<FilterableItem[]>([]);
 
   // Batch-loaded tag data for the feed: each post's tag set (by contentId) and
   // tag metadata (id → name/category). Three queries total, no N+1 (see effect).
@@ -169,55 +151,23 @@ export default function CoachesCornerScreen() {
     ...userTeams.filter(t => COACH_ROLES.includes(t.role)).map(t => ({ value: t.team_id, label: t.name })),
   ], [userTeams]);
 
-  // Per-category tag options derived from tags actually present on the feed.
-  // Categories with zero feed tags yield an empty list → no dropdown rendered.
-  const tagOptionsByCategory = useMemo<Record<string, DropdownOption[]>>(() => {
-    const present = new Set<string>();
-    posts.forEach(p => tagsByContentId.get(p.contentId)?.forEach(tid => present.add(tid)));
-    const byCat: Record<string, DropdownOption[]> = {};
-    for (const cat of TAG_CATEGORIES) {
-      byCat[cat.key] = [...present]
-        .filter(tid => tagMeta.get(tid)?.category === cat.key)
-        .map(tid => ({ value: tid, label: tagMeta.get(tid)!.name }))
-        .sort((a, b) => a.label.localeCompare(b.label));
-    }
-    return byCat;
-  }, [posts, tagsByContentId, tagMeta]);
-
-  // Map each category to its filter value + setter so the dropdowns render in a loop.
-  const tagFilterByCategory: Record<string, { value: string; set: (v: string) => void }> = {
-    players: { value: playerFilter, set: setPlayerFilter },
-    offense: { value: offenseFilter, set: setOffenseFilter },
-    defense: { value: defenseFilter, set: setDefenseFilter },
-    plays: { value: playsFilter, set: setPlaysFilter },
-  };
-
-  // Apply team / type / search + per-category tag filters (AND), then sort.
-  const visiblePosts = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const activeTags = [playerFilter, offenseFilter, defenseFilter, playsFilter].filter(v => v !== 'all');
-    const filtered = posts.filter(p => {
-      if (!(teamFilter === 'all' || p.teamId === teamFilter)) return false;
-      if (!(typeFilter === 'all' || p.contentType === typeFilter)) return false;
-      if (!(q === '' || p.title.toLowerCase().includes(q) || p.teamName.toLowerCase().includes(q))) return false;
-      // AND across categories: the post must carry EVERY selected tag. A post with
-      // no tags (video/game, or untagged) fails any active tag filter.
-      if (activeTags.length > 0) {
-        const tagSet = tagsByContentId.get(p.contentId);
-        if (!activeTags.every(tid => tagSet?.has(tid))) return false;
-      }
-      return true;
-    });
-    const sorted = [...filtered];
-    if (sortBy === 'az') {
-      sorted.sort((a, b) => a.title.localeCompare(b.title));
-    } else if (sortBy === 'oldest') {
-      sorted.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    } else {
-      sorted.sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // newest
-    }
-    return sorted;
-  }, [posts, search, teamFilter, typeFilter, sortBy, playerFilter, offenseFilter, defenseFilter, playsFilter, tagsByContentId]);
+  // Map posts → FilterableItem for FilterBar. id is the SHARE id (unique per
+  // post), not contentId — the same content can appear on multiple coaches
+  // boards, so contentId isn't unique and would collapse cards. tagsByContentId
+  // is therefore re-keyed by share id so each item's tag set still lines up.
+  // postsById recovers the full Post (storagePath etc.) for the card render.
+  const items = useMemo<FilterableItem[]>(
+    () => posts.map(p => ({
+      id: p.shareId, teamId: p.teamId, teamName: p.teamName,
+      contentType: p.contentType, title: p.title, createdAt: p.createdAt,
+    })),
+    [posts],
+  );
+  const tagsById = useMemo(
+    () => new Map(posts.map(p => [p.shareId, tagsByContentId.get(p.contentId) ?? new Set<string>()])),
+    [posts, tagsByContentId],
+  );
+  const postsById = useMemo(() => new Map(posts.map(p => [p.shareId, p])), [posts]);
 
   function openShared(item: Post) {
     if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
@@ -242,44 +192,16 @@ export default function CoachesCornerScreen() {
 
       <Text style={styles.title}>Coaches&apos; Corner</Text>
 
-      <View style={styles.searchWrap}>
-        <Ionicons name="search" size={16} color="#888" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search posts"
-          placeholderTextColor="#666"
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          returnKeyType="search"
-        />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Ionicons name="close-circle" size={16} color="#666" />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterRowContent}>
-        <Dropdown compact value={teamFilter} options={teamOptions} onSelect={setTeamFilter} placeholder="Team" />
-        <Dropdown compact value={typeFilter} options={TYPE_OPTIONS} onSelect={setTypeFilter} placeholder="Type" />
-        <Dropdown compact value={sortBy} options={SORT_OPTIONS} onSelect={setSortBy} placeholder="Sort" />
-        {TAG_CATEGORIES.map(cat => {
-          const opts = tagOptionsByCategory[cat.key];
-          if (!opts || opts.length === 0) return null;
-          const f = tagFilterByCategory[cat.key];
-          return (
-            <Dropdown
-              key={cat.key}
-              compact
-              value={f.value}
-              options={[{ value: 'all', label: cat.allLabel }, ...opts]}
-              onSelect={f.set}
-              placeholder={cat.label}
-            />
-          );
-        })}
-      </ScrollView>
+      <FilterBar
+        items={items}
+        tagsById={tagsById}
+        tagMeta={tagMeta}
+        teamOptions={teamOptions}
+        typeOptions={TYPE_OPTIONS}
+        sortOptions={SORT_OPTIONS}
+        searchPlaceholder="Search posts"
+        onVisibleChange={setVisiblePosts}
+      />
 
       <View style={[styles.content, visiblePosts.length > 0 && styles.contentTop]}>
         {loading ? (
@@ -290,16 +212,20 @@ export default function CoachesCornerScreen() {
           <Text style={styles.empty}>No posts match your filters.</Text>
         ) : (
           <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }}>
-            {visiblePosts.map(item => (
-              <TouchableOpacity key={item.shareId} style={styles.card} onPress={() => openShared(item)}>
-                <View style={styles.cardTop}>
-                  <Text style={styles.teamPill} numberOfLines={1}>{item.teamName}</Text>
-                  <Text style={styles.typeLabel}>{CONTENT_LABEL[item.contentType] ?? item.contentType}</Text>
-                </View>
-                <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={styles.cardMeta}>{relativeTime(item.createdAt)}</Text>
-              </TouchableOpacity>
-            ))}
+            {visiblePosts.map(fi => {
+              const item = postsById.get(fi.id);
+              if (!item) return null;
+              return (
+                <TouchableOpacity key={item.shareId} style={styles.card} onPress={() => openShared(item)}>
+                  <View style={styles.cardTop}>
+                    <Text style={styles.teamPill} numberOfLines={1}>{item.teamName}</Text>
+                    <Text style={styles.typeLabel}>{CONTENT_LABEL[item.contentType] ?? item.contentType}</Text>
+                  </View>
+                  <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+                  <Text style={styles.cardMeta}>{relativeTime(item.createdAt)}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         )}
       </View>
@@ -313,15 +239,6 @@ const styles = StyleSheet.create({
   back: { paddingVertical: 8 },
   backText: { color: '#534AB7', fontSize: 16 },
   title: { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 8, marginBottom: 16 },
-
-  searchWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#1a1a1a', borderRadius: 10, borderWidth: 1, borderColor: '#333',
-    paddingHorizontal: 12, height: 42,
-  },
-  searchInput: { flex: 1, color: '#fff', fontSize: 15, padding: 0 },
-  filterRow: { marginTop: 12, marginBottom: 8, flexGrow: 0 },
-  filterRowContent: { flexDirection: 'row', gap: 8, paddingRight: 8 },
 
   content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   contentTop: { alignItems: 'stretch', justifyContent: 'flex-start' },
