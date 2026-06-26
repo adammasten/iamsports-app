@@ -31,6 +31,15 @@ const SORT_OPTIONS: DropdownOption[] = [
   { value: 'az', label: 'A–Z' },
 ];
 
+// Tag-filter categories — each renders as a dropdown ONLY when the current feed
+// has at least one tag of that category. Order matches the filter bar.
+const TAG_CATEGORIES: { key: string; label: string; allLabel: string }[] = [
+  { key: 'players', label: 'Player', allLabel: 'All players' },
+  { key: 'offense', label: 'Offense', allLabel: 'All offense' },
+  { key: 'defense', label: 'Defense', allLabel: 'All defense' },
+  { key: 'plays', label: 'Plays', allLabel: 'All plays' },
+];
+
 function relativeTime(iso: string): string {
   const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
   if (m < 1) return 'just now';
@@ -67,6 +76,18 @@ export default function CoachesCornerScreen() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
 
+  // Per-category tag filters (single-select; 'all' = no constraint). Rendered
+  // only when the feed has tags of that category.
+  const [playerFilter, setPlayerFilter] = useState('all');
+  const [offenseFilter, setOffenseFilter] = useState('all');
+  const [defenseFilter, setDefenseFilter] = useState('all');
+  const [playsFilter, setPlaysFilter] = useState('all');
+
+  // Batch-loaded tag data for the feed: each post's tag set (by contentId) and
+  // tag metadata (id → name/category). Three queries total, no N+1 (see effect).
+  const [tagsByContentId, setTagsByContentId] = useState<Map<string, Set<string>>>(new Map());
+  const [tagMeta, setTagMeta] = useState<Map<string, { name: string; category: string }>>(new Map());
+
   // Coaches-audience shares for the user's coached teams (RLS-scoped), each
   // resolved to its content. Reuses the team-wall pattern exactly.
   async function loadCoachesBoard() {
@@ -101,20 +122,92 @@ export default function CoachesCornerScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Batch-load tags for the whole feed whenever posts change. Bucket content ids
+  // by type (reel → reel_tags, clip → clip_tags; video/game have no tags), load
+  // each join table with ONE .in() query, then resolve all tag ids → name/category
+  // in one more. Builds tagsByContentId (contentId → Set<tag_id>) + tagMeta. No N+1.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const reelIds = posts.filter(p => p.contentType === 'reel').map(p => p.contentId);
+      const clipIds = posts.filter(p => p.contentType === 'clip').map(p => p.contentId);
+
+      const byContent = new Map<string, Set<string>>();
+      const allTagIds = new Set<string>();
+      const add = (cid: string, tid: string) => {
+        const s = byContent.get(cid) ?? new Set<string>();
+        s.add(tid);
+        byContent.set(cid, s);
+        allTagIds.add(tid);
+      };
+
+      if (reelIds.length > 0) {
+        const { data } = await supabase.from('reel_tags').select('reel_id, tag_id').in('reel_id', reelIds);
+        (data || []).forEach((r: any) => add(r.reel_id, r.tag_id));
+      }
+      if (clipIds.length > 0) {
+        const { data } = await supabase.from('clip_tags').select('clip_id, tag_id').in('clip_id', clipIds);
+        (data || []).forEach((r: any) => add(r.clip_id, r.tag_id));
+      }
+
+      const meta = new Map<string, { name: string; category: string }>();
+      if (allTagIds.size > 0) {
+        const { data } = await supabase.from('tags').select('id, name, category').in('id', [...allTagIds]);
+        (data || []).forEach((t: any) => meta.set(t.id, { name: t.name, category: t.category }));
+      }
+
+      if (cancelled) return;
+      setTagsByContentId(byContent);
+      setTagMeta(meta);
+    })();
+    return () => { cancelled = true; };
+  }, [posts]);
+
   // Team dropdown options: "All teams" + one per coached team.
   const teamOptions = useMemo<DropdownOption[]>(() => [
     { value: 'all', label: 'All teams' },
     ...userTeams.filter(t => COACH_ROLES.includes(t.role)).map(t => ({ value: t.team_id, label: t.name })),
   ], [userTeams]);
 
-  // Apply team / type / search filters, then sort. Pure in-memory.
+  // Per-category tag options derived from tags actually present on the feed.
+  // Categories with zero feed tags yield an empty list → no dropdown rendered.
+  const tagOptionsByCategory = useMemo<Record<string, DropdownOption[]>>(() => {
+    const present = new Set<string>();
+    posts.forEach(p => tagsByContentId.get(p.contentId)?.forEach(tid => present.add(tid)));
+    const byCat: Record<string, DropdownOption[]> = {};
+    for (const cat of TAG_CATEGORIES) {
+      byCat[cat.key] = [...present]
+        .filter(tid => tagMeta.get(tid)?.category === cat.key)
+        .map(tid => ({ value: tid, label: tagMeta.get(tid)!.name }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+    }
+    return byCat;
+  }, [posts, tagsByContentId, tagMeta]);
+
+  // Map each category to its filter value + setter so the dropdowns render in a loop.
+  const tagFilterByCategory: Record<string, { value: string; set: (v: string) => void }> = {
+    players: { value: playerFilter, set: setPlayerFilter },
+    offense: { value: offenseFilter, set: setOffenseFilter },
+    defense: { value: defenseFilter, set: setDefenseFilter },
+    plays: { value: playsFilter, set: setPlaysFilter },
+  };
+
+  // Apply team / type / search + per-category tag filters (AND), then sort.
   const visiblePosts = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const filtered = posts.filter(p =>
-      (teamFilter === 'all' || p.teamId === teamFilter) &&
-      (typeFilter === 'all' || p.contentType === typeFilter) &&
-      (q === '' || p.title.toLowerCase().includes(q) || p.teamName.toLowerCase().includes(q))
-    );
+    const activeTags = [playerFilter, offenseFilter, defenseFilter, playsFilter].filter(v => v !== 'all');
+    const filtered = posts.filter(p => {
+      if (!(teamFilter === 'all' || p.teamId === teamFilter)) return false;
+      if (!(typeFilter === 'all' || p.contentType === typeFilter)) return false;
+      if (!(q === '' || p.title.toLowerCase().includes(q) || p.teamName.toLowerCase().includes(q))) return false;
+      // AND across categories: the post must carry EVERY selected tag. A post with
+      // no tags (video/game, or untagged) fails any active tag filter.
+      if (activeTags.length > 0) {
+        const tagSet = tagsByContentId.get(p.contentId);
+        if (!activeTags.every(tid => tagSet?.has(tid))) return false;
+      }
+      return true;
+    });
     const sorted = [...filtered];
     if (sortBy === 'az') {
       sorted.sort((a, b) => a.title.localeCompare(b.title));
@@ -124,7 +217,7 @@ export default function CoachesCornerScreen() {
       sorted.sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // newest
     }
     return sorted;
-  }, [posts, search, teamFilter, typeFilter, sortBy]);
+  }, [posts, search, teamFilter, typeFilter, sortBy, playerFilter, offenseFilter, defenseFilter, playsFilter, tagsByContentId]);
 
   function openShared(item: Post) {
     if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
@@ -171,6 +264,21 @@ export default function CoachesCornerScreen() {
         <Dropdown compact value={teamFilter} options={teamOptions} onSelect={setTeamFilter} placeholder="Team" />
         <Dropdown compact value={typeFilter} options={TYPE_OPTIONS} onSelect={setTypeFilter} placeholder="Type" />
         <Dropdown compact value={sortBy} options={SORT_OPTIONS} onSelect={setSortBy} placeholder="Sort" />
+        {TAG_CATEGORIES.map(cat => {
+          const opts = tagOptionsByCategory[cat.key];
+          if (!opts || opts.length === 0) return null;
+          const f = tagFilterByCategory[cat.key];
+          return (
+            <Dropdown
+              key={cat.key}
+              compact
+              value={f.value}
+              options={[{ value: 'all', label: cat.allLabel }, ...opts]}
+              onSelect={f.set}
+              placeholder={cat.label}
+            />
+          );
+        })}
       </View>
 
       <View style={[styles.content, visiblePosts.length > 0 && styles.contentTop]}>
@@ -212,7 +320,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, height: 42,
   },
   searchInput: { flex: 1, color: '#fff', fontSize: 15, padding: 0 },
-  filterRow: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 8 },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12, marginBottom: 8 },
 
   content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   contentTop: { alignItems: 'stretch', justifyContent: 'flex-start' },
