@@ -34,6 +34,11 @@ type Reel = {
   destinations: Destination[];
 };
 
+// A generic postable content unit for the wall-post flow — enough to call
+// post_to_wall (content type + id) plus a title for user-facing messages. Keeps
+// the destination picker content-type-agnostic (reels today, clips later).
+type Postable = { contentType: 'reel' | 'clip' | 'video'; contentId: string; title: string };
+
 // A "game" in Film Room is derived from videos the user uploaded — there's no
 // owner column on games. Each Game carries its videos pre-grouped so the inline
 // expand can render without a second query.
@@ -91,22 +96,22 @@ export default function MyWorkScreen() {
 
   // Post-to-wall picker state: which reel + kid the user chose in the Alert,
   // held while VisibilityPicker collects the tier. null = picker hidden.
-  const [pendingPost, setPendingPost] = useState<{ reel: Reel; playerId: string; kidName: string } | null>(null);
+  const [pendingPost, setPendingPost] = useState<{ item: Postable; playerId: string; kidName: string } | null>(null);
 
   // Players on teams the user coaches (loaded below) — candidates for the
   // post-to-wall picker beyond the user's own kids.
   const [coachedPlayers, setCoachedPlayers] = useState<{ player_id: string; name: string; team_id: string }[]>([]);
   // Which reel's grouped player-picker sheet is open. null = sheet hidden.
-  const [pickerReel, setPickerReel] = useState<Reel | null>(null);
+  const [pickerReel, setPickerReel] = useState<Postable | null>(null);
 
   // Destination picker state. tierReel drives the top-level chooser (Your Kids /
   // Your Teams / Coaches' Corner). teamWallReel / coachesReel drive the team
   // sub-pickers; teamWallChoice holds the chosen team while the user picks
   // Team-only vs Public for a team-wall post.
-  const [tierReel, setTierReel] = useState<Reel | null>(null);
-  const [teamWallReel, setTeamWallReel] = useState<Reel | null>(null);
-  const [coachesReel, setCoachesReel] = useState<Reel | null>(null);
-  const [teamWallChoice, setTeamWallChoice] = useState<{ reel: Reel; teamId: string; teamName: string } | null>(null);
+  const [tierReel, setTierReel] = useState<Postable | null>(null);
+  const [teamWallReel, setTeamWallReel] = useState<Postable | null>(null);
+  const [coachesReel, setCoachesReel] = useState<Postable | null>(null);
+  const [teamWallChoice, setTeamWallChoice] = useState<{ item: Postable; teamId: string; teamName: string } | null>(null);
 
   async function loadReels() {
     if (!userId) { setReels([]); setLoading(false); return; }
@@ -383,20 +388,20 @@ export default function MyWorkScreen() {
   // Your Kids routes to the existing player sheet + VisibilityPicker flow; the
   // two team tiers post player-less, coach-gated shares. Empty-state stands when
   // the user has neither kids nor coached teams.
-  function confirmPostToWall(reel: Reel) {
+  function confirmPostToWall(item: Postable) {
     const hasKids = pickerGroups.some(g => g.key === 'kids');
     const hasTeams = coachedTeams.length > 0;
     if (!hasKids && !hasTeams) {
       Alert.alert('Nothing to post to', 'Add a kid, or join a team as a coach, to post a reel.');
       return;
     }
-    setTierReel(reel);
+    setTierReel(item);
   }
 
-  // Kid chosen in the Alert — defer posting and let VisibilityPicker collect
+  // Player chosen in the sheet — defer posting and let VisibilityPicker collect
   // the tier (public / team / private) before any RPC fires.
-  function postReelToKid(reel: Reel, playerId: string, kidName: string) {
-    setPendingPost({ reel, playerId, kidName });
+  function postReelToKid(item: Postable, playerId: string, kidName: string) {
+    setPendingPost({ item, playerId, kidName });
   }
 
   // Merge new destination badges onto a reel optimistically (dedup by kind; team
@@ -421,13 +426,13 @@ export default function MyWorkScreen() {
   // separate public share — mirroring the kid flow's treatment of public vs team
   // as independent audiences (so a public team post is visible publicly AND on
   // the team wall).
-  async function postTeamWall(choice: { reel: Reel; teamId: string; teamName: string }, alsoPublic: boolean) {
-    const { reel, teamId, teamName } = choice;
+  async function postTeamWall(choice: { item: Postable; teamId: string; teamName: string }, alsoPublic: boolean) {
+    const { item, teamId, teamName } = choice;
     setTeamWallChoice(null);
 
     const { error: teamErr } = await supabase.rpc('post_to_wall', {
-      p_content_type: 'reel',
-      p_content_id: reel.id,
+      p_content_type: item.contentType,
+      p_content_id: item.contentId,
       p_audience: 'team',
       p_target_player_id: null,
       p_team_id: teamId,
@@ -437,8 +442,8 @@ export default function MyWorkScreen() {
     const dests: Destination[] = [{ kind: 'team', teamName }];
     if (alsoPublic) {
       const { error: pubErr } = await supabase.rpc('post_to_wall', {
-        p_content_type: 'reel',
-        p_content_id: reel.id,
+        p_content_type: item.contentType,
+        p_content_id: item.contentId,
         p_audience: 'public',
         p_target_player_id: null,
         p_team_id: teamId,
@@ -447,23 +452,23 @@ export default function MyWorkScreen() {
       dests.push({ kind: 'public' });
     }
 
-    addReelDestinations(reel.id, dests);
+    addReelDestinations(item.contentId, dests);
     Alert.alert('Posted', alsoPublic ? `Posted to ${teamName} wall and public.` : `Posted to ${teamName} wall.`);
   }
 
   // Post a reel to a team's COACHES' board (player-less, coach-gated). No
   // visibility choice — selecting the team posts immediately.
-  async function postCoachesBoard(reel: Reel, teamId: string, teamName: string) {
+  async function postCoachesBoard(item: Postable, teamId: string, teamName: string) {
     setCoachesReel(null);
     const { error } = await supabase.rpc('post_to_wall', {
-      p_content_type: 'reel',
-      p_content_id: reel.id,
+      p_content_type: item.contentType,
+      p_content_id: item.contentId,
       p_audience: 'coaches',
       p_target_player_id: null,
       p_team_id: teamId,
     });
     if (error) { Alert.alert('Error', error.message); return; }
-    addReelDestinations(reel.id, [{ kind: 'coaches' }]);
+    addReelDestinations(item.contentId, [{ kind: 'coaches' }]);
     Alert.alert('Posted', `Posted to ${teamName} coaches' board.`);
   }
 
@@ -475,7 +480,7 @@ export default function MyWorkScreen() {
     const pending = pendingPost;
     if (!pending) return;
     setPendingPost(null);
-    const { reel, playerId, kidName } = pending;
+    const { item, playerId, kidName } = pending;
 
     // Build the list of audiences to post, each with the badge it maps to.
     const targets: { audience: 'player' | 'public' | 'team'; teamId?: string; label: string; dest: Destination }[] = [];
@@ -492,7 +497,7 @@ export default function MyWorkScreen() {
 
     // Only-me (or an empty set) means no wall placement at all.
     if (targets.length === 0) {
-      Alert.alert('Kept private', `“${reel.name}” stays visible only to you.`);
+      Alert.alert('Kept private', `“${item.title}” stays visible only to you.`);
       return;
     }
 
@@ -502,8 +507,8 @@ export default function MyWorkScreen() {
     const newDests: Destination[] = [];
     for (const t of targets) {
       const params: Record<string, any> = {
-        p_content_type: 'reel',
-        p_content_id: reel.id,
+        p_content_type: item.contentType,
+        p_content_id: item.contentId,
         p_audience: t.audience,
         p_target_player_id: playerId,
       };
@@ -522,7 +527,7 @@ export default function MyWorkScreen() {
       const key = (d: Destination) =>
         d.kind === 'team' ? `team:${d.teamName}` : d.kind === 'player' ? `player:${d.kidName}` : d.kind;
       setReels(prev => prev.map(r => {
-        if (r.id !== reel.id) return r;
+        if (r.id !== item.contentId) return r;
         const have = new Set(r.destinations.map(key));
         const add = newDests.filter(d => !have.has(key(d)));
         return add.length ? { ...r, destinations: [...r.destinations, ...add] } : r;
@@ -662,7 +667,7 @@ export default function MyWorkScreen() {
                       <View style={styles.badgeRow}>{renderBadges(reel.destinations)}</View>
 
                       <View style={styles.actions}>
-                        <TouchableOpacity style={styles.postBtn} onPress={() => confirmPostToWall(reel)}>
+                        <TouchableOpacity style={styles.postBtn} onPress={() => confirmPostToWall({ contentType: 'reel', contentId: reel.id, title: reel.name })}>
                           <Text style={styles.postBtnText}>Post to wall</Text>
                         </TouchableOpacity>
 
@@ -801,7 +806,7 @@ export default function MyWorkScreen() {
                   <TouchableOpacity
                     key={t.team_id}
                     style={styles.sheetRow}
-                    onPress={() => { setTeamWallChoice({ reel: teamWallReel, teamId: t.team_id, teamName: t.name }); setTeamWallReel(null); }}
+                    onPress={() => { setTeamWallChoice({ item: teamWallReel, teamId: t.team_id, teamName: t.name }); setTeamWallReel(null); }}
                   >
                     <Text style={styles.sheetRowText}>{t.name}</Text>
                   </TouchableOpacity>
