@@ -152,6 +152,7 @@ export default function RootLayout() {
           <Stack.Screen name="coaches-corner" options={{ headerShown: false }} />
           <Stack.Screen name="upload" options={{ headerShown: false }} />
           <Stack.Screen name="shared-viewer" options={{ headerShown: false }} />
+          <Stack.Screen name="shared-game" options={{ headerShown: false }} />
         </Stack>
         <AuthGate />
         <NameCaptureGate />

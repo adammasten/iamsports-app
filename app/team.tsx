@@ -38,7 +38,7 @@ export default function TeamWallScreen() {
         shareId: r.id,
         contentType: r.content_type,
         createdAt: r.created_at,
-        title: c?.title ?? '(content unavailable)',
+        title: r.content_type === 'game' ? 'Shared game' : (c?.title ?? '(content unavailable)'),
         storagePath: c?.storage_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
@@ -53,7 +53,11 @@ export default function TeamWallScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamId]);
 
-  function openShared(item: { title: string; storagePath: string | null; startTime: number | null; endTime: number | null }) {
+  function openShared(item: { shareId: string; contentType: string; title: string; storagePath: string | null; startTime: number | null; endTime: number | null }) {
+    if (item.contentType === 'game') {
+      router.push({ pathname: '/shared-game', params: { shareId: item.shareId, title: item.title } });
+      return;
+    }
     if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
     router.push({
       pathname: '/shared-viewer',

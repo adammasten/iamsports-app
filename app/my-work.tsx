@@ -37,7 +37,7 @@ type Reel = {
 // A generic postable content unit for the wall-post flow — enough to call
 // post_to_wall (content type + id) plus a title for user-facing messages. Keeps
 // the destination picker content-type-agnostic (reels today, clips later).
-type Postable = { contentType: 'reel' | 'clip' | 'video'; contentId: string; title: string };
+type Postable = { contentType: 'reel' | 'clip' | 'video' | 'game'; contentId: string; title: string };
 
 // A "game" in Film Room is derived from videos the user uploaded — there's no
 // owner column on games. Each Game carries its videos pre-grouped so the inline
@@ -703,6 +703,12 @@ export default function MyWorkScreen() {
                       </View>
                       <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={20} color="#888" />
                     </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.gamePostBtn}
+                      onPress={() => confirmPostToWall({ contentType: 'game', contentId: game.id, title: game.title })}
+                    >
+                      <Text style={styles.postBtnText}>Post to wall</Text>
+                    </TouchableOpacity>
                     {expanded && (
                       <View style={styles.videoList}>
                         {game.videos.length === 0 ? (
@@ -830,9 +836,11 @@ export default function MyWorkScreen() {
                 <TouchableOpacity style={styles.sheetRow} onPress={() => postTeamWall(teamWallChoice, false)}>
                   <Text style={styles.sheetRowText}>Team only</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.sheetRow} onPress={() => postTeamWall(teamWallChoice, true)}>
-                  <Text style={styles.sheetRowText}>Public</Text>
-                </TouchableOpacity>
+                {teamWallChoice.item.contentType !== 'game' && (
+                  <TouchableOpacity style={styles.sheetRow} onPress={() => postTeamWall(teamWallChoice, true)}>
+                    <Text style={styles.sheetRowText}>Public</Text>
+                  </TouchableOpacity>
+                )}
               </ScrollView>
               <TouchableOpacity style={styles.sheetCancel} onPress={() => setTeamWallChoice(null)}>
                 <Text style={styles.sheetCancelText}>Cancel</Text>
@@ -871,6 +879,7 @@ export default function MyWorkScreen() {
       {pendingPost && (
         <VisibilityPicker
           teams={userTeams.map(t => ({ id: t.team_id, name: t.name }))}
+          allowPublic={pendingPost.item.contentType !== 'game'}
           onSelect={handleVisibilitySelect}
           onCancel={() => setPendingPost(null)}
         />
@@ -913,6 +922,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8, paddingHorizontal: 4,
   },
   videoRowText: { color: '#fff', fontSize: 14, fontWeight: '500', flex: 1 },
+  gamePostBtn: { alignSelf: 'flex-start', backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 10 },
   videoRowEmpty: { color: '#555', fontSize: 13, fontStyle: 'italic', paddingVertical: 6 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 },
   thumb: {

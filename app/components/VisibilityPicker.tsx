@@ -17,13 +17,15 @@ type Props = {
   teams: Team[];
   onSelect: (selection: VisibilitySelection) => void;
   onCancel: () => void;
+  // When false, hide the "Public" option (e.g. team-gated content like games).
+  allowPublic?: boolean;
 };
 
 // Presentational multi-select picker only — it never calls post_to_wall or any
 // RPC. It collects a SET of visibility choices (checkboxes) and hands them back
 // via onSelect; the caller fans them out into one share row per selection.
 // Bottom-sheet styling mirrors kid.tsx's picker so the two stay consistent.
-export default function VisibilityPicker({ teams, onSelect, onCancel }: Props) {
+export default function VisibilityPicker({ teams, onSelect, onCancel, allowPublic = true }: Props) {
   const [onlyMe, setOnlyMe] = useState(false);
   const [friendsFamily, setFriendsFamily] = useState(false);
   const [isPublic, setIsPublic] = useState(false);
@@ -84,12 +86,14 @@ export default function VisibilityPicker({ teams, onSelect, onCancel }: Props) {
               selected={friendsFamily}
               onPress={() => toggleShared(friendsFamily, setFriendsFamily)}
             />
-            <CheckRow
-              label="Public"
-              helper="Anyone can see it."
-              selected={isPublic}
-              onPress={() => toggleShared(isPublic, setIsPublic)}
-            />
+            {allowPublic && (
+              <CheckRow
+                label="Public"
+                helper="Anyone can see it."
+                selected={isPublic}
+                onPress={() => toggleShared(isPublic, setIsPublic)}
+              />
+            )}
             {hasTeams && (
               <CheckRow
                 label="Team wall"

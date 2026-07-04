@@ -89,7 +89,9 @@ export default function CoachesCornerScreen() {
         teamId: r.team_id,
         teamName: r.teams?.name ?? 'Team',
         createdAt: r.created_at,
-        title: c?.title ?? '(content unavailable)',
+        // A 'game' share can't be resolved by resolve_shared_content (multi-video,
+        // no single file) — show a generic label; tapping opens the game view.
+        title: r.content_type === 'game' ? 'Shared game' : (c?.title ?? '(content unavailable)'),
         storagePath: c?.storage_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
@@ -170,6 +172,10 @@ export default function CoachesCornerScreen() {
   const postsById = useMemo(() => new Map(posts.map(p => [p.shareId, p])), [posts]);
 
   function openShared(item: Post) {
+    if (item.contentType === 'game') {
+      router.push({ pathname: '/shared-game', params: { shareId: item.shareId, title: item.title } });
+      return;
+    }
     if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
     router.push({
       pathname: '/shared-viewer',
