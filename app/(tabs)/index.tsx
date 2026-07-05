@@ -2,13 +2,14 @@ import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import DateTimePicker, { DateTimePickerAndroid, DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Alert, FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import ContentTypeBadge from '../components/ContentTypeBadge';
+import { type DropdownOption } from '../components/Dropdown';
+import FilterBar, { type FilterableItem } from '../components/FilterBar';
 
 // Extract local YYYY-MM-DD from a Date. Never use .toISOString() — that
-// converts via UTC and shifts the date by a day for users west of UTC
-// (this app's users are US/Central, where any local date before 6am turns
-// into the previous day in UTC). All three getters below return LOCAL time.
+// converts via UTC and shifts the date by a day for users west of UTC.
 function dateToLocalYMD(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -16,113 +17,165 @@ function dateToLocalYMD(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-// Single source of truth for date display. Postgres returns the date column
-// as a YYYY-MM-DD string; we split and reorder to DD/MM/YYYY without ever
-// instantiating a Date object (which would re-introduce timezone risk).
 function formatDate(ymd: string | null): string {
   if (!ymd) return 'No date set';
   const [y, m, d] = ymd.split('-');
   return `${d}/${m}/${y}`;
 }
 
+// Team wall filter/sort — no tags loaded here, Team dropdown hidden (one team).
+// Stable module refs so FilterBar's memo doesn't churn each render.
+const EMPTY_TAGS = new Map<string, Set<string>>();
+const EMPTY_TAG_META = new Map<string, { name: string; category: string }>();
+const TEAM_OPTIONS: DropdownOption[] = [{ value: 'all', label: 'All' }];
+const TYPE_OPTIONS: DropdownOption[] = [
+  { value: 'all', label: 'All' },
+  { value: 'reel', label: 'Reels' },
+  { value: 'game', label: 'Games' },
+  { value: 'clip', label: 'Clips' },
+];
+const SORT_OPTIONS: DropdownOption[] = [
+  { value: 'newest', label: 'Newest' },
+  { value: 'oldest', label: 'Oldest' },
+  { value: 'az', label: 'A–Z' },
+];
+
+type WallPost = {
+  shareId: string; contentType: string; createdAt: string;
+  title: string; storagePath: string | null;
+  startTime: number | null; endTime: number | null;
+};
+
 export default function HomeScreen() {
   const { activeTeam } = useTeamContext();
 
+  // Games manager (create + open existing to add film) — behind the New Game button.
   const [games, setGames] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [opponent, setOpponent] = useState('');
   const [gameDate, setGameDate] = useState<Date>(new Date());
 
+  // Team wall (the main view): team-audience shares for this team.
+  const [posts, setPosts] = useState<WallPost[]>([]);
+  const [wallLoading, setWallLoading] = useState(true);
+  const [visiblePosts, setVisiblePosts] = useState<FilterableItem[]>([]);
+
   useEffect(() => {
     if (activeTeam) {
       fetchGames(activeTeam.id);
+      loadTeamWall(activeTeam.id);
     } else {
-      setGames([]);
-      setLoading(false);
+      setGames([]); setPosts([]); setWallLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTeam]);
 
   async function fetchGames(teamId: string) {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('games')
-      .select('*')
-      .eq('team_id', teamId)
+    const { data } = await supabase
+      .from('games').select('*').eq('team_id', teamId)
       .order('game_date', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false });
-    if (error) Alert.alert('Error', error.message);
-    else setGames(data || []);
-    setLoading(false);
+    setGames(data || []);
+  }
+
+  async function loadTeamWall(teamId: string) {
+    setWallLoading(true);
+    const { data: rows } = await supabase
+      .from('shares').select('id, content_type, created_at')
+      .eq('team_id', teamId).eq('audience', 'team')
+      .order('created_at', { ascending: false });
+    const items = await Promise.all((rows || []).map(async (r: any) => {
+      const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
+      const c = Array.isArray(resolved) ? resolved[0] : null;
+      return {
+        shareId: r.id, contentType: r.content_type, createdAt: r.created_at,
+        title: r.content_type === 'game' ? 'Shared game' : (c?.title ?? '(content unavailable)'),
+        storagePath: c?.storage_path ?? null,
+        startTime: c?.start_time ?? null, endTime: c?.end_time ?? null,
+      };
+    }));
+    setPosts(items);
+    setWallLoading(false);
+  }
+
+  const items = useMemo<FilterableItem[]>(
+    () => posts.map(p => ({
+      id: p.shareId,
+      teamId: activeTeam?.id ?? '',
+      teamName: activeTeam?.name ?? 'Team',
+      contentType: p.contentType === 'video' ? 'game' : p.contentType,
+      title: p.title,
+      createdAt: p.createdAt,
+    })),
+    [posts, activeTeam],
+  );
+  const postsById = useMemo(() => new Map(posts.map(p => [p.shareId, p])), [posts]);
+
+  function openShared(item: WallPost) {
+    if (item.contentType === 'game') {
+      router.push({ pathname: '/shared-game', params: { shareId: item.shareId, title: item.title } });
+      return;
+    }
+    if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
+    router.push({
+      pathname: '/shared-viewer',
+      params: {
+        title: item.title, storagePath: item.storagePath,
+        startTime: item.startTime != null ? String(item.startTime) : '',
+        endTime: item.endTime != null ? String(item.endTime) : '',
+      },
+    });
   }
 
   function toggleForm() {
-    // Reset the picker default to "today" each time the form opens, so a
-    // session that spans midnight doesn't show yesterday on the next open.
     if (!showForm) setGameDate(new Date());
     setShowForm(!showForm);
   }
-
-  function onDateChange(_: DateTimePickerEvent, selected?: Date) {
-    if (selected) setGameDate(selected);
-  }
-
+  function onDateChange(_: DateTimePickerEvent, selected?: Date) { if (selected) setGameDate(selected); }
   function openAndroidPicker() {
-    DateTimePickerAndroid.open({
-      value: gameDate,
-      mode: 'date',
-      onChange: onDateChange,
-    });
+    DateTimePickerAndroid.open({ value: gameDate, mode: 'date', onChange: onDateChange });
   }
 
   async function createGame() {
     if (!opponent.trim()) { Alert.alert('Enter an opponent'); return; }
     if (!activeTeam) { Alert.alert('No team selected'); return; }
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('games')
-      .insert({
-        title: `vs ${opponent.trim()}`,
-        opponent: opponent.trim(),
-        game_date: dateToLocalYMD(gameDate),
-        team_id: activeTeam.id,
-      });
-    if (error) Alert.alert('Error', error.message);
-    else {
-      await fetchGames(activeTeam.id);
-      setShowForm(false);
-      setOpponent('');
-      setGameDate(new Date());
-    }
+      .insert({ title: `vs ${opponent.trim()}`, opponent: opponent.trim(), game_date: dateToLocalYMD(gameDate), team_id: activeTeam.id })
+      .select('id, title')
+      .single();
+    if (error) { Alert.alert('Error', error.message); return; }
+    setShowForm(false);
+    setOpponent('');
+    setGameDate(new Date());
+    fetchGames(activeTeam.id);
+    // Straight into the new game to add film.
+    if (data?.id) router.push({ pathname: '/game', params: { id: data.id, title: data.title } });
   }
 
-  async function deleteGame(id: string, title: string) {
-    Alert.alert('Delete Game', `Delete "${title}"? This cannot be undone.`, [
+  function deleteGame(id: string, title: string) {
+    Alert.alert('Delete game', `Delete “${title}”? This cannot be undone.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         const { error } = await supabase.from('games').delete().eq('id', id);
         if (error) Alert.alert('Error', error.message);
         else if (activeTeam) fetchGames(activeTeam.id);
-      }}
+      }},
     ]);
   }
 
-  async function signOut() {
-    await supabase.auth.signOut();
-  }
+  async function signOut() { await supabase.auth.signOut(); }
 
   if (!activeTeam) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
           <View />
-          <TouchableOpacity onPress={signOut}>
-            <Text style={styles.signOut}>Sign out</Text>
-          </TouchableOpacity>
+          <TouchableOpacity onPress={signOut}><Text style={styles.signOut}>Sign out</Text></TouchableOpacity>
         </View>
-        <Text style={styles.title}>🏀 IamSports</Text>
-        <Text style={styles.empty}>No team selected.</Text>
-        <TouchableOpacity style={styles.newGame} onPress={() => router.replace('/select-team')}>
-          <Text style={styles.newGameText}>Pick a team</Text>
+        <Text style={styles.heading}>No team selected</Text>
+        <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/select-team')}>
+          <Text style={styles.primaryBtnText}>Pick a team</Text>
         </TouchableOpacity>
       </View>
     );
@@ -134,110 +187,149 @@ export default function HomeScreen() {
         <TouchableOpacity onPress={() => router.replace('/select-team')}>
           <Text style={styles.switchBtn}>← Switch team</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={signOut}>
-          <Text style={styles.signOut}>Sign out</Text>
+        <TouchableOpacity onPress={signOut}><Text style={styles.signOut}>Sign out</Text></TouchableOpacity>
+      </View>
+
+      <Text style={styles.heading} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{activeTeam.name}</Text>
+
+      <View style={styles.actions}>
+        <TouchableOpacity style={styles.smallBtn} onPress={toggleForm}>
+          <Text style={styles.smallBtnText}>{showForm ? 'Cancel' : '+ New Game'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.smallBtn, styles.smallBtnAlt]} onPress={() => router.push('/export')}>
+          <Text style={styles.smallBtnText}>Export</Text>
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.title}>🏀 IamSports</Text>
-      <Text style={styles.teamName}>{activeTeam.name}</Text>
+      <Text style={styles.subtitle}>Team wall</Text>
 
-      <View style={styles.buttonRow}>
-        <TouchableOpacity style={styles.newGame} onPress={toggleForm}>
-          <Text style={styles.newGameText}>{showForm ? 'Cancel' : '+ New Game'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.exportBtn} onPress={() => router.push('/export')}>
-          <Text style={styles.exportBtnText}>Export</Text>
-        </TouchableOpacity>
-      </View>
+      {showForm ? (
+        // Games manager: create a game, or open an existing one to add film.
+        <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+          <View style={styles.form}>
+            <TextInput
+              style={styles.input}
+              placeholder="Opponent name"
+              placeholderTextColor="#666"
+              value={opponent}
+              onChangeText={setOpponent}
+              autoFocus
+            />
+            <View style={styles.dateRow}>
+              <Text style={styles.dateLabel}>Game date:</Text>
+              {Platform.OS === 'ios' ? (
+                <DateTimePicker value={gameDate} mode="date" display="compact" themeVariant="dark" onChange={onDateChange} />
+              ) : (
+                <TouchableOpacity style={styles.dateBtn} onPress={openAndroidPicker}>
+                  <Text style={styles.dateBtnText}>{formatDate(dateToLocalYMD(gameDate))}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <TouchableOpacity style={styles.saveBtn} onPress={createGame}>
+              <Text style={styles.saveBtnText}>Save &amp; add film</Text>
+            </TouchableOpacity>
+          </View>
 
-      <TouchableOpacity
-        style={styles.wallBtn}
-        onPress={() => router.push({ pathname: '/team', params: { teamId: activeTeam.id, teamName: activeTeam.name } })}
-      >
-        <Text style={styles.wallBtnText}>Team Wall</Text>
-      </TouchableOpacity>
-
-      {showForm && (
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Opponent name"
-            value={opponent}
-            onChangeText={setOpponent}
-            autoFocus
-          />
-          <View style={styles.dateRow}>
-            <Text style={styles.dateLabel}>Game date:</Text>
-            {Platform.OS === 'ios' ? (
-              <DateTimePicker
-                value={gameDate}
-                mode="date"
-                display="compact"
-                onChange={onDateChange}
-              />
-            ) : (
-              <TouchableOpacity style={styles.dateBtn} onPress={openAndroidPicker}>
-                <Text style={styles.dateBtnText}>{formatDate(dateToLocalYMD(gameDate))}</Text>
+          <Text style={styles.sectionLabel}>Your games — tap to add film</Text>
+          {games.length === 0 ? (
+            <Text style={styles.empty}>No games yet.</Text>
+          ) : (
+            games.map(g => (
+              <TouchableOpacity
+                key={g.id}
+                style={styles.gameCard}
+                onPress={() => router.push({ pathname: '/game', params: { id: g.id, title: g.title } })}
+                onLongPress={() => deleteGame(g.id, g.title)}
+              >
+                <Text style={styles.gameTitle} numberOfLines={1}>{g.title}</Text>
+                <Text style={styles.gameDate}>{formatDate(g.game_date)}</Text>
+                <Text style={styles.hint}>Tap to open · Hold to delete</Text>
               </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+      ) : (
+        // The team wall — the main view.
+        <>
+          <FilterBar
+            items={items}
+            tagsById={EMPTY_TAGS}
+            tagMeta={EMPTY_TAG_META}
+            teamOptions={TEAM_OPTIONS}
+            typeOptions={TYPE_OPTIONS}
+            sortOptions={SORT_OPTIONS}
+            searchPlaceholder="Search the wall"
+            onVisibleChange={setVisiblePosts}
+          />
+
+          <View style={[styles.content, visiblePosts.length > 0 && styles.contentTop]}>
+            {wallLoading ? (
+              <ActivityIndicator size="large" color="#534AB7" />
+            ) : posts.length === 0 ? (
+              <Text style={styles.empty}>Nothing on the team wall yet.{'\n'}Post reels or games from Film Room.</Text>
+            ) : visiblePosts.length === 0 ? (
+              <Text style={styles.empty}>Nothing matches your filters.</Text>
+            ) : (
+              <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }}>
+                {visiblePosts.map(fi => {
+                  const item = postsById.get(fi.id);
+                  if (!item) return null;
+                  return (
+                    <TouchableOpacity key={item.shareId} style={styles.card} onPress={() => openShared(item)}>
+                      <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
+                      <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+                      <Text style={styles.cardMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
             )}
           </View>
-          <TouchableOpacity style={styles.saveBtn} onPress={createGame}>
-            <Text style={styles.saveBtnText}>Save Game</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {loading ? (
-        <Text style={styles.empty}>Loading...</Text>
-      ) : games.length === 0 ? (
-        <Text style={styles.empty}>No games yet. Create your first one!</Text>
-      ) : (
-        <FlatList
-          data={games}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.gameCard}
-              onPress={() => router.push({ pathname: '/game', params: { id: item.id, title: item.title } })}
-              onLongPress={() => deleteGame(item.id, item.title)}
-            >
-              <Text style={styles.gameTitle}>{item.title}</Text>
-              <Text style={styles.gameDate}>{formatDate(item.game_date)}</Text>
-              <Text style={styles.hint}>Tap to open • Hold to delete</Text>
-            </TouchableOpacity>
-          )}
-        />
+        </>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: '#fff' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: '#000' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   switchBtn: { color: '#534AB7', fontSize: 14, fontWeight: '600' },
   signOut: { color: '#888', fontSize: 14 },
-  title: { fontSize: 28, fontWeight: '700', marginBottom: 2 },
-  teamName: { fontSize: 16, color: '#534AB7', fontWeight: '600', marginBottom: 20 },
-  buttonRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  newGame: { flex: 1, backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center' },
-  newGameText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  exportBtn: { flex: 1, backgroundColor: '#1D9E75', borderRadius: 12, padding: 16, alignItems: 'center' },
-  exportBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  wallBtn: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: '#534AB7' },
-  wallBtnText: { color: '#534AB7', fontSize: 16, fontWeight: '600' },
-  form: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 16 },
-  input: { backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 10, fontSize: 16, borderWidth: 1, borderColor: '#ddd' },
+
+  heading: { color: '#fff', fontSize: 28, fontWeight: '700', letterSpacing: -0.3 },
+  actions: { flexDirection: 'row', gap: 8, justifyContent: 'center', marginTop: 12, marginBottom: 10 },
+  subtitle: { color: '#888', fontSize: 13, textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '600', marginBottom: 14 },
+  smallBtn: { backgroundColor: '#534AB7', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  smallBtnAlt: { backgroundColor: '#1D9E75' },
+  smallBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+
+  primaryBtn: { backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 16 },
+  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+
+  content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  contentTop: { alignItems: 'stretch', justifyContent: 'flex-start' },
+  empty: { color: '#555', fontSize: 15, textAlign: 'center', lineHeight: 22 },
+  list: { alignSelf: 'stretch', flex: 1 },
+
+  // wall cards
+  card: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#333' },
+  typeBadgeWrap: { marginBottom: 6 },
+  cardTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  cardMeta: { color: '#888', fontSize: 12, marginTop: 4 },
+
+  // games manager
+  form: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#333' },
+  input: { backgroundColor: '#0d0d0d', borderRadius: 8, padding: 12, marginBottom: 10, fontSize: 16, color: '#fff', borderWidth: 1, borderColor: '#333' },
   dateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
-  dateLabel: { fontSize: 16, color: '#333' },
-  dateBtn: { backgroundColor: '#fff', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: '#ddd', flex: 1 },
-  dateBtnText: { fontSize: 16, color: '#333' },
+  dateLabel: { fontSize: 15, color: '#aaa' },
+  dateBtn: { backgroundColor: '#0d0d0d', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: '#333', flex: 1 },
+  dateBtnText: { fontSize: 16, color: '#fff' },
   saveBtn: { backgroundColor: '#534AB7', borderRadius: 8, padding: 14, alignItems: 'center' },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  gameCard: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 12 },
-  gameTitle: { fontSize: 18, fontWeight: '600', marginBottom: 4 },
-  gameDate: { fontSize: 13, color: '#888', marginBottom: 4 },
-  hint: { fontSize: 11, color: '#ccc' },
-  empty: { textAlign: 'center', color: '#888', marginTop: 60, fontSize: 16 },
+  sectionLabel: { color: '#888', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
+  gameCard: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#333' },
+  gameTitle: { color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 3 },
+  gameDate: { color: '#888', fontSize: 12, marginBottom: 3 },
+  hint: { color: '#555', fontSize: 11 },
 });

@@ -58,6 +58,8 @@ export default function SharedGameScreen() {
       </View>
 
       <View style={styles.headerBlock}>
+        <View style={styles.gameAvatar}><Ionicons name="basketball" size={26} color="#C8742B" /></View>
+        <Text style={styles.eyebrow}>GAME</Text>
         <Text style={styles.title} numberOfLines={1}>{headerTitle}</Text>
         {!loading && !failed && <Text style={styles.subtitle}>{count}</Text>}
       </View>
@@ -91,6 +93,8 @@ const styles = StyleSheet.create({
   back: { paddingVertical: 8 },
   backText: { color: '#534AB7', fontSize: 16 },
   headerBlock: { alignItems: 'center', marginTop: 8, marginBottom: 20 },
+  gameAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  eyebrow: { color: '#C8742B', fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 4 },
   title: { color: '#fff', fontSize: 24, fontWeight: '700', textAlign: 'center' },
   subtitle: { color: '#aaa', fontSize: 14, marginTop: 4 },
   content: { flex: 1, alignItems: 'center', justifyContent: 'center' },

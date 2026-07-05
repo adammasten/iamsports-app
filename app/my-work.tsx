@@ -7,6 +7,7 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Tex
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
+import ContentTypeBadge from './components/ContentTypeBadge';
 import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
 
 // "My Work" — lists the current user's highlight reels (highlight_reels rows
@@ -641,6 +642,7 @@ export default function MyWorkScreen() {
                     </TouchableOpacity>
 
                     <View style={styles.cardBody}>
+                      <View style={styles.typeBadgeWrap}><ContentTypeBadge type="reel" /></View>
                       {renamingId === reel.id ? (
                         <TextInput
                           style={styles.cardTitleInput}
@@ -693,9 +695,10 @@ export default function MyWorkScreen() {
                       activeOpacity={0.7}
                     >
                       <View style={styles.gameThumb}>
-                        <Ionicons name="basketball-outline" size={24} color="#666" />
+                        <Ionicons name="basketball" size={24} color="#C8742B" />
                       </View>
                       <View style={styles.cardBody}>
+                        <View style={styles.typeBadgeWrap}><ContentTypeBadge type="game" /></View>
                         <Text style={styles.cardTitle} numberOfLines={1}>{game.title}</Text>
                         <Text style={styles.cardMeta} numberOfLines={1}>
                           {dateStr ? `${dateStr} · ${videoCount}` : videoCount}
@@ -923,6 +926,7 @@ const styles = StyleSheet.create({
   },
   videoRowText: { color: '#fff', fontSize: 14, fontWeight: '500', flex: 1 },
   gamePostBtn: { alignSelf: 'flex-start', backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 10 },
+  typeBadgeWrap: { marginBottom: 6 },
   videoRowEmpty: { color: '#555', fontSize: 13, fontStyle: 'italic', paddingVertical: 6 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 },
   thumb: {

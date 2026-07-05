@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ContentTypeBadge from './components/ContentTypeBadge';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 
@@ -13,9 +14,6 @@ import FilterBar, { type FilterableItem } from './components/FilterBar';
 // team filter is needed. Mirrors the team-wall feed (app/team.tsx): shares →
 // resolve_shared_content → card list → /shared-viewer. Slice 1: feed only, no
 // team-filter UI yet.
-
-// Display label per content type. 'video' shares are full game uploads.
-const CONTENT_LABEL: Record<string, string> = { reel: 'Reel', video: 'Game', clip: 'Clip' };
 
 // Static filter-bar options (Team options are derived from the user's coached teams).
 const TYPE_OPTIONS: DropdownOption[] = [
@@ -225,7 +223,7 @@ export default function CoachesCornerScreen() {
                 <TouchableOpacity key={item.shareId} style={styles.card} onPress={() => openShared(item)}>
                   <View style={styles.cardTop}>
                     <Text style={styles.teamPill} numberOfLines={1}>{item.teamName}</Text>
-                    <Text style={styles.typeLabel}>{CONTENT_LABEL[item.contentType] ?? item.contentType}</Text>
+                    <ContentTypeBadge type={item.contentType} />
                   </View>
                   <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
                   <Text style={styles.cardMeta}>{relativeTime(item.createdAt)}</Text>
@@ -259,6 +257,9 @@ const styles = StyleSheet.create({
     borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, maxWidth: 180,
   },
   typeLabel: { color: '#888', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  cardTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  gameBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#C8742B', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  gameBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  cardTitle: { color: '#fff', fontSize: 15, fontWeight: '600', flexShrink: 1 },
   cardMeta: { color: '#888', fontSize: 12, marginTop: 4 },
 });

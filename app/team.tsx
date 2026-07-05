@@ -1,8 +1,28 @@
 import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ContentTypeBadge from './components/ContentTypeBadge';
+import { type DropdownOption } from './components/Dropdown';
+import FilterBar, { type FilterableItem } from './components/FilterBar';
+
+// Single-team wall: no tags loaded here, and the Team dropdown is hidden (one
+// team). Stable module-level refs so FilterBar's memo doesn't churn each render.
+const EMPTY_TAGS = new Map<string, Set<string>>();
+const EMPTY_TAG_META = new Map<string, { name: string; category: string }>();
+const TEAM_OPTIONS: DropdownOption[] = [{ value: 'all', label: 'All' }];
+const TYPE_OPTIONS: DropdownOption[] = [
+  { value: 'all', label: 'All' },
+  { value: 'reel', label: 'Reels' },
+  { value: 'game', label: 'Games' },
+  { value: 'clip', label: 'Clips' },
+];
+const SORT_OPTIONS: DropdownOption[] = [
+  { value: 'newest', label: 'Newest' },
+  { value: 'oldest', label: 'Oldest' },
+  { value: 'az', label: 'A–Z' },
+];
 
 export default function TeamWallScreen() {
   const insets = useSafeAreaInsets();
@@ -21,6 +41,7 @@ export default function TeamWallScreen() {
     startTime: number | null; endTime: number | null;
   }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [visiblePosts, setVisiblePosts] = useState<FilterableItem[]>([]);
 
   async function loadTeamWall() {
     if (!teamId) return;
@@ -53,6 +74,22 @@ export default function TeamWallScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamId]);
 
+  // Map posts → FilterableItem for FilterBar (id = share id). 'video' uploads are
+  // game films, so normalize them to 'game' for the Type filter. postsById
+  // recovers the full post for the card render + openShared.
+  const items = useMemo<FilterableItem[]>(
+    () => posts.map(p => ({
+      id: p.shareId,
+      teamId: teamId ?? '',
+      teamName: teamName ?? 'Team',
+      contentType: p.contentType === 'video' ? 'game' : p.contentType,
+      title: p.title,
+      createdAt: p.createdAt,
+    })),
+    [posts, teamId, teamName],
+  );
+  const postsById = useMemo(() => new Map(posts.map(p => [p.shareId, p])), [posts]);
+
   function openShared(item: { shareId: string; contentType: string; title: string; storagePath: string | null; startTime: number | null; endTime: number | null }) {
     if (item.contentType === 'game') {
       router.push({ pathname: '/shared-game', params: { shareId: item.shareId, title: item.title } });
@@ -83,19 +120,37 @@ export default function TeamWallScreen() {
         <Text style={styles.subtitle}>Team wall</Text>
       </View>
 
-      <View style={[styles.content, posts.length > 0 && styles.contentTop]}>
+      <FilterBar
+        items={items}
+        tagsById={EMPTY_TAGS}
+        tagMeta={EMPTY_TAG_META}
+        teamOptions={TEAM_OPTIONS}
+        typeOptions={TYPE_OPTIONS}
+        sortOptions={SORT_OPTIONS}
+        searchPlaceholder="Search"
+        onVisibleChange={setVisiblePosts}
+      />
+
+      <View style={[styles.content, visiblePosts.length > 0 && styles.contentTop]}>
         {loading ? (
           <ActivityIndicator size="large" color="#534AB7" />
         ) : posts.length === 0 ? (
           <Text style={styles.empty}>Nothing on the team wall yet</Text>
+        ) : visiblePosts.length === 0 ? (
+          <Text style={styles.empty}>Nothing matches your filters.</Text>
         ) : (
           <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }}>
-            {posts.map(item => (
-              <TouchableOpacity key={item.shareId} style={styles.card} onPress={() => openShared(item)}>
-                <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={styles.cardMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
-              </TouchableOpacity>
-            ))}
+            {visiblePosts.map(fi => {
+              const item = postsById.get(fi.id);
+              if (!item) return null;
+              return (
+                <TouchableOpacity key={item.shareId} style={styles.card} onPress={() => openShared(item)}>
+                  <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
+                  <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+                  <Text style={styles.cardMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         )}
       </View>
@@ -118,6 +173,7 @@ const styles = StyleSheet.create({
   empty: { color: '#555', fontSize: 15 },
   list: { alignSelf: 'stretch' },
   card: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#333' },
+  typeBadgeWrap: { marginBottom: 6 },
   cardTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   cardMeta: { color: '#888', fontSize: 12, marginTop: 4 },
 });

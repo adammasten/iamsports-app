@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
+import ContentTypeBadge from './components/ContentTypeBadge';
 import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
 import { initials, teamColor } from './select-team';
 
@@ -574,6 +575,7 @@ export default function KidWallScreen() {
               {inbox.map(item => (
                 <View key={item.shareId} style={styles.inboxCard}>
                   <TouchableOpacity style={styles.inboxMain} onPress={() => openShared(item)}>
+                    <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
                     <Text style={styles.inboxTitle} numberOfLines={1}>{item.title}</Text>
                     <Text style={styles.inboxMeta}>
                       From {item.sharedBy === userId ? 'you' : (item.sharedByName ?? 'someone')} · {new Date(item.createdAt).toLocaleDateString()}
@@ -596,6 +598,7 @@ export default function KidWallScreen() {
               {wall.map(item => (
                 <View key={item.shareId} style={styles.inboxCard}>
                   <TouchableOpacity style={styles.inboxMain} onPress={() => openShared(item)}>
+                    <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
                     <Text style={styles.inboxTitle} numberOfLines={1}>{item.title}</Text>
                     <View style={styles.wallMetaRow}>
                       <View style={styles.audienceBadge}>
@@ -680,6 +683,7 @@ const styles = StyleSheet.create({
   inboxList: { alignSelf: 'stretch' },
   inboxCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#333' },
   inboxMain: { flex: 1, paddingRight: 10 },
+  typeBadgeWrap: { marginBottom: 6 },
   inboxTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   inboxMeta: { color: '#888', fontSize: 12, marginTop: 4 },
   wallMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
