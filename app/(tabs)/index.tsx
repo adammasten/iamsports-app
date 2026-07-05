@@ -23,10 +23,8 @@ function formatDate(ymd: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
-// Team wall filter/sort — no tags loaded here, Team dropdown hidden (one team).
-// Stable module refs so FilterBar's memo doesn't churn each render.
-const EMPTY_TAGS = new Map<string, Set<string>>();
-const EMPTY_TAG_META = new Map<string, { name: string; category: string }>();
+// Team wall filter/sort — tags batch-loaded (parity with Coaches' Corner), Team
+// dropdown hidden (single team → one-element TEAM_OPTIONS).
 const TEAM_OPTIONS: DropdownOption[] = [{ value: 'all', label: 'All' }];
 const TYPE_OPTIONS: DropdownOption[] = [
   { value: 'all', label: 'All' },
@@ -41,7 +39,7 @@ const SORT_OPTIONS: DropdownOption[] = [
 ];
 
 type WallPost = {
-  shareId: string; contentType: string; createdAt: string;
+  shareId: string; contentType: string; contentId: string; createdAt: string;
   title: string; storagePath: string | null;
   startTime: number | null; endTime: number | null;
 };
@@ -60,6 +58,11 @@ export default function HomeScreen() {
   const [wallLoading, setWallLoading] = useState(true);
   const [visiblePosts, setVisiblePosts] = useState<FilterableItem[]>([]);
 
+  // Batch-loaded tag data for the wall: each post's tag set (by contentId) and
+  // tag metadata (id → name/category). Three queries total, no N+1 (see effect).
+  const [tagsByContentId, setTagsByContentId] = useState<Map<string, Set<string>>>(new Map());
+  const [tagMeta, setTagMeta] = useState<Map<string, { name: string; category: string }>>(new Map());
+
   useEffect(() => {
     if (activeTeam) {
       fetchGames(activeTeam.id);
@@ -69,6 +72,47 @@ export default function HomeScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTeam]);
+
+  // Batch-load tags for the whole wall whenever posts change. Bucket content ids
+  // by type (reel → reel_tags, clip → clip_tags; game/video have no tags), load
+  // each join table with ONE .in() query, then resolve all tag ids → name/category
+  // in one more. Builds tagsByContentId (contentId → Set<tag_id>) + tagMeta. No N+1.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const reelIds = posts.filter(p => p.contentType === 'reel').map(p => p.contentId);
+      const clipIds = posts.filter(p => p.contentType === 'clip').map(p => p.contentId);
+
+      const byContent = new Map<string, Set<string>>();
+      const allTagIds = new Set<string>();
+      const add = (cid: string, tid: string) => {
+        const s = byContent.get(cid) ?? new Set<string>();
+        s.add(tid);
+        byContent.set(cid, s);
+        allTagIds.add(tid);
+      };
+
+      if (reelIds.length > 0) {
+        const { data } = await supabase.from('reel_tags').select('reel_id, tag_id').in('reel_id', reelIds);
+        (data || []).forEach((r: any) => add(r.reel_id, r.tag_id));
+      }
+      if (clipIds.length > 0) {
+        const { data } = await supabase.from('clip_tags').select('clip_id, tag_id').in('clip_id', clipIds);
+        (data || []).forEach((r: any) => add(r.clip_id, r.tag_id));
+      }
+
+      const meta = new Map<string, { name: string; category: string }>();
+      if (allTagIds.size > 0) {
+        const { data } = await supabase.from('tags').select('id, name, category').in('id', [...allTagIds]);
+        (data || []).forEach((t: any) => meta.set(t.id, { name: t.name, category: t.category }));
+      }
+
+      if (cancelled) return;
+      setTagsByContentId(byContent);
+      setTagMeta(meta);
+    })();
+    return () => { cancelled = true; };
+  }, [posts]);
 
   async function fetchGames(teamId: string) {
     const { data } = await supabase
@@ -81,14 +125,14 @@ export default function HomeScreen() {
   async function loadTeamWall(teamId: string) {
     setWallLoading(true);
     const { data: rows } = await supabase
-      .from('shares').select('id, content_type, created_at')
+      .from('shares').select('id, content_type, content_id, created_at')
       .eq('team_id', teamId).eq('audience', 'team')
       .order('created_at', { ascending: false });
     const items = await Promise.all((rows || []).map(async (r: any) => {
       const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
       const c = Array.isArray(resolved) ? resolved[0] : null;
       return {
-        shareId: r.id, contentType: r.content_type, createdAt: r.created_at,
+        shareId: r.id, contentType: r.content_type, contentId: r.content_id, createdAt: r.created_at,
         title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
         storagePath: c?.storage_path ?? null,
         startTime: c?.start_time ?? null, endTime: c?.end_time ?? null,
@@ -108,6 +152,12 @@ export default function HomeScreen() {
       createdAt: p.createdAt,
     })),
     [posts, activeTeam],
+  );
+  // tagsByContentId is re-keyed by SHARE id so each item's tag set lines up with
+  // its FilterBar item (whose id is the share id, not the contentId).
+  const tagsById = useMemo(
+    () => new Map(posts.map(p => [p.shareId, tagsByContentId.get(p.contentId) ?? new Set<string>()])),
+    [posts, tagsByContentId],
   );
   const postsById = useMemo(() => new Map(posts.map(p => [p.shareId, p])), [posts]);
 
@@ -253,8 +303,8 @@ export default function HomeScreen() {
         <>
           <FilterBar
             items={items}
-            tagsById={EMPTY_TAGS}
-            tagMeta={EMPTY_TAG_META}
+            tagsById={tagsById}
+            tagMeta={tagMeta}
             teamOptions={TEAM_OPTIONS}
             typeOptions={TYPE_OPTIONS}
             sortOptions={SORT_OPTIONS}
