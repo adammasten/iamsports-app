@@ -59,7 +59,7 @@ export default function TeamWallScreen() {
         shareId: r.id,
         contentType: r.content_type,
         createdAt: r.created_at,
-        title: r.content_type === 'game' ? 'Shared game' : (c?.title ?? '(content unavailable)'),
+        title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
         storagePath: c?.storage_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,

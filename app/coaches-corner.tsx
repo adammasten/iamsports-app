@@ -87,9 +87,9 @@ export default function CoachesCornerScreen() {
         teamId: r.team_id,
         teamName: r.teams?.name ?? 'Team',
         createdAt: r.created_at,
-        // A 'game' share can't be resolved by resolve_shared_content (multi-video,
-        // no single file) — show a generic label; tapping opens the game view.
-        title: r.content_type === 'game' ? 'Shared game' : (c?.title ?? '(content unavailable)'),
+        // Prefer the resolved title — games now return games.title via the added
+        // resolve_shared_content 'game' branch; fall back to "Shared game" if absent.
+        title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
         storagePath: c?.storage_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
