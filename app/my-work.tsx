@@ -82,6 +82,9 @@ export default function MyWorkScreen() {
   // grouped by game_id). Tapping a game card expands it inline to reveal
   // game.videos — no navigation off Film Room until a video row is tapped.
   const [games, setGames] = useState<Game[]>([]);
+  // Loose footage: the user's uploads with no game (game_id IS NULL) — personal
+  // "+" uploads. Kept as its OWN list, never forced through the game grouping.
+  const [looseVideos, setLooseVideos] = useState<GameVideo[]>([]);
   const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // Filtered+sorted items, produced by FilterBar (a FilterableItem subset; the
@@ -174,23 +177,30 @@ export default function MyWorkScreen() {
     setLoading(false);
   }
 
-  // Games are derived from the user's own video uploads. ONE query: pull every
-  // video the user uploaded, embed games(...) for the parent row, then group
-  // client-side by game_id into a Map. RLS-blocked games come back with
-  // row.games === null and are dropped. Personal uploads (game_id IS NULL) are
-  // also dropped — they're not "games" in the Film Room sense.
+  // Games + loose footage are derived from the user's own video uploads. ONE
+  // query: pull every video the user uploaded, embed games(...) for the parent
+  // row. Then split into three buckets:
+  //   • game_id IS NULL          → LOOSE footage (personal "+" upload) — its own list.
+  //   • game_id set, games null   → game is RLS-blocked → dropped (not ours to show).
+  //   • game_id set, games present → grouped by game_id into the games Map.
   async function loadGames() {
-    if (!userId) { setGames([]); return; }
+    if (!userId) { setGames([]); setLooseVideos([]); return; }
     const { data, error } = await supabase
       .from('videos')
-      .select('id, label, url, sort_order, game_id, games (id, title, opponent, game_date, team_id, created_at)')
+      .select('id, label, url, sort_order, game_id, created_at, games (id, title, opponent, game_date, team_id, created_at)')
       .eq('uploaded_by_user_id', userId);
     if (error) { Alert.alert('Error', error.message); return; }
 
     const byId = new Map<string, Game>();
+    const loose: (GameVideo & { createdAt: string })[] = [];
     (data || []).forEach((row: any) => {
+      // Loose footage: no game at all. Distinct bucket — never touches the map.
+      if (row.game_id == null) {
+        loose.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, createdAt: row.created_at });
+        return;
+      }
       const g = row.games;
-      if (!g) return;
+      if (!g) return; // game_id set but RLS-blocked → drop
       let game = byId.get(row.game_id);
       if (!game) {
         game = {
@@ -209,7 +219,10 @@ export default function MyWorkScreen() {
     for (const game of byId.values()) {
       game.videos.sort((a, b) => a.sortOrder - b.sortOrder);
     }
+    // Newest loose footage first; strip the sort-only createdAt back to GameVideo.
+    loose.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     setGames([...byId.values()]);
+    setLooseVideos(loose.map(({ createdAt, ...v }) => v));
   }
 
   useEffect(() => {
@@ -610,6 +623,7 @@ export default function MyWorkScreen() {
       </View>
 
       <Text style={styles.title}>Film Room</Text>
+      <Text style={styles.subtitle}>Your workbench. Everything you’ve made — games and reels. Tap “Post to wall” to share.</Text>
 
       <FilterBar
         items={items}
@@ -622,15 +636,45 @@ export default function MyWorkScreen() {
         onVisibleChange={setVisibleReels}
       />
 
-      <View style={[styles.content, visibleReels.length > 0 && styles.contentTop]}>
+      <View style={[styles.content, (visibleReels.length > 0 || looseVideos.length > 0) && styles.contentTop]}>
         {loading ? (
           <ActivityIndicator size="large" color="#534AB7" />
-        ) : reels.length === 0 && games.length === 0 ? (
+        ) : reels.length === 0 && games.length === 0 && looseVideos.length === 0 ? (
           <Text style={styles.empty}>Nothing here yet. Export a reel or upload game film to see it.</Text>
-        ) : visibleReels.length === 0 ? (
-          <Text style={styles.empty}>Nothing matches your filters.</Text>
         ) : (
           <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+            {/* Unsorted footage — loose uploads (game_id null). Distinct list,
+                always shown when present, independent of the reels/games filter. */}
+            {looseVideos.length > 0 && (
+              <View style={styles.unsortedSection}>
+                <Text style={styles.sectionHeader}>Unsorted footage</Text>
+                <Text style={styles.sectionHint}>Uploaded, not on a game yet — tap to tag.</Text>
+                {looseVideos.map(v => (
+                  <TouchableOpacity
+                    key={v.id}
+                    style={styles.looseCard}
+                    onPress={() => Alert.alert(v.label, undefined, [
+                      { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, personal: '1' } }) },
+                      { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
+                      { text: 'Cancel', style: 'cancel' },
+                    ])}
+                  >
+                    <View style={styles.looseThumb}><Ionicons name="videocam-outline" size={22} color="#888" /></View>
+                    <View style={styles.cardBody}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>{v.label}</Text>
+                      <Text style={styles.cardMeta}>Not on a game yet</Text>
+                    </View>
+                    <Ionicons name="pricetag-outline" size={18} color="#534AB7" />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* "No matches" only when there ARE reels/games but the filter hid them. */}
+            {(reels.length > 0 || games.length > 0) && visibleReels.length === 0 && (
+              <Text style={styles.emptyInline}>Nothing matches your filters.</Text>
+            )}
+
             {visibleReels.map(fi => {
               if (fi.contentType === 'reel') {
                 const reel = reelsById.get(fi.id);
@@ -896,7 +940,8 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   back: { paddingVertical: 8 },
   backText: { color: '#534AB7', fontSize: 16 },
-  title: { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 8, marginBottom: 16 },
+  title: { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 8, marginBottom: 4 },
+  subtitle: { color: '#888', fontSize: 13, lineHeight: 18, marginBottom: 16 },
 
   content: { flex: 1, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   contentTop: { alignItems: 'stretch', justifyContent: 'flex-start' },
@@ -940,6 +985,19 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#534AB7',
   },
   cardMeta: { color: '#888', fontSize: 12 },
+  unsortedSection: { marginBottom: 6 },
+  sectionHeader: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 2 },
+  sectionHint: { color: '#888', fontSize: 12, marginTop: 2, marginBottom: 10 },
+  looseCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#1a1a1a', borderRadius: 10, padding: 12, marginBottom: 8,
+    borderWidth: 1, borderColor: '#333',
+  },
+  looseThumb: {
+    width: 44, height: 44, borderRadius: 8, backgroundColor: '#0d0d0d',
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  emptyInline: { color: '#555', fontSize: 14, textAlign: 'center', paddingVertical: 20 },
 
   badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   badge: {

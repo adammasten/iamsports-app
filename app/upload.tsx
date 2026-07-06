@@ -19,6 +19,9 @@ export default function UploadScreen() {
   const [label, setLabel] = useState('');
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  // After a successful upload we show a confirmation instead of force-jumping
+  // into tagging — the user chooses to tag now or finish.
+  const [done, setDone] = useState<{ videoId: string; url: string; label: string } | null>(null);
 
   async function pick() {
     const f = await pickVideo();
@@ -53,11 +56,10 @@ export default function UploadScreen() {
         setUploading(false);
         return;
       }
-      // Straight into tagging (personal session — clips get team_id null).
-      router.replace({
-        pathname: '/tagging-overlay',
-        params: { videoId: data.id, url: fileName, label: label.trim(), personal: '1' },
-      });
+      // Confirm the upload landed, then let the user choose to tag now or finish
+      // (replaces the old force-jump straight into tagging).
+      setUploading(false);
+      setDone({ videoId: data.id, url: fileName, label: label.trim() });
     } catch (e: any) {
       Alert.alert('Upload error', e?.message ?? 'Unknown');
       setUploading(false);
@@ -71,7 +73,28 @@ export default function UploadScreen() {
       </TouchableOpacity>
       <Text style={styles.title}>Upload video</Text>
 
-      {uploading ? (
+      {done ? (
+        <View style={styles.doneWrap}>
+          <Text style={styles.doneCheck}>✓</Text>
+          <Text style={styles.doneTitle}>Uploaded</Text>
+          <Text style={styles.doneBody}>“{done.label}” is saved to Film Room. Tag it now to pull out clips, or find it later under “Unsorted footage.”</Text>
+          <TouchableOpacity
+            style={[styles.saveBtn, styles.doneBtn]}
+            onPress={() => router.replace({
+              pathname: '/tagging-overlay',
+              params: { videoId: done.videoId, url: done.url, label: done.label, personal: '1' },
+            })}
+          >
+            <Text style={styles.saveBtnText}>Tag it now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.doneOutlineBtn, styles.doneBtn]} onPress={() => router.replace('/my-work')}>
+            <Text style={styles.doneOutlineText}>Go to Film Room</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.doneSecondary} onPress={() => router.back()}>
+            <Text style={styles.doneSecondaryText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      ) : uploading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#534AB7" />
           <Text style={styles.progress}>{progress}%</Text>
@@ -123,4 +146,13 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: '#534AB7', borderRadius: 8, padding: 16, alignItems: 'center', marginTop: 18 },
   saveBtnDisabled: { opacity: 0.5 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  doneWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 40 },
+  doneCheck: { color: '#2e7d32', fontSize: 56, fontWeight: '800', lineHeight: 60 },
+  doneTitle: { color: '#fff', fontSize: 22, fontWeight: '700', marginTop: 8 },
+  doneBody: { color: '#aaa', fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 10, marginBottom: 8, paddingHorizontal: 12 },
+  doneBtn: { alignSelf: 'stretch', marginTop: 12 },
+  doneOutlineBtn: { borderRadius: 8, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#534AB7' },
+  doneOutlineText: { color: '#534AB7', fontSize: 16, fontWeight: '600' },
+  doneSecondary: { padding: 14, marginTop: 4 },
+  doneSecondaryText: { color: '#888', fontSize: 15, fontWeight: '600' },
 });

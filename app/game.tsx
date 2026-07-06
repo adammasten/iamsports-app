@@ -29,6 +29,8 @@ export default function GameScreen() {
   const [videoLabel, setVideoLabel] = useState('');
   const [pendingFile, setPendingFile] = useState<any>(null);
   const [cacheState, setCacheState] = useState<Record<string, CacheStatus>>({});
+  // Persistent "it worked / here's where it is" confirmation after an upload.
+  const [justUploaded, setJustUploaded] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) fetchVideos();
@@ -60,6 +62,7 @@ export default function GameScreen() {
   }
 
   async function startPick() {
+    setJustUploaded(null);
     const f = await pickVideo();
     if (f) {
       setPendingFile(f);
@@ -100,6 +103,7 @@ export default function GameScreen() {
 
       if (error) Alert.alert('Error', error.message);
       else {
+        setJustUploaded(videoLabel);
         fetchVideos();
         setVideoLabel('');
         setPendingFile(null);
@@ -174,6 +178,15 @@ export default function GameScreen() {
         </View>
       )}
 
+      {justUploaded && !uploading && !showLabelForm && (
+        <View style={styles.uploadedBanner}>
+          <Text style={styles.uploadedTitle}>✓ Uploaded</Text>
+          <Text style={styles.uploadedBody}>
+            “{justUploaded}” is saved to this game. Tap it below to tag it — all your footage lives in Film Room.
+          </Text>
+        </View>
+      )}
+
       {videos.length === 0 ? (
         <Text style={styles.empty}>No videos yet. Upload your first one!</Text>
       ) : (
@@ -234,6 +247,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: '700', marginBottom: 24 },
   uploadBtn: { backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 },
   uploadText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  uploadedBanner: { backgroundColor: '#e8f5e9', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#a5d6a7' },
+  uploadedTitle: { color: '#2e7d32', fontSize: 15, fontWeight: '800', marginBottom: 4 },
+  uploadedBody: { color: '#33691e', fontSize: 13, lineHeight: 18 },
   labelForm: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 16 },
   labelTitle: { fontSize: 16, fontWeight: '600', marginBottom: 10 },
   input: { backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 10, fontSize: 16, borderWidth: 1, borderColor: '#ddd' },
