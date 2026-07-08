@@ -109,6 +109,20 @@ V2 Phase F's "Saved!" Alert (with OK-button-then-reset) in `app/tagging-overlay.
 - When suggesting terminal commands, put **each command in its own code block**, one per block — even in multi-step instructions. Adam copies them one at a time.
 - Development rhythm: tag real games → find worst friction → fix it → repeat. Real-user friction beats theoretical priorities; resist refactor-for-refactor's-sake suggestions.
 
+## Debugging protocol — investigate before proposing
+
+When Adam reports a bug, the DEFAULT is: **investigate read-only and report findings BEFORE proposing or writing any fix.** No code changes until Adam has seen the findings and approved the fix. Specifically:
+
+1. **Trace the actual code — don't guess.** You have the code; read it. Follow the real execution path to where the data actually dies, rather than theorizing about what's "likely" wrong.
+2. **Confirm real schema against the database before writing SQL.** Verify exact table + column names against the live DB. We've hit repeated errors from assumed names (`team_id` that didn't exist; `kid_id` that was really `player_id`).
+3. **Confirm the fix lands in the LIVE file that actually renders — and flag orphans on sight.** We got burned TWICE by the two-file trap: feed work in files the Home tab didn't use, and a suspected orphaned `home.tsx`. Before editing a screen, verify which file is really mounted/registered (check the router: `app/(tabs)/_layout.tsx` registers `index` + `tags`; the Home tab IS `app/(tabs)/index.tsx`). When you touch a screen, always confirm the change is in the rendered file, and **flag any duplicate/orphaned screen file** (e.g. the undeclared `app/(tabs)/explore.tsx`) so we delete it on sight — one file per screen, no coexisting copies.
+4. **Prove which stage the data dies at with on-screen debug output / logs** — not theory. Instrument, observe the real numbers, then conclude.
+5. **No code changes until findings are seen and the fix is approved.**
+
+### The root pattern: this codebase "fails safe" by swallowing errors
+
+Recurring root cause across our bugs: the code hides failures and shows nothing (empty teams → blank feed; missing RPC → dropped items; permission error → assumed-zero-rows) instead of surfacing them. **Before launch, treat error visibility/logging as a priority** so silent failures become visible. This is Adam's scaling concern: he can't debug at 1000+ users if failures are silent. When touching error handling, prefer surfacing the failure over defaulting to empty — a visible "permission denied on player_teams" beats a blank screen.
+
 ## What we're working on now (May 2026)
 
 Active project: **V2 overlay** — a transparent, full-screen landscape tagging UI (Concept B). The current `app/tagging.tsx` is portrait with controls below the video; the overlay rebuild moves everything on top of full-screen landscape video.
@@ -168,6 +182,7 @@ These are settled. Don't change them without an explicit conversation with Adam 
 - **15 MB chunk size for mobile TUS uploads is tuned.** Smaller chunks generate too many requests; larger chunks cause memory pressure on older iPhones.
 - **`getFreshToken(forceRefresh)` for mid-upload auth refresh is required, not optional.** Long uploads outlive the original JWT. Never cache the token across an upload.
 - **The Railway ffmpeg server's `fps=30` filter + `-fps_mode cfr` flag is the VFR fix.** Variable-frame-rate phone video breaks concatenation without these. Don't remove them from the server's ffmpeg invocations.
+- **The `followers` table is RESERVED / dormant — NOT in use. Do NOT wire it or build on it.** It exists in the schema (`migration_walls_reels_sharing.sql`) but is referenced by zero app code. The follower feature is deferred to **post-launch**. Do NOT delete it either — leave it dormant. Seeing "teammates' public content" is handled by **team membership**, NOT followers. The request/approve onboarding and the viewer/grandparent tier are still **net-new to design later** — they will NOT be built via `followers` for now. If a future session finds this table, treat it as reserved and confirm with Adam before touching it.
 
 ## Upload stability is the #1 quality signal
 
