@@ -171,8 +171,15 @@ export default function KidWallScreen() {
     // or no name set; the card falls back to "you" / "someone" accordingly.
     const sharerIds = [...new Set(items.map(i => i.sharedBy).filter((x): x is string => !!x && x !== userId))];
     const nameEntries = await Promise.all(sharerIds.map(async (id) => {
-      const { data } = await supabase.rpc('get_user_display_name', { p_user_id: id });
-      return [id, typeof data === 'string' ? data : null] as const;
+      // A failed/missing name lookup must NEVER drop an item or break the inbox.
+      // supabase.rpc returns {error} (no throw) when the function is missing, but
+      // guard an unexpected throw too so one bad lookup can't reject the whole load.
+      try {
+        const { data } = await supabase.rpc('get_user_display_name', { p_user_id: id });
+        return [id, typeof data === 'string' ? data : null] as const;
+      } catch {
+        return [id, null] as const;
+      }
     }));
     const nameById = new Map(nameEntries);
 

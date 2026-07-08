@@ -195,6 +195,7 @@ export default function CoachesCornerScreen() {
       </View>
 
       <Text style={styles.title}>Coaches&apos; Corner</Text>
+      <Text style={styles.subtitle}>Coaches only. A private board for your staff — players and families never see this.</Text>
 
       <FilterBar
         items={items}
@@ -242,7 +243,8 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   back: { paddingVertical: 8 },
   backText: { color: '#534AB7', fontSize: 16 },
-  title: { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 8, marginBottom: 16 },
+  title: { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 8, marginBottom: 4 },
+  subtitle: { color: '#888', fontSize: 13, lineHeight: 18, marginBottom: 16 },
 
   content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   contentTop: { alignItems: 'stretch', justifyContent: 'flex-start' },
