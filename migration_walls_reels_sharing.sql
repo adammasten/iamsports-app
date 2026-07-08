@@ -60,6 +60,17 @@ CREATE TABLE IF NOT EXISTS shares (
 );
 
 -- 4. followers
+-- ============================================================
+-- ⚠️ RESERVED / DORMANT — NOT IN USE. DO NOT WIRE OR BUILD ON THIS.
+-- Referenced by ZERO app code. The follower feature is DEFERRED to post-launch
+-- (decision locked 2026-07-08). Kept in the schema on purpose — do NOT delete.
+--   • "See teammates' public content" is handled by TEAM MEMBERSHIP, not this.
+--   • Request/approve onboarding + the viewer/grandparent tier are NET-NEW to
+--     design later, and will NOT be built via this table for now.
+-- If you're a future session eyeing this: treat as reserved, confirm with Adam
+-- before touching. See CLAUDE.md "Don't relitigate" + the permissions/onboarding
+-- memory note.
+-- ============================================================
 CREATE TABLE IF NOT EXISTS followers (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   follower_user_id    uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
