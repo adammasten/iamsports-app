@@ -1,11 +1,13 @@
 import { useTeamContext } from '@/context';
+import { loadMergedFeed, type FeedDebug, type WallPost } from '@/lib/core/homeFeed';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ContentTypeBadge from './components/ContentTypeBadge';
 
 // Visual-only filter chips for now — wiring to real data is a later task.
 const FILTERS = ['All', 'Lars', 'Highlights', 'Sent', 'Games'];
@@ -46,6 +48,45 @@ export default function SelectTeamScreen() {
   const [creatingKid, setCreatingKid] = useState(false);
   // player_id -> signed photo URL, minted from each kid's photo_path.
   const [kidPhotoUris, setKidPhotoUris] = useState<Record<string, string>>({});
+
+  // App-home feed: the merged "everything I'm attached to and allowed to see"
+  // list. The merge/dedup is the SINGLE source of truth in @/lib/core/homeFeed —
+  // the exact same call the tabs Home uses. No team selection needed; it scopes
+  // to ALL my teams + ALL my kids and reloads when those memberships resolve.
+  const [feedPosts, setFeedPosts] = useState<WallPost[]>([]);
+  const [feedLoading, setFeedLoading] = useState(true);
+  const [debug, setDebug] = useState<FeedDebug | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setFeedLoading(true);
+      const { posts, debug: dbg } = await loadMergedFeed(userTeams, userKids);
+      if (cancelled) return;
+      setFeedPosts(posts);
+      setDebug(dbg);
+      setFeedLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [userTeams, userKids]);
+
+  // Open a feed card. Mirrors the tabs Home's handler — navigation is UI, so it
+  // stays per-screen (only the feed *data* logic is shared in lib/core).
+  function openShared(item: WallPost) {
+    if (item.contentType === 'game') {
+      router.push({ pathname: '/shared-game', params: { shareId: item.shareId, title: item.title } });
+      return;
+    }
+    if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
+    router.push({
+      pathname: '/shared-viewer',
+      params: {
+        title: item.title, storagePath: item.storagePath,
+        startTime: item.startTime != null ? String(item.startTime) : '',
+        endTime: item.endTime != null ? String(item.endTime) : '',
+      },
+    });
+  }
 
   // One entry per team, keeping the HIGHEST-ranked role (a user can hold several
   // roles on one team — UNIQUE key is (team_id, user_id, role)).
@@ -295,12 +336,46 @@ export default function SelectTeamScreen() {
           })}
         </ScrollView>
 
-        {/* Body placeholder */}
-        {uniqueTeams.length === 0 ? (
-          <Text style={styles.empty}>No teams yet — tap “New team” to get started.</Text>
-        ) : (
+        {/* App-home feed — the merged cross-team/cross-kid list (same logic as
+            the tabs Home, from @/lib/core/homeFeed). Tapping a team above still
+            opens that team's page; this feed shows everything on open. */}
+        {__DEV__ && debug ? (
+          <View style={styles.debugBox}>
+            <Text style={styles.debugTitle}>▶ SCREEN: select-team.tsx (app-home)</Text>
+            <Text style={styles.debugText}>userTeams {userTeams.length} · userKids {userKids.length}</Text>
+            <Text style={styles.debugText}>Q1 team/player rows: {debug.q1Rows}{debug.q1Err ? `  ⛔ ${debug.q1Err}` : ''}</Text>
+            <Text style={styles.debugText}>Q2 public rows: {debug.q2Rows}{debug.q2Err ? `  ⛔ ${debug.q2Err}` : ''}</Text>
+            {debug.ptErr ? <Text style={styles.debugText}>player_teams ⛔ {debug.ptErr}</Text> : null}
+            <Text style={styles.debugText}>final after dedup: {debug.final}</Text>
+          </View>
+        ) : null}
+
+        {feedLoading ? (
+          <ActivityIndicator size="large" color="#534AB7" style={{ marginTop: 30 }} />
+        ) : feedPosts.length === 0 ? (
           <View style={styles.feedPlaceholder}>
-            <Text style={styles.feedPlaceholderText}>Your feed will appear here.</Text>
+            <Text style={styles.feedPlaceholderText}>
+              Nothing new yet.{'\n'}Games and reels from your teams and kids show up here.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.feed}>
+            {feedPosts.map(item => {
+              // Teams before "Family" in the source pills.
+              const sources = [...item.sources].sort((a, b) => (a === 'Family' ? 1 : 0) - (b === 'Family' ? 1 : 0));
+              return (
+                <TouchableOpacity key={item.key} style={styles.card} onPress={() => openShared(item)}>
+                  <View style={styles.cardTop}>
+                    <ContentTypeBadge type={item.contentType === 'video' ? 'game' : item.contentType} />
+                    {sources.map(s => (
+                      <Text key={s} style={styles.sourcePill} numberOfLines={1}>{s}</Text>
+                    ))}
+                  </View>
+                  <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+                  <Text style={styles.cardMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
       </ScrollView>
@@ -365,7 +440,24 @@ const styles = StyleSheet.create({
   chipTextActive: { color: '#fff' },
 
   feedPlaceholder: { paddingVertical: 60, alignItems: 'center' },
-  feedPlaceholderText: { color: '#555', fontSize: 14 },
+  feedPlaceholderText: { color: '#555', fontSize: 14, textAlign: 'center', lineHeight: 20 },
+
+  // App-home feed cards (parity with the tabs Home cards).
+  feed: { paddingHorizontal: 16, paddingTop: 4 },
+  card: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#333' },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' },
+  sourcePill: {
+    color: '#ddd', fontSize: 11, fontWeight: '700',
+    backgroundColor: '#2a2740', borderColor: '#534AB7', borderWidth: 1,
+    borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, maxWidth: 160,
+  },
+  cardTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  cardMeta: { color: '#888', fontSize: 12, marginTop: 4 },
+
+  // TEMP diagnostic panel — remove after on-device verify.
+  debugBox: { backgroundColor: '#3a2f00', borderColor: '#c8a400', borderWidth: 1, borderRadius: 8, padding: 10, marginHorizontal: 16, marginVertical: 10, gap: 2 },
+  debugTitle: { color: '#ffd11a', fontSize: 12, fontWeight: '800', marginBottom: 4, fontFamily: 'Courier' },
+  debugText: { color: '#ffe680', fontSize: 12, fontFamily: 'Courier' },
   empty: { color: '#888', textAlign: 'center', marginTop: 40, fontSize: 15 },
 
   bottomNav: {

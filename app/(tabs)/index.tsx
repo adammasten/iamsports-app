@@ -4,6 +4,7 @@ import DateTimePicker, { DateTimePickerAndroid, DateTimePickerEvent } from '@rea
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { loadTeamWall, type WallPost } from '@/lib/core/homeFeed';
 import ContentTypeBadge from '../components/ContentTypeBadge';
 import { type DropdownOption } from '../components/Dropdown';
 import FilterBar, { type FilterableItem } from '../components/FilterBar';
@@ -23,9 +24,8 @@ function formatDate(ymd: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
-// Team wall filter/sort — tags batch-loaded (parity with Coaches' Corner), Team
-// dropdown hidden (single team → one-element TEAM_OPTIONS).
-const TEAM_OPTIONS: DropdownOption[] = [{ value: 'all', label: 'All' }];
+// Home feed filter/sort. TYPE/SORT are static; the Team dropdown options are
+// derived from the teams actually present in the merged feed (see teamOptions).
 const TYPE_OPTIONS: DropdownOption[] = [
   { value: 'all', label: 'All' },
   { value: 'reel', label: 'Reels' },
@@ -38,11 +38,9 @@ const SORT_OPTIONS: DropdownOption[] = [
   { value: 'az', label: 'A–Z' },
 ];
 
-type WallPost = {
-  shareId: string; contentType: string; contentId: string; createdAt: string;
-  title: string; storagePath: string | null;
-  startTime: number | null; endTime: number | null;
-};
+// The feed's data model (WallPost) and the merge/dedup logic live in
+// @/lib/core/homeFeed — the SINGLE source of truth, shared with the app-home
+// screen (select-team.tsx). This screen only renders + filters the result.
 
 export default function HomeScreen() {
   const { activeTeam } = useTeamContext();
@@ -53,24 +51,35 @@ export default function HomeScreen() {
   const [opponent, setOpponent] = useState('');
   const [gameDate, setGameDate] = useState<Date>(new Date());
 
-  // Team wall (the main view): team-audience shares for this team.
+  // This is a TEAM page: the feed shows ONLY the active team's own wall (its
+  // team-audience shares). The merged cross-team/cross-kid feed lives on the
+  // app-home screen (select-team.tsx). Both use @/lib/core/homeFeed.
   const [posts, setPosts] = useState<WallPost[]>([]);
   const [wallLoading, setWallLoading] = useState(true);
   const [visiblePosts, setVisiblePosts] = useState<FilterableItem[]>([]);
 
-  // Batch-loaded tag data for the wall: each post's tag set (by contentId) and
+  // TEMP diagnostic panel (verify-on-device, remove after). Surfaces per-stage
+  // COUNTS *and* the previously-swallowed Postgres errors — a blank feed is
+  // otherwise indistinguishable from an errored one. This is the error-visibility
+  // fix in miniature: if Query 1 hits an RLS/recursion error, you SEE it here
+  // instead of a blank screen.
+  const [debug, setDebug] = useState<{
+    q1Rows: number; q1Err: string | null;
+    q2Rows: number; q2Err: string | null;
+    ptErr: string | null; final: number;
+  } | null>(null);
+
+  // Batch-loaded tag data for the feed: each post's tag set (by contentId) and
   // tag metadata (id → name/category). Three queries total, no N+1 (see effect).
   const [tagsByContentId, setTagsByContentId] = useState<Map<string, Set<string>>>(new Map());
   const [tagMeta, setTagMeta] = useState<Map<string, { name: string; category: string }>>(new Map());
 
+  // Team page: the wall + games both reload when the active team changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadHome(); }, [activeTeam]);
   useEffect(() => {
-    if (activeTeam) {
-      fetchGames(activeTeam.id);
-      loadTeamWall(activeTeam.id);
-    } else {
-      setGames([]); setPosts([]); setWallLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (activeTeam) fetchGames(activeTeam.id);
+    else setGames([]);
   }, [activeTeam]);
 
   // Batch-load tags for the whole wall whenever posts change. Bucket content ids
@@ -122,44 +131,43 @@ export default function HomeScreen() {
     setGames(data || []);
   }
 
-  async function loadTeamWall(teamId: string) {
+  async function loadHome() {
+    if (!activeTeam) { setPosts([]); setDebug(null); setWallLoading(false); return; }
     setWallLoading(true);
-    const { data: rows } = await supabase
-      .from('shares').select('id, content_type, content_id, created_at')
-      .eq('team_id', teamId).eq('audience', 'team')
-      .order('created_at', { ascending: false });
-    const items = await Promise.all((rows || []).map(async (r: any) => {
-      const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
-      const c = Array.isArray(resolved) ? resolved[0] : null;
-      return {
-        shareId: r.id, contentType: r.content_type, contentId: r.content_id, createdAt: r.created_at,
-        title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
-        storagePath: c?.storage_path ?? null,
-        startTime: c?.start_time ?? null, endTime: c?.end_time ?? null,
-      };
-    }));
-    setPosts(items);
+    // ONLY this team's own wall — scoped in @/lib/core/homeFeed (single source of
+    // truth). No merge; the merged cross-team feed is the app-home screen's job.
+    const { posts: wall, debug: dbg } = await loadTeamWall(activeTeam.id);
+    setDebug(dbg);
+    setPosts(wall);
     setWallLoading(false);
   }
 
   const items = useMemo<FilterableItem[]>(
     () => posts.map(p => ({
-      id: p.shareId,
-      teamId: activeTeam?.id ?? '',
-      teamName: activeTeam?.name ?? 'Team',
+      id: p.key,
+      teamId: p.teamId,
+      teamName: p.teamName || 'Family',
       contentType: p.contentType === 'video' ? 'game' : p.contentType,
       title: p.title,
       createdAt: p.createdAt,
     })),
-    [posts, activeTeam],
+    [posts],
   );
-  // tagsByContentId is re-keyed by SHARE id so each item's tag set lines up with
-  // its FilterBar item (whose id is the share id, not the contentId).
+  // Team dropdown options derived from the teams actually in the feed (+ "All").
+  // FilterBar hides the dropdown when there's ≤1 team, so a single-team user sees
+  // no Team filter, and a multi-team coach/parent does.
+  const teamOptions = useMemo<DropdownOption[]>(() => {
+    const seen = new Map<string, string>();
+    posts.forEach(p => { if (p.teamId) seen.set(p.teamId, p.teamName); });
+    return [{ value: 'all', label: 'All' }, ...[...seen].map(([value, label]) => ({ value, label }))];
+  }, [posts]);
+  // tagsByContentId is re-keyed by the item key (contentType:contentId) so each
+  // item's tag set lines up with its FilterBar item.
   const tagsById = useMemo(
-    () => new Map(posts.map(p => [p.shareId, tagsByContentId.get(p.contentId) ?? new Set<string>()])),
+    () => new Map(posts.map(p => [p.key, tagsByContentId.get(p.contentId) ?? new Set<string>()])),
     [posts, tagsByContentId],
   );
-  const postsById = useMemo(() => new Map(posts.map(p => [p.shareId, p])), [posts]);
+  const postsById = useMemo(() => new Map(posts.map(p => [p.key, p])), [posts]);
 
   function openShared(item: WallPost) {
     if (item.contentType === 'game') {
@@ -216,6 +224,16 @@ export default function HomeScreen() {
 
   async function signOut() { await supabase.auth.signOut(); }
 
+  // TEMP diagnostic — rendered in BOTH the no-team gate and the feed so the
+  // numbers show regardless of whether activeTeam resolved. Remove after verify.
+  const debugPanel = __DEV__ && debug ? (
+    <View style={styles.debugBox}>
+      <Text style={styles.debugTitle}>▶ SCREEN: (tabs)/index.tsx — TEAM page ({activeTeam?.name ?? '—'})</Text>
+      <Text style={styles.debugText}>team wall rows: {debug.q1Rows}{debug.q1Err ? `  ⛔ ${debug.q1Err}` : ''}</Text>
+      <Text style={styles.debugText}>final after dedup: {debug.final}</Text>
+    </View>
+  ) : null;
+
   if (!activeTeam) {
     return (
       <View style={styles.container}>
@@ -223,6 +241,7 @@ export default function HomeScreen() {
           <View />
           <TouchableOpacity onPress={signOut}><Text style={styles.signOut}>Sign out</Text></TouchableOpacity>
         </View>
+        {debugPanel}
         <Text style={styles.heading}>No team selected</Text>
         <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/select-team')}>
           <Text style={styles.primaryBtnText}>Pick a team</Text>
@@ -242,6 +261,8 @@ export default function HomeScreen() {
 
       <Text style={styles.heading} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{activeTeam.name}</Text>
 
+      {debugPanel}
+
       <View style={styles.actions}>
         <TouchableOpacity style={styles.smallBtn} onPress={toggleForm}>
           <Text style={styles.smallBtnText}>{showForm ? 'Cancel' : '+ New Game'}</Text>
@@ -251,12 +272,13 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.subtitle}>Team wall</Text>
+      <Text style={styles.subtitle}>This team’s wall.</Text>
 
       {showForm ? (
         // Games manager: create a game, or open an existing one to add film.
         <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
           <View style={styles.form}>
+            <Text style={styles.formTeam}>New game for {activeTeam.name}</Text>
             <TextInput
               style={styles.input}
               placeholder="Opponent name"
@@ -299,16 +321,16 @@ export default function HomeScreen() {
           )}
         </ScrollView>
       ) : (
-        // The team wall — the main view.
+        // The Home feed — the main view.
         <>
           <FilterBar
             items={items}
             tagsById={tagsById}
             tagMeta={tagMeta}
-            teamOptions={TEAM_OPTIONS}
+            teamOptions={teamOptions}
             typeOptions={TYPE_OPTIONS}
             sortOptions={SORT_OPTIONS}
-            searchPlaceholder="Search the wall"
+            searchPlaceholder="Search"
             onVisibleChange={setVisiblePosts}
           />
 
@@ -316,7 +338,7 @@ export default function HomeScreen() {
             {wallLoading ? (
               <ActivityIndicator size="large" color="#534AB7" />
             ) : posts.length === 0 ? (
-              <Text style={styles.empty}>Nothing on the team wall yet.{'\n'}Post reels or games from Film Room.</Text>
+              <Text style={styles.empty}>Nothing on this team’s wall yet.{'\n'}Post games or reels from Film Room.</Text>
             ) : visiblePosts.length === 0 ? (
               <Text style={styles.empty}>Nothing matches your filters.</Text>
             ) : (
@@ -324,9 +346,16 @@ export default function HomeScreen() {
                 {visiblePosts.map(fi => {
                   const item = postsById.get(fi.id);
                   if (!item) return null;
+                  // Show the wall labels this content lives on, teams before Family.
+                  const sources = [...item.sources].sort((a, b) => (a === 'Family' ? 1 : 0) - (b === 'Family' ? 1 : 0));
                   return (
-                    <TouchableOpacity key={item.shareId} style={styles.card} onPress={() => openShared(item)}>
-                      <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
+                    <TouchableOpacity key={item.key} style={styles.card} onPress={() => openShared(item)}>
+                      <View style={styles.cardTop}>
+                        <ContentTypeBadge type={item.contentType} />
+                        {sources.map(s => (
+                          <Text key={s} style={styles.sourcePill} numberOfLines={1}>{s}</Text>
+                        ))}
+                      </View>
                       <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
                       <Text style={styles.cardMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
                     </TouchableOpacity>
@@ -348,8 +377,13 @@ const styles = StyleSheet.create({
   signOut: { color: '#888', fontSize: 14 },
 
   heading: { color: '#fff', fontSize: 28, fontWeight: '700', letterSpacing: -0.3 },
+
+  // TEMP diagnostic panel — remove after on-device verify.
+  debugBox: { backgroundColor: '#3a2f00', borderColor: '#c8a400', borderWidth: 1, borderRadius: 8, padding: 10, marginVertical: 10, gap: 2 },
+  debugTitle: { color: '#ffd11a', fontSize: 12, fontWeight: '800', marginBottom: 4, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+  debugText: { color: '#ffe680', fontSize: 12, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
   actions: { flexDirection: 'row', gap: 8, justifyContent: 'center', marginTop: 12, marginBottom: 10 },
-  subtitle: { color: '#888', fontSize: 13, textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '600', marginBottom: 14 },
+  subtitle: { color: '#888', fontSize: 13, lineHeight: 18, textAlign: 'center', marginBottom: 14 },
   smallBtn: { backgroundColor: '#534AB7', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   smallBtnAlt: { backgroundColor: '#1D9E75' },
   smallBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
@@ -365,11 +399,18 @@ const styles = StyleSheet.create({
   // wall cards
   card: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#333' },
   typeBadgeWrap: { marginBottom: 6 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' },
+  sourcePill: {
+    color: '#ddd', fontSize: 11, fontWeight: '700',
+    backgroundColor: '#2a2740', borderColor: '#534AB7', borderWidth: 1,
+    borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, maxWidth: 160,
+  },
   cardTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   cardMeta: { color: '#888', fontSize: 12, marginTop: 4 },
 
   // games manager
   form: { backgroundColor: '#1a1a1a', borderRadius: 12, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#333' },
+  formTeam: { color: '#888', fontSize: 12, fontWeight: '600', marginBottom: 10 },
   input: { backgroundColor: '#0d0d0d', borderRadius: 8, padding: 12, marginBottom: 10, fontSize: 16, color: '#fff', borderWidth: 1, borderColor: '#333' },
   dateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 },
   dateLabel: { fontSize: 15, color: '#aaa' },
