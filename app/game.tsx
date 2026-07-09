@@ -1,5 +1,6 @@
 import { useTeamContext } from '@/context';
 import { CacheStatus, getManifest, prefetch, remove as removeFromCache, subscribe } from '@/lib/native/video-cache';
+import { makeVideoLabel } from '@/lib/core/upload-meta';
 import { pickVideo, uploadVideoToBucket } from '@/lib/native/video-upload';
 import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -82,7 +83,7 @@ export default function GameScreen() {
   }
 
   async function uploadVideo() {
-    if (!pendingFile || !videoLabel) { Alert.alert('Please add a label'); return; }
+    if (!pendingFile) { Alert.alert('Choose a video first'); return; }
     // team_id comes from the GAME's own row (fetchGame), never the active team —
     // they can differ (Film Room entry, or a mid-flow team switch). A game with
     // no readable team is a broken state: block and surface it, never misfile.
@@ -91,6 +92,9 @@ export default function GameScreen() {
       Alert.alert('Couldn’t determine this game’s team — can’t add video');
       return;
     }
+    // Blank label → the shared "{date} {index}" default (index continues from the
+    // game's current video count, in sync with sort_order). A typed label wins.
+    const finalLabel = videoLabel.trim() || makeVideoLabel('', videos.length, true);
     setShowLabelForm(false);
     setUploading(true);
     setUploadProgress(0);
@@ -109,13 +113,13 @@ export default function GameScreen() {
         team_id: gameTeamId,
         uploaded_by_user_id: userId,
         url: fileName,
-        label: videoLabel,
+        label: finalLabel,
         sort_order: videos.length,
       });
 
       if (error) Alert.alert('Error', error.message);
       else {
-        setJustUploaded(videoLabel);
+        setJustUploaded(finalLabel);
         fetchVideos();
         setVideoLabel('');
         setPendingFile(null);

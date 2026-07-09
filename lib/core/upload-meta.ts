@@ -48,3 +48,12 @@ export function dateToYMD(d: Date): string {
 export function defaultUploadTitle(d: Date): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
+
+// The ONE place videos get named — shared by the multi-select batch (upload.tsx)
+// and the add-to-game flow (game.tsx). A blank base falls back to today's date;
+// `withIndex` appends the 1-based position (sortOrder + 1) to keep a game's
+// videos distinct (e.g. game has 3 videos → next is "Jul 9, 2026 4").
+export function makeVideoLabel(base: string, sortOrder: number, withIndex: boolean): string {
+  const b = base.trim() || defaultUploadTitle(new Date());
+  return withIndex ? `${b} ${sortOrder + 1}` : b;
+}

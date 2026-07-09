@@ -67,6 +67,38 @@ export async function pickVideo(): Promise<PendingFile | null> {
   return { isWeb: false, uri: result.assets[0].uri, type: 'video/mp4' };
 }
 
+// Pick MULTIPLE videos at once (for building a game from several clips). Returns
+// them in the order the OS reports (used as play order). Empty array if cancelled
+// or permission denied.
+export async function pickVideos(): Promise<PendingFile[]> {
+  if (Platform.OS === 'web') {
+    return new Promise(resolve => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'video/*';
+      input.multiple = true;
+      input.onchange = (e: any) => {
+        const files: File[] = Array.from(e.target.files || []);
+        resolve(files.map(file => ({ isWeb: true, file, type: file.type, name: file.name })));
+      };
+      input.click();
+    });
+  }
+  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!permission.granted) {
+    Alert.alert('Permission needed', 'Please allow access to your photo library.');
+    return [];
+  }
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ['videos'],
+    allowsMultipleSelection: true,
+    allowsEditing: false,
+    quality: 1,
+  });
+  if (result.canceled) return [];
+  return result.assets.map(a => ({ isWeb: false as const, uri: a.uri, type: 'video/mp4' }));
+}
+
 // Upload a single chunk via PATCH with retries + token refresh on auth errors.
 async function patchChunk(uploadUrl: string, bytes: Uint8Array, offset: number): Promise<void> {
   const maxAttempts = 3;

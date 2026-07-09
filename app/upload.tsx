@@ -1,7 +1,7 @@
 import { useTeamContext } from '@/context';
-import { pickVideo, uploadVideoToBucket, type PendingFile } from '@/lib/native/video-upload';
+import { pickVideos, uploadVideoToBucket, type PendingFile } from '@/lib/native/video-upload';
 import {
-  defaultUploadTitle, dateToYMD, deriveResult, EVENT_TYPES, NEW_TOURNAMENT, SEASON_TERMS, SPORTS,
+  defaultUploadTitle, dateToYMD, deriveResult, EVENT_TYPES, makeVideoLabel, NEW_TOURNAMENT, SEASON_TERMS, SPORTS,
   type EventTypeKey,
 } from '@/lib/core/upload-meta';
 import { supabase } from '@/supabase';
@@ -22,8 +22,9 @@ export default function UploadScreen() {
   const params = useLocalSearchParams();
   const paramPlayerId = (Array.isArray(params.playerId) ? params.playerId[0] : params.playerId) || '';
 
-  // Always-visible
-  const [pending, setPending] = useState<PendingFile | null>(null);
+  // Always-visible. `pending` is now a LIST — multi-select creates one game and
+  // uploads every picked video to it in pick order.
+  const [pending, setPending] = useState<PendingFile[]>([]);
   const [label, setLabel] = useState('');
   const [titleTouched, setTitleTouched] = useState(false);
   const [eventType, setEventType] = useState<EventTypeKey>('game');
@@ -47,7 +48,15 @@ export default function UploadScreen() {
   // Flow
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [done, setDone] = useState<{ videoId: string; url: string; label: string; where: string } | null>(null);
+  const [progressText, setProgressText] = useState('');   // "Video 2 of 4"
+  // Multi-upload result: how many landed, out of how many, the row to jump
+  // straight into tagging (single video), and the just-created game's context so
+  // "Add more videos to this game" can attach more without re-entering details.
+  const [done, setDone] = useState<{
+    count: number; total: number; where: string;
+    first: { videoId: string; url: string; label: string } | null;
+    game: { id: string; teamId: string | null; eventType: EventTypeKey; eventDate: string; sport: string | null; seasonId: string | null } | null;
+  } | null>(null);
 
   const activeTeam = teamId ? userTeams.find(t => t.team_id === teamId) : null;
 
@@ -91,9 +100,9 @@ export default function UploadScreen() {
   }, [teamId]);
 
   async function pick() {
-    const f = await pickVideo();
-    if (f) {
-      setPending(f);
+    const files = await pickVideos();
+    if (files.length > 0) {
+      setPending(files);
       if (!titleTouched && !label.trim()) setLabel(defaultUploadTitle(eventDate));   // sensible default
     }
   }
@@ -111,11 +120,11 @@ export default function UploadScreen() {
   }
 
   async function doUpload() {
-    if (!pending) { await pick(); return; }
-    if (!label.trim()) { Alert.alert('Add a title'); return; }
+    if (pending.length === 0) { await pick(); return; }
     if (!userId) { Alert.alert('Not signed in'); return; }
     setUploading(true);
     setProgress(0);
+    setProgressText('');
     try {
       const resolvedSport = teamId ? (activeTeam?.sport ?? null) : (sport || null);
 
@@ -132,7 +141,7 @@ export default function UploadScreen() {
         }
       }
 
-      // 2. Tournament — pick-or-create (team + game details).
+      // 2. Tournament — pick-or-create.
       let tournamentResolved: string | null = null;
       if (teamId && tournamentId && tournamentId !== NEW_TOURNAMENT) {
         tournamentResolved = tournamentId;
@@ -147,8 +156,7 @@ export default function UploadScreen() {
         }
       }
 
-      // 3. Game — created ONLY when a team is set AND there are game details
-      //    (opponent or tournament). Requires games-insert permission.
+      // 3. Create the game ONCE (team + game details). Every picked video attaches to it.
       let gameId: string | null = null;
       if (teamId && (opponent.trim() !== '' || tournamentResolved !== null)) {
         const gameTitle = opponent.trim() ? `${vsAt} ${opponent.trim()}` : 'Game';
@@ -166,29 +174,108 @@ export default function UploadScreen() {
         gameId = g?.id ?? null;
       }
 
-      // 4. Upload the file.
-      const fileName = `${teamId ? 'team' : 'personal'}-${userId}-${Date.now()}.mp4`;
-      await uploadVideoToBucket(fileName, pending, setProgress);
-
-      // 5. Insert the video row (the self-describing record).
-      const { data: v, error } = await supabase.from('videos').insert({
-        game_id: gameId,
-        team_id: teamId || null,
-        uploaded_by_user_id: userId,
-        player_id: playerId || null,
-        url: fileName,
-        label: label.trim(),
-        sort_order: 0,
-        visibility: teamId ? 'team' : 'private_to_creator',
-        event_type: eventType,
-        event_date: dateToYMD(eventDate),
-        sport: resolvedSport,
-        season_id: seasonId,
-      }).select('id').single();
-      if (error || !v) { Alert.alert('Upload error', error?.message ?? 'Failed to save video'); setUploading(false); return; }
+      // 4. Upload every picked video to the game (sort_order = pick order, from 0).
+      //    Partial failure is handled inside uploadBatch (keeps successes).
+      const total = pending.length;
+      const evDate = dateToYMD(eventDate);
+      const r = await uploadBatch(pending, {
+        gameId, teamId: teamId || null, playerId: playerId || null,
+        eventType, eventDate: evDate, sport: resolvedSport, seasonId, base: label.trim(),
+      }, 0);
 
       setUploading(false);
-      setDone({ videoId: v.id, url: fileName, label: label.trim(), where: activeTeam ? activeTeam.name : 'Film Room' });
+      if (r.succeeded.length === 0) {
+        Alert.alert('Upload failed', `None of the ${total} video${total === 1 ? '' : 's'} uploaded — nothing was saved. Please try again.`);
+        return;
+      }
+      if (r.failed.length > 0) {
+        Alert.alert(
+          'Some videos didn’t upload',
+          `${r.succeeded.length} of ${total} uploaded${gameId ? ' to the game' : ''}. Failed: ${r.failed.join(', ')}. The successful videos were kept — re-add the failed ones from Film Room.`,
+        );
+      }
+      setDone({
+        count: r.succeeded.length, total, where: activeTeam ? activeTeam.name : 'Film Room', first: r.first,
+        game: gameId ? { id: gameId, teamId: teamId || null, eventType, eventDate: evDate, sport: resolvedSport, seasonId } : null,
+      });
+    } catch (e: any) {
+      Alert.alert('Upload error', e?.message ?? 'Unknown');
+      setUploading(false);
+    }
+  }
+
+  // Upload a batch of videos to a game, continuing sort_order from startSortOrder.
+  // Each video is independent — a failure is collected, never rolls back the batch.
+  async function uploadBatch(
+    files: PendingFile[],
+    ctx: { gameId: string | null; teamId: string | null; playerId: string | null; eventType: EventTypeKey; eventDate: string; sport: string | null; seasonId: string | null; base: string },
+    startSortOrder: number,
+  ) {
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+    let first: { videoId: string; url: string; label: string } | null = null;
+    for (let i = 0; i < files.length; i++) {
+      const sort = startSortOrder + i;
+      const vidLabel = makeVideoLabel(ctx.base, sort, files.length > 1 || startSortOrder > 0);
+      setProgressText(`Video ${i + 1} of ${files.length}`);
+      setProgress(0);
+      try {
+        const fileName = `${ctx.teamId ? 'team' : 'personal'}-${userId}-${Date.now()}-${sort}.mp4`;
+        await uploadVideoToBucket(fileName, files[i], setProgress);
+        const { data: v, error } = await supabase.from('videos').insert({
+          game_id: ctx.gameId,
+          team_id: ctx.teamId,
+          uploaded_by_user_id: userId,
+          player_id: ctx.playerId,
+          url: fileName,
+          label: vidLabel,
+          sort_order: sort,
+          visibility: ctx.teamId ? 'team' : 'private_to_creator',
+          event_type: ctx.eventType,
+          event_date: ctx.eventDate,
+          sport: ctx.sport,
+          season_id: ctx.seasonId,
+        }).select('id').single();
+        if (error || !v) throw new Error(error?.message ?? 'Failed to save video');
+        succeeded.push(vidLabel);
+        if (!first) first = { videoId: v.id, url: fileName, label: vidLabel };
+      } catch {
+        failed.push(vidLabel);
+      }
+    }
+    return { succeeded, failed, first };
+  }
+
+  // Success-screen "Add more videos to this game" — reuses the picker + uploadBatch
+  // against the JUST-CREATED game. team_id comes from the game (anti-misfile), and
+  // sort_order continues from the game's CURRENT max, recomputed on every call.
+  async function addMore() {
+    if (!done?.game || !userId) return;
+    const g = done.game;
+    const files = await pickVideos();
+    if (files.length === 0) return;
+    setUploading(true);
+    setProgress(0);
+    setProgressText('');
+    try {
+      // Recomputed live EACH call → a 2nd "add more" appends (…3,4 then 5,6), never restarts at 0.
+      const { data: last } = await supabase.from('videos')
+        .select('sort_order').eq('game_id', g.id)
+        .order('sort_order', { ascending: false }).limit(1).maybeSingle();
+      const start = (last?.sort_order ?? -1) + 1;
+      const r = await uploadBatch(files, {
+        gameId: g.id, teamId: g.teamId, playerId: null,
+        eventType: g.eventType, eventDate: g.eventDate, sport: g.sport, seasonId: g.seasonId, base: 'Clip',
+      }, start);
+      setUploading(false);
+      if (r.succeeded.length === 0) {
+        Alert.alert('Upload failed', `None of the ${files.length} video${files.length === 1 ? '' : 's'} were added.`);
+        return;
+      }
+      if (r.failed.length > 0) {
+        Alert.alert('Some videos didn’t upload', `${r.succeeded.length} of ${files.length} added. Failed: ${r.failed.join(', ')}.`);
+      }
+      setDone({ ...done, count: done.count + r.succeeded.length, total: done.total + files.length });
     } catch (e: any) {
       Alert.alert('Upload error', e?.message ?? 'Unknown');
       setUploading(false);
@@ -204,14 +291,25 @@ export default function UploadScreen() {
           <Text style={styles.doneCheck}>✓</Text>
           <Text style={styles.doneTitle}>Saved to Film Room</Text>
           <Text style={styles.doneBody}>
-            “{done.label}” landed in your Film Room{activeTeam ? ` and is attached to ${done.where}` : ''}. Tag it now to pull out clips, or find it later under “Unsorted footage.” It was NOT posted to any wall.
+            {done.count === 1 ? '1 video' : `${done.count} videos`} landed in your Film Room{done.where !== 'Film Room' ? ` on ${done.where}` : ''}
+            {done.count < done.total ? ` — ${done.total - done.count} failed (re-add from Film Room)` : ''}. Not posted to any wall.
           </Text>
-          <TouchableOpacity
-            style={[styles.saveBtn, styles.doneBtn]}
-            onPress={() => router.replace({ pathname: '/tagging-overlay', params: { videoId: done.videoId, url: done.url, label: done.label, personal: '1' } })}
-          >
-            <Text style={styles.saveBtnText}>Tag it now</Text>
-          </TouchableOpacity>
+          {/* "Tag it now" only makes sense for a single video; N videos → tag them
+              individually in Film Room. */}
+          {done.count === 1 && done.first ? (
+            <TouchableOpacity
+              style={[styles.saveBtn, styles.doneBtn]}
+              onPress={() => router.replace({ pathname: '/tagging-overlay', params: { videoId: done.first!.videoId, url: done.first!.url, label: done.first!.label, personal: '1' } })}
+            >
+              <Text style={styles.saveBtnText}>Tag it now</Text>
+            </TouchableOpacity>
+          ) : null}
+          {/* Add more to the SAME game — only when this upload created a game. */}
+          {done.game ? (
+            <TouchableOpacity style={[styles.doneOutlineBtn, styles.doneBtn]} onPress={addMore}>
+              <Text style={styles.doneOutlineText}>＋ Add more videos to this game</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity style={[styles.doneOutlineBtn, styles.doneBtn]} onPress={() => router.replace('/my-work')}>
             <Text style={styles.doneOutlineText}>Go to Film Room</Text>
           </TouchableOpacity>
@@ -229,6 +327,7 @@ export default function UploadScreen() {
         <Text style={styles.title}>Upload video</Text>
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#534AB7" />
+          {progressText ? <Text style={styles.progress}>{progressText}</Text> : null}
           <Text style={styles.progress}>{progress}%</Text>
         </View>
       </View>
@@ -241,15 +340,18 @@ export default function UploadScreen() {
       <Text style={styles.title}>Upload video</Text>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
-        {/* Video (required) */}
+        {/* Video(s) — pick one or several; several go to one new game in pick order */}
         <TouchableOpacity style={styles.pickBtn} onPress={pick}>
-          <Text style={styles.pickText}>{pending ? 'Video selected ✓ — choose another' : 'Choose a video'}</Text>
+          <Text style={styles.pickText}>
+            {pending.length > 0 ? `${pending.length} video${pending.length === 1 ? '' : 's'} selected ✓ — choose again` : 'Choose video(s)'}
+          </Text>
         </TouchableOpacity>
 
-        {pending ? (
+        {pending.length > 0 ? (
           <>
-            {/* Title (required, prefilled) */}
-            <Text style={styles.label}>Title</Text>
+            {/* Title (optional; a base name — each video is titled “{name} 1/2/3…”,
+                or “Clip 1/2/3” if left blank) */}
+            <Text style={styles.label}>Title (optional)</Text>
             <TextInput
               style={styles.input}
               value={label}
@@ -291,7 +393,7 @@ export default function UploadScreen() {
                 <Text style={styles.label}>Sport{activeTeam ? ` (from ${activeTeam.name})` : ''}</Text>
                 <Dropdown value={sport} options={SPORTS} onSelect={setSport} />
 
-                {/* Season — only when a team is attached */}
+                {/* Season — when a team is attached */}
                 {teamId ? (
                   <>
                     <Text style={styles.label}>Season</Text>
@@ -311,7 +413,8 @@ export default function UploadScreen() {
                   </>
                 ) : null}
 
-                {/* Game details — only meaningful with a team */}
+                {/* Game details — shown whenever a team is attached (entered once
+                    for the game all the picked videos land on). */}
                 {teamId ? (
                   <>
                     <Text style={styles.label}>Game details</Text>
@@ -385,13 +488,11 @@ export default function UploadScreen() {
               </View>
             ) : null}
 
-            {/* Upload */}
-            <TouchableOpacity
-              style={[styles.saveBtn, !label.trim() && styles.saveBtnDisabled]}
-              onPress={doUpload}
-              disabled={!label.trim()}
-            >
-              <Text style={styles.saveBtnText}>Upload</Text>
+            {/* Upload — title is optional now, so gated only on having video(s) */}
+            <TouchableOpacity style={styles.saveBtn} onPress={doUpload}>
+              <Text style={styles.saveBtnText}>
+                {pending.length > 1 ? `Upload ${pending.length} videos` : 'Upload'}
+              </Text>
             </TouchableOpacity>
           </>
         ) : null}
