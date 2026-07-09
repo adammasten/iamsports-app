@@ -21,8 +21,11 @@ export default function GameScreen() {
   const params = useLocalSearchParams();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const title = Array.isArray(params.title) ? params.title[0] : params.title;
-  const { activeTeam, userId } = useTeamContext();
+  const { userId } = useTeamContext();
   const [videos, setVideos] = useState<any[]>([]);
+  // The GAME's own team_id (from its row), used for the video insert — never the
+  // active team, which can differ from the game's team.
+  const [gameTeamId, setGameTeamId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [showLabelForm, setShowLabelForm] = useState(false);
@@ -33,7 +36,8 @@ export default function GameScreen() {
   const [justUploaded, setJustUploaded] = useState<string | null>(null);
 
   useEffect(() => {
-    if (id) fetchVideos();
+    if (id) { fetchGame(); fetchVideos(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   useEffect(() => {
@@ -61,6 +65,13 @@ export default function GameScreen() {
     else setVideos(data || []);
   }
 
+  async function fetchGame() {
+    // Source team_id from the GAME's own row. RLS (games_read) only returns the
+    // row to a member of that team, so this also gates who can add a video.
+    const { data } = await supabase.from('games').select('team_id').eq('id', id).single();
+    setGameTeamId(data?.team_id ?? null);
+  }
+
   async function startPick() {
     setJustUploaded(null);
     const f = await pickVideo();
@@ -72,11 +83,12 @@ export default function GameScreen() {
 
   async function uploadVideo() {
     if (!pendingFile || !videoLabel) { Alert.alert('Please add a label'); return; }
-    // V3 requirement: videos.team_id is nullable; omitting it silently
-    // misfiles the video as a personal upload. Both team_id and
-    // uploaded_by_user_id must be wired on every team-context upload.
-    if (!activeTeam || !userId) {
-      Alert.alert('No team selected', 'Pick a team before uploading.');
+    // team_id comes from the GAME's own row (fetchGame), never the active team —
+    // they can differ (Film Room entry, or a mid-flow team switch). A game with
+    // no readable team is a broken state: block and surface it, never misfile.
+    if (!userId) { Alert.alert('Not signed in'); return; }
+    if (!gameTeamId) {
+      Alert.alert('Couldn’t determine this game’s team — can’t add video');
       return;
     }
     setShowLabelForm(false);
@@ -94,7 +106,7 @@ export default function GameScreen() {
       // getSignedVideoUrl(). Matches the format existing rows were migrated to.
       const { error } = await supabase.from('videos').insert({
         game_id: id,
-        team_id: activeTeam.id,
+        team_id: gameTeamId,
         uploaded_by_user_id: userId,
         url: fileName,
         label: videoLabel,
