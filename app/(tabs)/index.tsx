@@ -1,4 +1,4 @@
-import { useTeamContext } from '@/context';
+import { COACH_ROLES, useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import DateTimePicker, { DateTimePickerAndroid, DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { router } from 'expo-router';
@@ -43,7 +43,8 @@ const SORT_OPTIONS: DropdownOption[] = [
 // screen (select-team.tsx). This screen only renders + filters the result.
 
 export default function HomeScreen() {
-  const { activeTeam } = useTeamContext();
+  const { activeTeam, activeRole } = useTeamContext();
+  const isCoach = !!activeRole && COACH_ROLES.includes(activeRole);
 
   // Games manager (create + open existing to add film) — behind the New Game button.
   const [games, setGames] = useState<any[]>([]);
@@ -256,7 +257,14 @@ export default function HomeScreen() {
         <TouchableOpacity onPress={() => router.replace('/select-team')}>
           <Text style={styles.switchBtn}>← Switch team</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={signOut}><Text style={styles.signOut}>Sign out</Text></TouchableOpacity>
+        <View style={styles.headerRight}>
+          {isCoach ? (
+            <TouchableOpacity onPress={() => router.push({ pathname: '/team-permissions', params: { teamId: activeTeam.id } })}>
+              <Text style={styles.manageBtn}>Permissions</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity onPress={signOut}><Text style={styles.signOut}>Sign out</Text></TouchableOpacity>
+        </View>
       </View>
 
       <Text style={styles.heading} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{activeTeam.name}</Text>
@@ -374,6 +382,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: '#000' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   switchBtn: { color: '#534AB7', fontSize: 14, fontWeight: '600' },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  manageBtn: { color: '#1D9E75', fontSize: 14, fontWeight: '700' },
   signOut: { color: '#888', fontSize: 14 },
 
   heading: { color: '#fff', fontSize: 28, fontWeight: '700', letterSpacing: -0.3 },
