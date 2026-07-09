@@ -601,7 +601,7 @@ export default function MyWorkScreen() {
         return (
           <View key={`player-${i}`} style={[styles.badge, styles.badgePlayer]}>
             <Ionicons name="lock-closed" size={11} color="#fff" />
-            <Text style={styles.badgeText} numberOfLines={1}>On {d.kidName}'s wall</Text>
+            <Text style={styles.badgeText} numberOfLines={1}>On {d.kidName}’s wall</Text>
           </View>
         );
       }
@@ -755,6 +755,13 @@ export default function MyWorkScreen() {
                       onPress={() => confirmPostToWall({ contentType: 'game', contentId: game.id, title: game.title })}
                     >
                       <Text style={styles.postBtnText}>Post to wall</Text>
+                    </TouchableOpacity>
+                    {/* Add-video is safe: game.tsx sources team_id from the game's own row, not the active team. */}
+                    <TouchableOpacity
+                      style={styles.gameAddBtn}
+                      onPress={() => router.push({ pathname: '/game', params: { id: game.id, title: game.title } })}
+                    >
+                      <Text style={styles.gameAddText}>＋ Add video</Text>
                     </TouchableOpacity>
                     {expanded && (
                       <View style={styles.videoList}>
@@ -971,6 +978,8 @@ const styles = StyleSheet.create({
   },
   videoRowText: { color: '#fff', fontSize: 14, fontWeight: '500', flex: 1 },
   gamePostBtn: { alignSelf: 'flex-start', backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 10 },
+  gameAddBtn: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 8 },
+  gameAddText: { color: '#534AB7', fontSize: 12, fontWeight: '700' },
   typeBadgeWrap: { marginBottom: 6 },
   videoRowEmpty: { color: '#555', fontSize: 13, fontStyle: 'italic', paddingVertical: 6 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 },
