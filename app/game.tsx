@@ -155,8 +155,9 @@ export default function GameScreen() {
 
       {!uploading && !showLabelForm && (
         <TouchableOpacity
-          style={styles.uploadBtn}
+          style={[styles.uploadBtn, !gameTeamId && styles.uploadBtnDisabled]}
           onPress={startPick}
+          disabled={!gameTeamId}
         >
           <Text style={styles.uploadText}>+ Upload Video</Text>
         </TouchableOpacity>
@@ -258,6 +259,7 @@ const styles = StyleSheet.create({
   backText: { color: '#534AB7', fontSize: 16 },
   title: { fontSize: 26, fontWeight: '700', marginBottom: 24 },
   uploadBtn: { backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 12 },
+  uploadBtnDisabled: { opacity: 0.5 },
   uploadText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   uploadedBanner: { backgroundColor: '#e8f5e9', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#a5d6a7' },
   uploadedTitle: { color: '#2e7d32', fontSize: 15, fontWeight: '800', marginBottom: 4 },
