@@ -123,6 +123,16 @@ When Adam reports a bug, the DEFAULT is: **investigate read-only and report find
 
 Recurring root cause across our bugs: the code hides failures and shows nothing (empty teams → blank feed; missing RPC → dropped items; permission error → assumed-zero-rows) instead of surfacing them. **Before launch, treat error visibility/logging as a priority** so silent failures become visible. This is Adam's scaling concern: he can't debug at 1000+ users if failures are silent. When touching error handling, prefer surfacing the failure over defaulting to empty — a visible "permission denied on player_teams" beats a blank screen.
 
+## Cleanup rule — no orphans, no drift (NON-NEGOTIABLE)
+
+Clean up behind yourself, every time — no orphaned files, no dead code, no duplicate tables/functions/policies, no repo↔live drift, no described-but-unwritten migrations left as breadcrumbs. This project has repeatedly lost hours to leftovers (orphaned `home.tsx`, two permission tables, stale migration files). So when you replace or supersede something:
+
+1. **Rewire everything to the ONE real thing**, then **search the entire codebase AND live DB** for every remaining reference to the old thing — app code, SQL, functions/RPCs, RLS policies, migration files.
+2. **Zero references = the bar.** If any remain, it's not done — fix them.
+3. **Only then retire/drop the old thing** — and for a destructive drop (table/function/policy), tell Adam before the final drop.
+4. **Give a proof-based cleanup report:** "Searched for X, found N references, all rewired/removed, zero orphans remain" — with the actual search output, not a claim.
+5. Keep repo migration files in sync with live so a future session can't mistake stale schema for truth.
+
 ## What we're working on now (May 2026)
 
 Active project: **V2 overlay** — a transparent, full-screen landscape tagging UI (Concept B). The current `app/tagging.tsx` is portrait with controls below the video; the overlay rebuild moves everything on top of full-screen landscape video.
