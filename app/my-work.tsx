@@ -77,10 +77,8 @@ function gameStatusColor(game: Game): string {
   return game.clipCount > 0 ? TAG_STATUS.inProgress : TAG_STATUS.notStarted;
 }
 
-// Filter-bar options for My Work. Single-entry teamOptions hides the Team
-// dropdown (reels carry no team); single-entry typeOptions keeps the Type
-// dropdown visible but constrained — reels-only feed today.
-const MY_WORK_TEAM_OPTIONS: DropdownOption[] = [{ value: 'all', label: 'All reels' }];
+// Filter-bar options for My Work. Team options are built from the user's teams
+// at render (see teamOptions); Type stays a small fixed set.
 const MY_WORK_TYPE_OPTIONS: DropdownOption[] = [
   { value: 'all', label: 'All' },
   { value: 'reel', label: 'Reels' },
@@ -420,13 +418,24 @@ export default function MyWorkScreen() {
     return groups;
   }, [userKids, userTeams, coachedPlayers]);
 
+  // Real team options so the FilterBar's Team dropdown appears. Games carry a
+  // team_id; reels don't yet, so a reel falls under "no team" and is hidden when
+  // a specific team is selected (expected until reels get team attach).
+  const teamNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    userTeams.forEach(t => { if (!m.has(t.team_id)) m.set(t.team_id, t.name); });
+    return m;
+  }, [userTeams]);
+  const teamOptions = useMemo<DropdownOption[]>(
+    () => [{ value: 'all', label: 'All teams' }, ...[...teamNameById].map(([value, label]) => ({ value, label }))],
+    [teamNameById],
+  );
+
   // Map reels + games → FilterableItem for FilterBar. Reels carry no team
-  // (teamId/teamName empty); games carry game.teamId — teamName stays empty
-  // because MY_WORK_TEAM_OPTIONS is single-entry so the Team dropdown is
-  // hidden regardless. Games have no durationSeconds so 'longest' sort lands
-  // them at the bottom (Math.max chooses (b.duration ?? 0) - (a.duration ?? 0)
-  // in FilterBar — acceptable). reelsById/gamesById recover the full row for
-  // the card render; the list-render branches on fi.contentType.
+  // (teamId/teamName empty); games carry game.teamId + its team name. Games have
+  // no durationSeconds so 'longest' sort lands them at the bottom (acceptable).
+  // reelsById/gamesById recover the full row for the card render; the
+  // list-render branches on fi.contentType.
   const items = useMemo<FilterableItem[]>(
     () => [
       ...reels.map(r => ({
@@ -435,11 +444,11 @@ export default function MyWorkScreen() {
         durationSeconds: r.durationSeconds,
       })),
       ...games.map(g => ({
-        id: g.id, teamId: g.teamId, teamName: '',
+        id: g.id, teamId: g.teamId, teamName: teamNameById.get(g.teamId) ?? '',
         contentType: 'game', title: g.title, createdAt: g.createdAt,
       })),
     ],
-    [reels, games],
+    [reels, games, teamNameById],
   );
   const reelsById = useMemo(() => new Map(reels.map(r => [r.id, r])), [reels]);
   const gamesById = useMemo(() => new Map(games.map(g => [g.id, g])), [games]);
@@ -720,7 +729,7 @@ export default function MyWorkScreen() {
         items={items}
         tagsById={tagsById}
         tagMeta={tagMeta}
-        teamOptions={MY_WORK_TEAM_OPTIONS}
+        teamOptions={teamOptions}
         typeOptions={MY_WORK_TYPE_OPTIONS}
         sortOptions={MY_WORK_SORT_OPTIONS}
         searchPlaceholder="Search reels"
