@@ -52,7 +52,22 @@ type Game = {
   teamId: string;
   createdAt: string;
   videos: GameVideo[];
+  // Total clips across all this game's videos. Drives the tagging-status
+  // outline on the GAME badge: 0 → not started (red), >0 → in progress (yellow).
+  clipCount: number;
 };
+
+// Tagging-status traffic light for the GAME badge outline. Vivid hues so they
+// read against the badge's amber fill (yellow is the tightest contrast — tune
+// here if it muddies). Green ("done") arrives with the tagging_complete flag.
+const TAG_STATUS = {
+  notStarted: '#FF453A', // red   — no clips yet
+  inProgress: '#FFD60A', // yellow — has clips
+  done:       '#32D74B', // green  — marked fully tagged (Shot 2)
+};
+function gameStatusColor(clipCount: number): string {
+  return clipCount > 0 ? TAG_STATUS.inProgress : TAG_STATUS.notStarted;
+}
 
 // Filter-bar options for My Work. Single-entry teamOptions hides the Team
 // dropdown (reels carry no team); single-entry typeOptions keeps the Type
@@ -187,7 +202,7 @@ export default function MyWorkScreen() {
     if (!userId) { setGames([]); setLooseVideos([]); return; }
     const { data, error } = await supabase
       .from('videos')
-      .select('id, label, url, sort_order, game_id, created_at, games (id, title, opponent, game_date, team_id, created_at)')
+      .select('id, label, url, sort_order, game_id, created_at, clips (count), games (id, title, opponent, game_date, team_id, created_at)')
       .eq('uploaded_by_user_id', userId);
     if (error) { Alert.alert('Error', error.message); return; }
 
@@ -211,10 +226,13 @@ export default function MyWorkScreen() {
           teamId: g.team_id,
           createdAt: g.created_at,
           videos: [],
+          clipCount: 0,
         };
         byId.set(row.game_id, game);
       }
       game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order });
+      // clips(count) embeds as [{ count: N }] on the video row; accumulate per game.
+      game.clipCount += row.clips?.[0]?.count ?? 0;
     });
     for (const game of byId.values()) {
       game.videos.sort((a, b) => a.sortOrder - b.sortOrder);
@@ -742,7 +760,9 @@ export default function MyWorkScreen() {
                         <Ionicons name="basketball" size={24} color="#C8742B" />
                       </View>
                       <View style={styles.cardBody}>
-                        <View style={styles.typeBadgeWrap}><ContentTypeBadge type="game" /></View>
+                        <View style={styles.typeBadgeWrap}>
+                          <ContentTypeBadge type="game" outlineColor={gameStatusColor(game.clipCount)} />
+                        </View>
                         <Text style={styles.cardTitle} numberOfLines={1}>{game.title}</Text>
                         <Text style={styles.cardMeta} numberOfLines={1}>
                           {dateStr ? `${dateStr} · ${videoCount}` : videoCount}
@@ -755,13 +775,6 @@ export default function MyWorkScreen() {
                       onPress={() => confirmPostToWall({ contentType: 'game', contentId: game.id, title: game.title })}
                     >
                       <Text style={styles.postBtnText}>Post to wall</Text>
-                    </TouchableOpacity>
-                    {/* Add-video is safe: game.tsx sources team_id from the game's own row, not the active team. */}
-                    <TouchableOpacity
-                      style={styles.gameAddBtn}
-                      onPress={() => router.push({ pathname: '/game', params: { id: game.id, title: game.title } })}
-                    >
-                      <Text style={styles.gameAddText}>＋ Add video</Text>
                     </TouchableOpacity>
                     {expanded && (
                       <View style={styles.videoList}>
@@ -783,6 +796,13 @@ export default function MyWorkScreen() {
                             </TouchableOpacity>
                           ))
                         )}
+                        {/* Add-video is safe: game.tsx sources team_id from the game's own row, not the active team. */}
+                        <TouchableOpacity
+                          style={styles.gameAddBtn}
+                          onPress={() => router.push({ pathname: '/game', params: { id: game.id, title: game.title } })}
+                        >
+                          <Text style={styles.gameAddText}>＋ Add video</Text>
+                        </TouchableOpacity>
                       </View>
                     )}
                   </View>

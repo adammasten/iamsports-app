@@ -15,10 +15,19 @@ const MAP: Record<string, Meta> = {
   video: { label: 'GAME', icon: 'basketball', bg: '#C8742B' },
 };
 
-export default function ContentTypeBadge({ type }: { type: string }) {
+// outlineColor (optional): draws a status ring around the badge. Only the Film
+// Room game card passes it (tagging-status traffic light) — every other caller
+// omits it and gets the original borderless pill unchanged.
+export default function ContentTypeBadge({ type, outlineColor }: { type: string; outlineColor?: string }) {
   const m = MAP[type] ?? { label: type.toUpperCase(), icon: 'ellipse' as const, bg: '#3a3a3a' };
   return (
-    <View style={[styles.badge, { backgroundColor: m.bg }]}>
+    <View
+      style={[
+        styles.badge,
+        { backgroundColor: m.bg },
+        outlineColor ? { borderWidth: 2, borderColor: outlineColor } : null,
+      ]}
+    >
       <Ionicons name={m.icon} size={11} color="#fff" />
       <Text style={styles.text}>{m.label}</Text>
     </View>
