@@ -809,6 +809,9 @@ export default function MyWorkScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.back}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.push('/export')} style={styles.makeReelBtn}>
+          <Text style={styles.makeReelText}>＋ Make a reel</Text>
+        </TouchableOpacity>
       </View>
 
       <Text style={styles.title}>Film Room</Text>
@@ -1169,6 +1172,8 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   back: { paddingVertical: 8 },
   backText: { color: '#534AB7', fontSize: 16 },
+  makeReelBtn: { backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 },
+  makeReelText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   title: { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 8, marginBottom: 4 },
   subtitle: { color: '#888', fontSize: 13, lineHeight: 18, marginBottom: 16 },
 
