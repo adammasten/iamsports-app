@@ -13,6 +13,10 @@ export type FilterableItem = {
   title: string;
   createdAt: string;
   durationSeconds?: number | null;
+  // Optional extra single-select dimensions (event type, season, tournament, …)
+  // keyed by the same key used in the extraFilters prop. An item missing a key
+  // never matches a specific selection, so it drops out when that dim is filtered.
+  extra?: Record<string, string | null | undefined>;
 };
 
 // Tag-filter categories — each renders as a dropdown ONLY when the current items
@@ -31,6 +35,10 @@ type Props = {
   teamOptions: DropdownOption[];
   typeOptions: DropdownOption[];
   sortOptions: DropdownOption[];
+  // Optional extra single-select dimensions, rendered after Sort. Each renders a
+  // dropdown when its options list has more than one entry (an 'all' entry + at
+  // least one value); filtering matches item.extra[key] === selected value.
+  extraFilters?: { key: string; label: string; options: DropdownOption[] }[];
   searchPlaceholder?: string;
   onVisibleChange: (visible: FilterableItem[]) => void;
 };
@@ -42,12 +50,15 @@ type Props = {
 // Extracted from coaches-corner.tsx; behavior identical.
 export default function FilterBar({
   items, tagsById, tagMeta, teamOptions, typeOptions, sortOptions,
+  extraFilters = [],
   searchPlaceholder = 'Search', onVisibleChange,
 }: Props) {
   const [search, setSearch] = useState('');
   const [teamFilter, setTeamFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
+  // Extra-dimension selections, keyed by filter key ('all'/absent = no constraint).
+  const [extraValues, setExtraValues] = useState<Record<string, string>>({});
 
   // Per-category tag filters (single-select; 'all' = no constraint). Rendered
   // only when the items have tags of that category.
@@ -93,6 +104,11 @@ export default function FilterBar({
         const tagSet = tagsById.get(it.id);
         if (!activeTags.every(tid => tagSet?.has(tid))) return false;
       }
+      // Extra single-select dimensions (event type, season, tournament, …). AND.
+      for (const f of extraFilters) {
+        const v = extraValues[f.key] ?? 'all';
+        if (v !== 'all' && it.extra?.[f.key] !== v) return false;
+      }
       return true;
     });
     const sorted = [...filtered];
@@ -106,7 +122,7 @@ export default function FilterBar({
       sorted.sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // newest
     }
     return sorted;
-  }, [items, search, teamFilter, typeFilter, sortBy, playerFilter, offenseFilter, defenseFilter, playsFilter, tagsById]);
+  }, [items, search, teamFilter, typeFilter, sortBy, playerFilter, offenseFilter, defenseFilter, playsFilter, tagsById, extraFilters, extraValues]);
 
   // Hand the recomputed list to the parent whenever it changes. The ref
   // indirection makes the effect immune to an unstable onVisibleChange prop
@@ -141,6 +157,18 @@ export default function FilterBar({
         )}
         <Dropdown compact value={typeFilter} options={typeOptions} onSelect={setTypeFilter} placeholder="Type" />
         <Dropdown compact value={sortBy} options={sortOptions} onSelect={setSortBy} placeholder="Sort" />
+        {extraFilters.map(f => (
+          f.options.length > 1 ? (
+            <Dropdown
+              key={f.key}
+              compact
+              value={extraValues[f.key] ?? 'all'}
+              options={f.options}
+              onSelect={v => setExtraValues(prev => ({ ...prev, [f.key]: v }))}
+              placeholder={f.label}
+            />
+          ) : null
+        ))}
         {TAG_CATEGORIES.map(cat => {
           const opts = tagOptionsByCategory[cat.key];
           if (!opts || opts.length === 0) return null;

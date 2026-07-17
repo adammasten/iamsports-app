@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { EVENT_TYPES } from '@/lib/core/upload-meta';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 import ContentTypeBadge from './components/ContentTypeBadge';
@@ -55,6 +56,9 @@ type Game = {
   // Total clips across all this game's videos. Drives the tagging-status
   // outline on the GAME badge: 0 → not started (red), >0 → in progress (yellow).
   clipCount: number;
+  // Event type (game/practice/…) for the Film Room event filter. Taken from the
+  // game's videos (first non-null); null when none of its videos carry one.
+  eventType: string | null;
 };
 
 // Tagging-status traffic light for the GAME badge outline. Vivid hues so they
@@ -208,7 +212,7 @@ export default function MyWorkScreen() {
     if (!userId) { setGames([]); setLooseVideos([]); return; }
     const { data, error } = await supabase
       .from('videos')
-      .select('id, label, url, sort_order, game_id, created_at, tagging_complete, clips (count), games (id, title, opponent, game_date, team_id, created_at)')
+      .select('id, label, url, sort_order, game_id, created_at, tagging_complete, event_type, clips (count), games (id, title, opponent, game_date, team_id, created_at)')
       .eq('uploaded_by_user_id', userId);
     if (error) { Alert.alert('Error', error.message); return; }
 
@@ -233,12 +237,16 @@ export default function MyWorkScreen() {
           createdAt: g.created_at,
           videos: [],
           clipCount: 0,
+          eventType: null,
         };
         byId.set(row.game_id, game);
       }
       game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true });
       // clips(count) embeds as [{ count: N }] on the video row; accumulate per game.
       game.clipCount += row.clips?.[0]?.count ?? 0;
+      // First video that carries an event type sets the game's (game.tsx uploads
+      // leave it null; upload.tsx uploads set it).
+      if (!game.eventType && row.event_type) game.eventType = row.event_type;
     });
     for (const game of byId.values()) {
       game.videos.sort((a, b) => a.sortOrder - b.sortOrder);
@@ -431,6 +439,22 @@ export default function MyWorkScreen() {
     [teamNameById],
   );
 
+  // Extra FilterBar dimensions. Event type: only the types actually present
+  // across the games, and only when there's more than one to choose between.
+  const extraFilters = useMemo(() => {
+    const present = new Set(games.map(g => g.eventType).filter(Boolean) as string[]);
+    const out: { key: string; label: string; options: DropdownOption[] }[] = [];
+    if (present.size >= 2) {
+      const labelFor = (v: string) => EVENT_TYPES.find(e => e.value === v)?.label ?? v;
+      out.push({
+        key: 'eventType',
+        label: 'Event',
+        options: [{ value: 'all', label: 'All events' }, ...[...present].map(v => ({ value: v, label: labelFor(v) }))],
+      });
+    }
+    return out;
+  }, [games]);
+
   // Map reels + games → FilterableItem for FilterBar. Reels carry no team
   // (teamId/teamName empty); games carry game.teamId + its team name. Games have
   // no durationSeconds so 'longest' sort lands them at the bottom (acceptable).
@@ -446,6 +470,7 @@ export default function MyWorkScreen() {
       ...games.map(g => ({
         id: g.id, teamId: g.teamId, teamName: teamNameById.get(g.teamId) ?? '',
         contentType: 'game', title: g.title, createdAt: g.createdAt,
+        extra: { eventType: g.eventType ?? '' },
       })),
     ],
     [reels, games, teamNameById],
@@ -732,6 +757,7 @@ export default function MyWorkScreen() {
         teamOptions={teamOptions}
         typeOptions={MY_WORK_TYPE_OPTIONS}
         sortOptions={MY_WORK_SORT_OPTIONS}
+        extraFilters={extraFilters}
         searchPlaceholder="Search reels"
         onVisibleChange={setVisibleReels}
       />
