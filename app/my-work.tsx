@@ -786,8 +786,11 @@ export default function MyWorkScreen() {
                               key={v.id}
                               style={styles.videoRow}
                               onPress={() => Alert.alert(v.label, undefined, [
-                                { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } }) },
-                                { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
+                                { text: 'Tag video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } }) },
+                                // Watch game: same player, view-only. `watch: '1'` suppresses all tag
+                                // chrome in tagging-overlay — no new player, no divergent playback.
+                                { text: 'Watch game', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, watch: '1' } }) },
+                                { text: 'View clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
                                 { text: 'Cancel', style: 'cancel' },
                               ])}
                             >

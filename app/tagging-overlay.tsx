@@ -53,6 +53,10 @@ export default function TaggingOverlayScreen() {
   // Personal (no-team) tagging session — forces clip team_id null regardless of
   // whether the user happens to have an activeTeam selected.
   const isPersonal = (Array.isArray(params.personal) ? params.personal[0] : params.personal) === '1';
+  // Watch mode: reuse this player for pure viewing. Suppresses every tag control
+  // (Save Clip, bundle strip, tag columns, Mark Start/End, ★/POE, Tags/Video
+  // toggle) while keeping video, scrub bar, playback controls, and Back.
+  const isWatch = (Array.isArray(params.watch) ? params.watch[0] : params.watch) === '1';
   const startAt = params.startAt
     ? parseFloat(Array.isArray(params.startAt) ? params.startAt[0] : (params.startAt as string))
     : null;
@@ -644,18 +648,21 @@ export default function TaggingOverlayScreen() {
             <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
               <Text style={styles.backBtnText}>←</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
-              disabled={!canSave}
-              onPress={saveClip}
-            >
-              <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Clip'}</Text>
-            </TouchableOpacity>
+            {!isWatch && (
+              <TouchableOpacity
+                style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
+                disabled={!canSave}
+                onPress={saveClip}
+              >
+                <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Clip'}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </LinearGradient>
 
         {/* Right-edge bundle strip — Clip pill + dynamic numbered pills + add pill.
-            Same in both tag modes. */}
+            Same in both tag modes. Hidden in watch mode. */}
+        {!isWatch && (
         <View
           style={[
             styles.bundleStripContainer,
@@ -688,11 +695,14 @@ export default function TaggingOverlayScreen() {
             </TouchableOpacity>
           </ScrollView>
         </View>
+        )}
 
         {/* Tag region — 4 category columns. Compact: short strip above the
             controls row. Fullscreen: same left/right/bottom; top extends up
             under the top bar so the columns get much more vertical space.
-            Chip dimensions identical in both modes (per F.4 correction). */}
+            Chip dimensions identical in both modes (per F.4 correction).
+            Hidden in watch mode. */}
+        {!isWatch && (
         <View
           style={[
             tagMode === 'compact' ? styles.tagRegion : styles.fullscreenTagRegion,
@@ -740,6 +750,7 @@ export default function TaggingOverlayScreen() {
             </View>
           ))}
         </View>
+        )}
 
         {/* Bottom gradient + scrub bar + controls row — same in both tag modes.
             Toggle ("Tags" / "Video") sits rightmost in the controls row. */}
@@ -828,6 +839,7 @@ export default function TaggingOverlayScreen() {
               </TouchableOpacity>
             </View>
 
+            {!isWatch && (
             <View style={styles.markGroup}>
               <TouchableOpacity
                 style={[styles.markBtn, styles.markStartBtn, !videoReady && styles.disabledBtn]}
@@ -871,13 +883,16 @@ export default function TaggingOverlayScreen() {
                 </TouchableOpacity>
               </Animated.View>
             </View>
+            )}
 
+            {!isWatch && (
             <TouchableOpacity
               style={styles.toggleBtn}
               onPress={() => setTagMode(m => (m === 'compact' ? 'fullscreen' : 'compact'))}
             >
               <Text style={styles.toggleBtnText}>{tagMode === 'compact' ? 'Tags' : 'Video'}</Text>
             </TouchableOpacity>
+            )}
           </View>
         </LinearGradient>
       </Animated.View>
