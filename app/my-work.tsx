@@ -328,9 +328,10 @@ export default function MyWorkScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // Batch-load tags for the reel feed whenever reels change. ONE .in() query on
-  // reel_tags, then ONE on tags for names/categories. No N+1. Mirrors the reel
-  // branch of coaches-corner.tsx's tag batch-load — reels-only here.
+  // Batch-load tags for BOTH reels and games whenever either changes. Reels via
+  // reel_tags; games via their clips' clip_tags. All merged into one tagsById
+  // (item id → tag id set) + tagMeta so the FilterBar's per-category dropdowns
+  // work across the whole Film Room. Batched .in() queries — no N+1.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -346,6 +347,35 @@ export default function MyWorkScreen() {
           allTagIds.add(r.tag_id);
         });
       }
+
+      // Game clip-tags: game → videos → clips → clip_tags. Batched .in() queries
+      // (no N+1), keyed by GAME id so the per-category filters (Player/Offense/
+      // Defense/Plays) light up for games the same way they do for reels. A
+      // game's tag set is the union of tags across all its clips (any bundle).
+      const videoToGame = new Map<string, string>();
+      games.forEach(g => g.videos.forEach(v => videoToGame.set(v.id, g.id)));
+      const videoIds = [...videoToGame.keys()];
+      if (videoIds.length > 0) {
+        const { data: clipRows } = await supabase.from('clips').select('id, video_id').in('video_id', videoIds);
+        const clipToGame = new Map<string, string>();
+        (clipRows || []).forEach((c: any) => {
+          const gid = videoToGame.get(c.video_id);
+          if (gid) clipToGame.set(c.id, gid);
+        });
+        const clipIds = [...clipToGame.keys()];
+        if (clipIds.length > 0) {
+          const { data: ctRows } = await supabase.from('clip_tags').select('clip_id, tag_id').in('clip_id', clipIds);
+          (ctRows || []).forEach((ct: any) => {
+            const gid = clipToGame.get(ct.clip_id);
+            if (!gid) return;
+            const s = byId.get(gid) ?? new Set<string>();
+            s.add(ct.tag_id);
+            byId.set(gid, s);
+            allTagIds.add(ct.tag_id);
+          });
+        }
+      }
+
       const meta = new Map<string, { name: string; category: string }>();
       if (allTagIds.size > 0) {
         const { data } = await supabase.from('tags').select('id, name, category').in('id', [...allTagIds]);
@@ -356,7 +386,7 @@ export default function MyWorkScreen() {
       setTagMeta(meta);
     })();
     return () => { cancelled = true; };
-  }, [reels]);
+  }, [reels, games]);
 
   // Team ids the user coaches. players_read RLS only returns players on teams the
   // user is a confirmed member of, so this candidate set and post_to_wall's
