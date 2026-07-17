@@ -1,8 +1,8 @@
 import { COACH_ROLES, useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
@@ -331,11 +331,15 @@ export default function MyWorkScreen() {
     );
   }
 
-  useEffect(() => {
-    loadReels();
-    loadGames();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  // Reload on focus (and when the user changes) so returning from edit-game /
+  // edit-reel / a delete reflects the change without a manual refresh.
+  useFocusEffect(
+    useCallback(() => {
+      loadReels();
+      loadGames();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [userId]),
+  );
 
   // Batch-load tags for BOTH reels and games whenever either changes. Reels via
   // reel_tags; games via their clips' clip_tags. All merged into one tagsById
@@ -868,7 +872,15 @@ export default function MyWorkScreen() {
                 if (!reel) return null;
                 return (
                   <View key={`reel:${reel.id}`} style={styles.card}>
-                    <TouchableOpacity style={styles.thumb} onPress={() => openReel(reel)}>
+                    <TouchableOpacity
+                      style={styles.thumb}
+                      onPress={() => openReel(reel)}
+                      onLongPress={() => Alert.alert(reel.name, undefined, [
+                        { text: 'Edit reel', onPress: () => router.push({ pathname: '/edit-reel', params: { id: reel.id } }) },
+                        { text: 'Delete reel', style: 'destructive', onPress: () => confirmDelete(reel) },
+                        { text: 'Cancel', style: 'cancel' },
+                      ])}
+                    >
                       <Ionicons name="film-outline" size={30} color="#666" />
                     </TouchableOpacity>
 

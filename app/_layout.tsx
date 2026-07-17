@@ -155,6 +155,7 @@ export default function RootLayout() {
           <Stack.Screen name="shared-viewer" options={{ headerShown: false }} />
           <Stack.Screen name="shared-game" options={{ headerShown: false }} />
           <Stack.Screen name="edit-game" options={{ headerShown: false }} />
+          <Stack.Screen name="edit-reel" options={{ headerShown: false }} />
         </Stack>
         <AuthGate />
         <NameCaptureGate />
