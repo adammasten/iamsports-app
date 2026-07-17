@@ -785,6 +785,10 @@ export default function MyWorkScreen() {
                     <TouchableOpacity
                       style={styles.gameHeader}
                       onPress={() => setExpandedGameId(expanded ? null : game.id)}
+                      onLongPress={() => Alert.alert(game.title, undefined, [
+                        { text: 'Edit game', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
+                        { text: 'Cancel', style: 'cancel' },
+                      ])}
                       activeOpacity={0.7}
                     >
                       <View style={styles.gameThumb}>
