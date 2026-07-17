@@ -253,13 +253,24 @@ export default function MyWorkScreen() {
 
   // Manual per-video "done tagging" toggle. Coach decides — not derived from
   // clip count. Flipping the last incomplete video to done turns the game green.
+  // Optimistic: flip the check locally first (instant, and re-derives the green
+  // card face), write in the background, revert only if the write fails.
   async function toggleVideoComplete(video: GameVideo) {
+    const next = !video.taggingComplete;
+    const applyLocal = (val: boolean) =>
+      setGames(prev => prev.map(g => ({
+        ...g,
+        videos: g.videos.map(v => (v.id === video.id ? { ...v, taggingComplete: val } : v)),
+      })));
+    applyLocal(next);
     const { error } = await supabase
       .from('videos')
-      .update({ tagging_complete: !video.taggingComplete })
+      .update({ tagging_complete: next })
       .eq('id', video.id);
-    if (error) { Alert.alert('Error', error.message); return; }
-    loadGames();
+    if (error) {
+      applyLocal(!next); // revert
+      Alert.alert('Error', error.message);
+    }
   }
 
   useEffect(() => {
