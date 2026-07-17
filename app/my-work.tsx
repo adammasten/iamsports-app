@@ -296,6 +296,26 @@ export default function MyWorkScreen() {
     );
   }
 
+  // Delete a single video (game footage or loose). clips.video_id CASCADEs.
+  function confirmDeleteVideo(video: GameVideo) {
+    Alert.alert(
+      'Delete video',
+      `Delete “${video.label}”? This also deletes its clips. This can’t be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.from('videos').delete().eq('id', video.id);
+            if (error) { Alert.alert('Error', error.message); return; }
+            loadGames();
+          },
+        },
+      ],
+    );
+  }
+
   useEffect(() => {
     loadReels();
     loadGames();
@@ -724,6 +744,7 @@ export default function MyWorkScreen() {
                   <TouchableOpacity
                     key={v.id}
                     style={styles.looseCard}
+                    onLongPress={() => confirmDeleteVideo(v)}
                     onPress={() => Alert.alert(v.label, undefined, [
                       { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, personal: '1' } }) },
                       { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
@@ -855,6 +876,7 @@ export default function MyWorkScreen() {
                               </TouchableOpacity>
                               <TouchableOpacity
                                 style={styles.videoRowMain}
+                                onLongPress={() => confirmDeleteVideo(v)}
                                 onPress={() => Alert.alert(v.label, undefined, [
                                   { text: 'Tag video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } }) },
                                   // Watch game: same player, view-only. `watch: '1'` suppresses all tag
