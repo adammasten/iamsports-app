@@ -59,6 +59,11 @@ type Game = {
   // Event type (game/practice/…) for the Film Room event filter. Taken from the
   // game's videos (first non-null); null when none of its videos carry one.
   eventType: string | null;
+  // Season / tournament (id + display name) for their FilterBar dropdowns.
+  seasonId: string | null;
+  seasonName: string | null;
+  tournamentId: string | null;
+  tournamentName: string | null;
 };
 
 // Tagging-status traffic light for the GAME badge outline. Vivid hues so they
@@ -212,7 +217,7 @@ export default function MyWorkScreen() {
     if (!userId) { setGames([]); setLooseVideos([]); return; }
     const { data, error } = await supabase
       .from('videos')
-      .select('id, label, url, sort_order, game_id, created_at, tagging_complete, event_type, clips (count), games (id, title, opponent, game_date, team_id, created_at)')
+      .select('id, label, url, sort_order, game_id, created_at, tagging_complete, event_type, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))')
       .eq('uploaded_by_user_id', userId);
     if (error) { Alert.alert('Error', error.message); return; }
 
@@ -238,6 +243,10 @@ export default function MyWorkScreen() {
           videos: [],
           clipCount: 0,
           eventType: null,
+          seasonId: g.season_id ?? null,
+          seasonName: g.seasons?.name ?? null,
+          tournamentId: g.tournament_id ?? null,
+          tournamentName: g.tournaments?.name ?? null,
         };
         byId.set(row.game_id, game);
       }
@@ -469,19 +478,40 @@ export default function MyWorkScreen() {
     [teamNameById],
   );
 
-  // Extra FilterBar dimensions. Event type: only the types actually present
-  // across the games, and only when there's more than one to choose between.
+  // Extra FilterBar dimensions, built from what's actually present across the
+  // games. Event & Season show only when there are 2+ to choose between (a
+  // single value can't partition the list); Tournament shows with even one, so
+  // you can isolate "just the tournament games" from everything else.
   const extraFilters = useMemo(() => {
-    const present = new Set(games.map(g => g.eventType).filter(Boolean) as string[]);
     const out: { key: string; label: string; options: DropdownOption[] }[] = [];
-    if (present.size >= 2) {
+
+    const events = new Set(games.map(g => g.eventType).filter(Boolean) as string[]);
+    if (events.size >= 2) {
       const labelFor = (v: string) => EVENT_TYPES.find(e => e.value === v)?.label ?? v;
       out.push({
-        key: 'eventType',
-        label: 'Event',
-        options: [{ value: 'all', label: 'All events' }, ...[...present].map(v => ({ value: v, label: labelFor(v) }))],
+        key: 'eventType', label: 'Event',
+        options: [{ value: 'all', label: 'All events' }, ...[...events].map(v => ({ value: v, label: labelFor(v) }))],
       });
     }
+
+    const seasons = new Map<string, string>();
+    games.forEach(g => { if (g.seasonId) seasons.set(g.seasonId, g.seasonName ?? 'Season'); });
+    if (seasons.size >= 2) {
+      out.push({
+        key: 'seasonId', label: 'Season',
+        options: [{ value: 'all', label: 'All seasons' }, ...[...seasons].map(([value, label]) => ({ value, label }))],
+      });
+    }
+
+    const tours = new Map<string, string>();
+    games.forEach(g => { if (g.tournamentId) tours.set(g.tournamentId, g.tournamentName ?? 'Tournament'); });
+    if (tours.size >= 1) {
+      out.push({
+        key: 'tournamentId', label: 'Tournament',
+        options: [{ value: 'all', label: 'All' }, ...[...tours].map(([value, label]) => ({ value, label }))],
+      });
+    }
+
     return out;
   }, [games]);
 
@@ -500,7 +530,7 @@ export default function MyWorkScreen() {
       ...games.map(g => ({
         id: g.id, teamId: g.teamId, teamName: teamNameById.get(g.teamId) ?? '',
         contentType: 'game', title: g.title, createdAt: g.createdAt,
-        extra: { eventType: g.eventType ?? '' },
+        extra: { eventType: g.eventType ?? '', seasonId: g.seasonId ?? '', tournamentId: g.tournamentId ?? '' },
       })),
     ],
     [reels, games, teamNameById],
