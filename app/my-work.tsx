@@ -814,14 +814,16 @@ export default function MyWorkScreen() {
                         ) : (
                           game.videos.map(v => (
                             <View key={v.id} style={styles.videoRow}>
-                              {/* Tap the circle to toggle this video's tagging-complete.
-                                  When every video is checked, the game card face turns green. */}
-                              <TouchableOpacity onPress={() => toggleVideoComplete(v)} hitSlop={8}>
+                              {/* Tap the circle or "Tagged" to toggle this video's
+                                  tagging-complete. When every video is checked, the
+                                  game card face turns green. */}
+                              <TouchableOpacity style={styles.videoCheck} onPress={() => toggleVideoComplete(v)} hitSlop={8}>
                                 <Ionicons
                                   name={v.taggingComplete ? 'checkmark-circle' : 'ellipse-outline'}
                                   size={22}
                                   color={v.taggingComplete ? TAG_STATUS.done : '#666'}
                                 />
+                                <Text style={[styles.videoCheckLabel, v.taggingComplete && styles.videoCheckLabelDone]}>Tagged</Text>
                               </TouchableOpacity>
                               <TouchableOpacity
                                 style={styles.videoRowMain}
@@ -1041,6 +1043,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 8, paddingHorizontal: 4,
   },
+  videoCheck: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  videoCheckLabel: { color: '#666', fontSize: 12, fontWeight: '600' },
+  videoCheckLabelDone: { color: TAG_STATUS.done },
   videoRowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   videoRowText: { color: '#fff', fontSize: 14, fontWeight: '500', flex: 1 },
   gamePostBtn: { alignSelf: 'flex-start', backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 10 },
