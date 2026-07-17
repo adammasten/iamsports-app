@@ -1,11 +1,22 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { clipMatchesGroup } from '@/lib/core/clip-filtering';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, FlatList, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Dropdown, { type DropdownOption } from './components/Dropdown';
+
+// Tag categories for the review-step reel tag picker. Matches the tagging
+// screens; colors read on export's light review background.
+const REEL_TAG_CATEGORIES = [
+  { key: 'offense', label: 'Offense', color: '#1a6fd4' },
+  { key: 'defense', label: 'Defense', color: '#c0392b' },
+  { key: 'plays', label: 'Plays', color: '#1e8449' },
+  { key: 'players', label: 'Players', color: '#7d3c98' },
+];
 
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
 const ACTIVE_JOB_KEY = 'iamsports.active_export_job';
@@ -80,6 +91,33 @@ export default function ExportScreen() {
   // and whether to ALSO save to the camera roll. The reel always saves to My Work.
   const [reelName, setReelName] = useState('');
   const [saveToCameraRoll, setSaveToCameraRoll] = useState(true);
+  // Reel team + descriptive tags chosen at creation. Team defaults from the
+  // source games (below); tags are on top of the auto-copied clip tags.
+  const [reelTeamId, setReelTeamId] = useState('');
+  const [reelDescTags, setReelDescTags] = useState<Set<string>>(new Set());
+
+  const { userTeams } = useTeamContext();
+  const reelTeamOptions = useMemo<DropdownOption[]>(() => {
+    const seen = new Map<string, string>();
+    userTeams.forEach(t => { if (!seen.has(t.team_id)) seen.set(t.team_id, t.name); });
+    return [{ value: '', label: 'None' }, ...[...seen].map(([value, label]) => ({ value, label }))];
+  }, [userTeams]);
+  function toggleReelDescTag(id: string) {
+    setReelDescTags(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
+
+  // Prefill the reel's team from the source games when the review step opens, if
+  // they all share one team. Best-effort: does nothing if games lack team_id.
+  useEffect(() => {
+    if (step !== 'review' || reelTeamId !== '') return;
+    const teamIds = [...new Set(selectedGames.map(id => games.find((g: any) => g.id === id)?.team_id).filter(Boolean))];
+    if (teamIds.length === 1) setReelTeamId(teamIds[0] as string);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   // Pre-fill the reel name with the auto-name when the review step opens. Only
   // fills when empty so it never clobbers a name the user has already typed.
@@ -131,7 +169,7 @@ export default function ExportScreen() {
   // becomes a findable reel. Best-effort: never throws, never blocks the
   // camera-roll save or success UI. team_id is null for now (reels are
   // creator-owned; team association is derived later from source clips).
-  async function saveReelRecord(videoUrl: string, includedClipObjects: any[], name?: string) {
+  async function saveReelRecord(videoUrl: string, includedClipObjects: any[], name?: string, teamId?: string | null, descTagIds?: string[]) {
     try {
       if (includedClipObjects.length === 0) return;
 
@@ -152,7 +190,7 @@ export default function ExportScreen() {
 
       const { data: inserted, error } = await supabase.from('highlight_reels').insert({
         created_by_user_id: user.id,
-        team_id: null,
+        team_id: teamId || null,
         name: finalName,
         storage_path: deriveStoragePath(videoUrl),
         source_clip_ids: includedClipObjects.map(c => c.id),
@@ -169,7 +207,7 @@ export default function ExportScreen() {
       // Tags are already in memory (c.tagIds) — no extra query. Best-effort: a
       // tag-copy failure must never throw or break the (already-saved) reel.
       try {
-        const tagIds = [...new Set(includedClipObjects.flatMap((c: any) => c.tagIds || []))];
+        const tagIds = [...new Set([...includedClipObjects.flatMap((c: any) => c.tagIds || []), ...(descTagIds || [])])];
         if (tagIds.length > 0) {
           const rows = tagIds.map(tag_id => ({ reel_id: inserted.id, tag_id }));
           const { error: tagErr } = await supabase.from('reel_tags').insert(rows);
@@ -443,7 +481,7 @@ export default function ExportScreen() {
 
       // Persist the export as a reel (best-effort — must not block the save).
       // Always saves to My Work; the camera-roll save is user-gated below.
-      await saveReelRecord(videoUrl, includedClipObjects, reelName);
+      await saveReelRecord(videoUrl, includedClipObjects, reelName, reelTeamId, [...reelDescTags]);
 
       if (saveToCameraRoll) {
         await saveExportToLibrary(videoUrl);
@@ -720,7 +758,37 @@ export default function ExportScreen() {
             placeholder="Reel name"
             placeholderTextColor="#666"
           />
-          <View style={styles.toggleRow}>
+
+          <Text style={styles.fieldLabel}>Team</Text>
+          <Dropdown value={reelTeamId} options={reelTeamOptions} onSelect={setReelTeamId} placeholder="None" />
+
+          <Text style={[styles.fieldLabel, { marginTop: 14 }]}>Tags</Text>
+          <Text style={styles.reelTagHint}>Describe the reel so you can sort it later — e.g. Defense, Press break. On top of the clips’ own tags.</Text>
+          {REEL_TAG_CATEGORIES.map(cat => {
+            const catTags = tags.filter((t: any) => t.category === cat.key);
+            if (catTags.length === 0) return null;
+            return (
+              <View key={cat.key} style={styles.reelCatBlock}>
+                <Text style={[styles.reelCatHeader, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
+                <View style={styles.reelChipsWrap}>
+                  {catTags.map((t: any) => {
+                    const on = reelDescTags.has(t.id);
+                    return (
+                      <TouchableOpacity
+                        key={t.id}
+                        onPress={() => toggleReelDescTag(t.id)}
+                        style={[styles.reelChip, on ? { backgroundColor: cat.color, borderColor: cat.color } : { backgroundColor: '#fff', borderColor: cat.color }]}
+                      >
+                        <Text style={[styles.reelChipText, { color: on ? '#fff' : cat.color }]}>{t.name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            );
+          })}
+
+          <View style={[styles.toggleRow, { marginTop: 16 }]}>
             <Text style={styles.toggleLabel}>Also save to camera roll</Text>
             <Switch value={saveToCameraRoll} onValueChange={setSaveToCameraRoll} />
           </View>
@@ -818,6 +886,12 @@ const styles = StyleSheet.create({
   footer: { marginTop: 8 },
   fieldLabel: { color: '#666', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
   nameInput: { backgroundColor: '#1a1a1a', borderRadius: 10, borderWidth: 1, borderColor: '#333', color: '#fff', fontSize: 15, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 14 },
+  reelTagHint: { color: '#888', fontSize: 12, lineHeight: 17, marginTop: 4, marginBottom: 4 },
+  reelCatBlock: { marginTop: 12 },
+  reelCatHeader: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5, marginBottom: 8 },
+  reelChipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  reelChip: { borderWidth: 1.5, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 },
+  reelChipText: { fontSize: 13, fontWeight: '700' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   toggleLabel: { color: '#333', fontSize: 15, fontWeight: '600' },
   footerHelper: { color: '#999', fontSize: 12, marginBottom: 14 },
