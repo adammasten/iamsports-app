@@ -273,6 +273,29 @@ export default function MyWorkScreen() {
     }
   }
 
+  // Delete a game. videos.game_id and clips.video_id both CASCADE, so one delete
+  // removes the game, its videos, and their clips — warn about that.
+  function confirmDeleteGame(game: Game) {
+    const n = game.videos.length;
+    Alert.alert(
+      'Delete game',
+      `Delete “${game.title}”? This also deletes its ${n} video${n === 1 ? '' : 's'} and their clips. This can’t be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.from('games').delete().eq('id', game.id);
+            if (error) { Alert.alert('Error', error.message); return; }
+            if (expandedGameId === game.id) setExpandedGameId(null);
+            loadGames();
+          },
+        },
+      ],
+    );
+  }
+
   useEffect(() => {
     loadReels();
     loadGames();
@@ -787,6 +810,7 @@ export default function MyWorkScreen() {
                       onPress={() => setExpandedGameId(expanded ? null : game.id)}
                       onLongPress={() => Alert.alert(game.title, undefined, [
                         { text: 'Edit game', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
+                        { text: 'Delete game', style: 'destructive', onPress: () => confirmDeleteGame(game) },
                         { text: 'Cancel', style: 'cancel' },
                       ])}
                       activeOpacity={0.7}
