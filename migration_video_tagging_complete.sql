@@ -8,15 +8,17 @@
 -- started" signal stays derived from clips(count) — this column does not
 -- duplicate it.
 --
--- Nullable, default false, no backfill/table rewrite (PG stores the default in
--- the catalog; existing rows read false virtually). App treats
--- tagging_complete === true as done; false/null as not done.
+-- NOT NULL DEFAULT false (as applied live) — the column is never null, so app
+-- code never inserts null (omit the column to take the default) and treats it
+-- as an always-boolean in the green-card logic. ADD COLUMN with a DEFAULT is a
+-- fast metadata-only default on PG 11+ (no table rewrite); NOT NULL is
+-- satisfied by that default for existing rows.
 -- Idempotent. Applied live 2026-07-17.
 -- ============================================================
 
 BEGIN;
 
-alter table videos add column if not exists tagging_complete boolean default false;
+alter table videos add column if not exists tagging_complete boolean not null default false;
 
 notify pgrst, 'reload schema';
 
