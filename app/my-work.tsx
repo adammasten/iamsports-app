@@ -43,7 +43,7 @@ type Postable = { contentType: 'reel' | 'clip' | 'video' | 'game'; contentId: st
 // A "game" in Film Room is derived from videos the user uploaded — there's no
 // owner column on games. Each Game carries its videos pre-grouped so the inline
 // expand can render without a second query.
-type GameVideo = { id: string; label: string; url: string; sortOrder: number };
+type GameVideo = { id: string; label: string; url: string; sortOrder: number; taggingComplete: boolean };
 type Game = {
   id: string;
   title: string;
@@ -65,8 +65,16 @@ const TAG_STATUS = {
   inProgress: '#FFD60A', // yellow — has clips
   done:       '#32D74B', // green  — marked fully tagged (Shot 2)
 };
-function gameStatusColor(clipCount: number): string {
-  return clipCount > 0 ? TAG_STATUS.inProgress : TAG_STATUS.notStarted;
+// A game is "done" (green) only when it has videos AND every one is marked
+// tagging-complete. An empty game (no videos) can never be green.
+function gameIsDone(game: Game): boolean {
+  return game.videos.length > 0 && game.videos.every(v => v.taggingComplete);
+}
+// Green (all videos complete) takes precedence; otherwise the derived
+// clip-based signal: yellow = has clips, red = none yet.
+function gameStatusColor(game: Game): string {
+  if (gameIsDone(game)) return TAG_STATUS.done;
+  return game.clipCount > 0 ? TAG_STATUS.inProgress : TAG_STATUS.notStarted;
 }
 
 // Filter-bar options for My Work. Single-entry teamOptions hides the Team
@@ -202,7 +210,7 @@ export default function MyWorkScreen() {
     if (!userId) { setGames([]); setLooseVideos([]); return; }
     const { data, error } = await supabase
       .from('videos')
-      .select('id, label, url, sort_order, game_id, created_at, clips (count), games (id, title, opponent, game_date, team_id, created_at)')
+      .select('id, label, url, sort_order, game_id, created_at, tagging_complete, clips (count), games (id, title, opponent, game_date, team_id, created_at)')
       .eq('uploaded_by_user_id', userId);
     if (error) { Alert.alert('Error', error.message); return; }
 
@@ -211,7 +219,7 @@ export default function MyWorkScreen() {
     (data || []).forEach((row: any) => {
       // Loose footage: no game at all. Distinct bucket — never touches the map.
       if (row.game_id == null) {
-        loose.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, createdAt: row.created_at });
+        loose.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true, createdAt: row.created_at });
         return;
       }
       const g = row.games;
@@ -230,7 +238,7 @@ export default function MyWorkScreen() {
         };
         byId.set(row.game_id, game);
       }
-      game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order });
+      game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true });
       // clips(count) embeds as [{ count: N }] on the video row; accumulate per game.
       game.clipCount += row.clips?.[0]?.count ?? 0;
     });
@@ -241,6 +249,17 @@ export default function MyWorkScreen() {
     loose.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     setGames([...byId.values()]);
     setLooseVideos(loose.map(({ createdAt, ...v }) => v));
+  }
+
+  // Manual per-video "done tagging" toggle. Coach decides — not derived from
+  // clip count. Flipping the last incomplete video to done turns the game green.
+  async function toggleVideoComplete(video: GameVideo) {
+    const { error } = await supabase
+      .from('videos')
+      .update({ tagging_complete: !video.taggingComplete })
+      .eq('id', video.id);
+    if (error) { Alert.alert('Error', error.message); return; }
+    loadGames();
   }
 
   useEffect(() => {
@@ -747,10 +766,11 @@ export default function MyWorkScreen() {
                 const game = gamesById.get(fi.id);
                 if (!game) return null;
                 const expanded = expandedGameId === game.id;
+                const done = gameIsDone(game);
                 const dateStr = formatGameDate(game.gameDate);
                 const videoCount = `${game.videos.length} video${game.videos.length === 1 ? '' : 's'}`;
                 return (
-                  <View key={`game:${game.id}`} style={[styles.card, styles.gameCard]}>
+                  <View key={`game:${game.id}`} style={[styles.card, styles.gameCard, done && styles.gameCardDone]}>
                     <TouchableOpacity
                       style={styles.gameHeader}
                       onPress={() => setExpandedGameId(expanded ? null : game.id)}
@@ -761,7 +781,7 @@ export default function MyWorkScreen() {
                       </View>
                       <View style={styles.cardBody}>
                         <View style={styles.typeBadgeWrap}>
-                          <ContentTypeBadge type="game" outlineColor={gameStatusColor(game.clipCount)} />
+                          <ContentTypeBadge type="game" outlineColor={gameStatusColor(game)} />
                         </View>
                         <Text style={styles.cardTitle} numberOfLines={1}>{game.title}</Text>
                         <Text style={styles.cardMeta} numberOfLines={1}>
@@ -782,21 +802,30 @@ export default function MyWorkScreen() {
                           <Text style={styles.videoRowEmpty}>No videos uploaded yet.</Text>
                         ) : (
                           game.videos.map(v => (
-                            <TouchableOpacity
-                              key={v.id}
-                              style={styles.videoRow}
-                              onPress={() => Alert.alert(v.label, undefined, [
-                                { text: 'Tag video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } }) },
-                                // Watch game: same player, view-only. `watch: '1'` suppresses all tag
-                                // chrome in tagging-overlay — no new player, no divergent playback.
-                                { text: 'Watch game', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, watch: '1' } }) },
-                                { text: 'View clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
-                                { text: 'Cancel', style: 'cancel' },
-                              ])}
-                            >
-                              <Ionicons name="film-outline" size={18} color="#888" />
-                              <Text style={styles.videoRowText} numberOfLines={1}>{v.label}</Text>
-                            </TouchableOpacity>
+                            <View key={v.id} style={styles.videoRow}>
+                              {/* Tap the circle to toggle this video's tagging-complete.
+                                  When every video is checked, the game card face turns green. */}
+                              <TouchableOpacity onPress={() => toggleVideoComplete(v)} hitSlop={8}>
+                                <Ionicons
+                                  name={v.taggingComplete ? 'checkmark-circle' : 'ellipse-outline'}
+                                  size={22}
+                                  color={v.taggingComplete ? TAG_STATUS.done : '#666'}
+                                />
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={styles.videoRowMain}
+                                onPress={() => Alert.alert(v.label, undefined, [
+                                  { text: 'Tag video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } }) },
+                                  // Watch game: same player, view-only. `watch: '1'` suppresses all tag
+                                  // chrome in tagging-overlay — no new player, no divergent playback.
+                                  { text: 'Watch game', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, watch: '1' } }) },
+                                  { text: 'View clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
+                                  { text: 'Cancel', style: 'cancel' },
+                                ])}
+                              >
+                                <Text style={styles.videoRowText} numberOfLines={1}>{v.label}</Text>
+                              </TouchableOpacity>
+                            </View>
                           ))
                         )}
                         {/* Add-video is safe: game.tsx sources team_id from the game's own row, not the active team. */}
@@ -987,6 +1016,8 @@ const styles = StyleSheet.create({
   // overrides the reel card's row layout, and gap:0 lets videoList own the
   // spacing under its top divider.
   gameCard: { flexDirection: 'column', gap: 0 },
+  // Done signal: all videos tagged. Green border + faint green wash on the face.
+  gameCardDone: { borderColor: TAG_STATUS.done, borderWidth: 2, backgroundColor: '#14241a' },
   gameHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   gameThumb: {
     width: 72, height: 46, borderRadius: 8, backgroundColor: '#0d0d0d',
@@ -999,6 +1030,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingVertical: 8, paddingHorizontal: 4,
   },
+  videoRowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   videoRowText: { color: '#fff', fontSize: 14, fontWeight: '500', flex: 1 },
   gamePostBtn: { alignSelf: 'flex-start', backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 10 },
   gameAddBtn: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 8 },
