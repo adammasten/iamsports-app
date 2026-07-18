@@ -155,7 +155,9 @@ export default function FilterBar({
         {teamOptions.length > 1 && (
           <Dropdown compact value={teamFilter} options={teamOptions} onSelect={setTeamFilter} placeholder="Team" />
         )}
-        <Dropdown compact value={typeFilter} options={typeOptions} onSelect={setTypeFilter} placeholder="Type" />
+        {typeOptions.length > 1 && (
+          <Dropdown compact value={typeFilter} options={typeOptions} onSelect={setTypeFilter} placeholder="Type" />
+        )}
         <Dropdown compact value={sortBy} options={sortOptions} onSelect={setSortBy} placeholder="Sort" />
         {extraFilters.map(f => (
           f.options.length > 1 ? (

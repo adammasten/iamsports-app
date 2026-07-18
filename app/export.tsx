@@ -8,6 +8,8 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, FlatList, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
+import FilterBar, { type FilterableItem } from './components/FilterBar';
+import { EVENT_TYPES } from '@/lib/core/upload-meta';
 
 // Tag categories for the review-step reel tag picker. Matches the tagging
 // screens; colors read on export's light review background.
@@ -16,6 +18,15 @@ const REEL_TAG_CATEGORIES = [
   { key: 'defense', label: 'Defense', color: '#c0392b' },
   { key: 'plays', label: 'Plays', color: '#1e8449' },
   { key: 'players', label: 'Players', color: '#7d3c98' },
+];
+
+// Step-1 game-picker filter options. Single-entry Type hides that dropdown
+// (games only); Sort drops "Longest" (games have no duration).
+const GAME_TYPE_OPTIONS: DropdownOption[] = [{ value: 'all', label: 'Games' }];
+const GAME_SORT_OPTIONS: DropdownOption[] = [
+  { value: 'newest', label: 'Newest' },
+  { value: 'oldest', label: 'Oldest' },
+  { value: 'az', label: 'A–Z' },
 ];
 
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
@@ -297,9 +308,100 @@ export default function ExportScreen() {
   }, []);
 
   async function fetchGames() {
-    const { data } = await supabase.from('games').select('*').order('created_at', { ascending: false });
+    // Embed season/tournament names + videos' event types so the step-1 filter
+    // bar can offer Event/Season/Tournament without extra round-trips.
+    const { data } = await supabase
+      .from('games')
+      .select('*, seasons (name), tournaments (name), videos (id, event_type)')
+      .order('created_at', { ascending: false });
     setGames(data || []);
   }
+
+  // ---- Step 1 game picker: the Film Room's filter/sort stack ----
+  const [gameTagsById, setGameTagsById] = useState<Map<string, Set<string>>>(new Map());
+  const [visibleGameItems, setVisibleGameItems] = useState<FilterableItem[]>([]);
+
+  const teamNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    userTeams.forEach(t => { if (!m.has(t.team_id)) m.set(t.team_id, t.name); });
+    return m;
+  }, [userTeams]);
+  const gamesById = useMemo(() => new Map(games.map((g: any) => [g.id, g])), [games]);
+  // A game's event type = its first video that carries one.
+  const eventTypeOf = (g: any): string => (g.videos || []).map((v: any) => v.event_type).find((e: any) => e) ?? '';
+
+  const gameItems = useMemo<FilterableItem[]>(
+    () => games.map((g: any) => ({
+      id: g.id,
+      teamId: g.team_id ?? '',
+      teamName: teamNameById.get(g.team_id) ?? '',
+      contentType: 'game',
+      title: g.title,
+      createdAt: g.created_at,
+      extra: { eventType: eventTypeOf(g), seasonId: g.season_id ?? '', tournamentId: g.tournament_id ?? '' },
+    })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [games, teamNameById],
+  );
+
+  const gameTeamOptions = useMemo<DropdownOption[]>(() => {
+    const seen = new Map<string, string>();
+    games.forEach((g: any) => { if (g.team_id) seen.set(g.team_id, teamNameById.get(g.team_id) ?? 'Team'); });
+    return [{ value: 'all', label: 'All teams' }, ...[...seen].map(([value, label]) => ({ value, label }))];
+  }, [games, teamNameById]);
+
+  const gameExtraFilters = useMemo(() => {
+    const out: { key: string; label: string; options: DropdownOption[] }[] = [];
+    const events = new Set(games.map((g: any) => eventTypeOf(g)).filter(Boolean) as string[]);
+    if (events.size >= 2) {
+      const labelFor = (v: string) => EVENT_TYPES.find(e => e.value === v)?.label ?? v;
+      out.push({ key: 'eventType', label: 'Event', options: [{ value: 'all', label: 'All events' }, ...[...events].map(v => ({ value: v, label: labelFor(v) }))] });
+    }
+    const seasons = new Map<string, string>();
+    games.forEach((g: any) => { if (g.season_id) seasons.set(g.season_id, g.seasons?.name ?? 'Season'); });
+    if (seasons.size >= 2) out.push({ key: 'seasonId', label: 'Season', options: [{ value: 'all', label: 'All seasons' }, ...[...seasons].map(([value, label]) => ({ value, label }))] });
+    const tours = new Map<string, string>();
+    games.forEach((g: any) => { if (g.tournament_id) tours.set(g.tournament_id, g.tournaments?.name ?? 'Tournament'); });
+    if (tours.size >= 1) out.push({ key: 'tournamentId', label: 'Tournament', options: [{ value: 'all', label: 'All' }, ...[...tours].map(([value, label]) => ({ value, label }))] });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [games]);
+
+  const gameTagMeta = useMemo(() => {
+    const m = new Map<string, { name: string; category: string }>();
+    (tags || []).forEach((t: any) => m.set(t.id, { name: t.name, category: t.category }));
+    return m;
+  }, [tags]);
+
+  // Clip-tags per game (game → videos → clips → clip_tags), keyed by game id —
+  // same batched pattern as the Film Room, so Player/Offense/Defense/Plays work.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const videoToGame = new Map<string, string>();
+      games.forEach((g: any) => (g.videos || []).forEach((v: any) => videoToGame.set(v.id, g.id)));
+      const videoIds = [...videoToGame.keys()];
+      const byId = new Map<string, Set<string>>();
+      if (videoIds.length > 0) {
+        const { data: clipRows } = await supabase.from('clips').select('id, video_id').in('video_id', videoIds);
+        const clipToGame = new Map<string, string>();
+        (clipRows || []).forEach((c: any) => { const gid = videoToGame.get(c.video_id); if (gid) clipToGame.set(c.id, gid); });
+        const clipIds = [...clipToGame.keys()];
+        if (clipIds.length > 0) {
+          const { data: ctRows } = await supabase.from('clip_tags').select('clip_id, tag_id').in('clip_id', clipIds);
+          (ctRows || []).forEach((ct: any) => {
+            const gid = clipToGame.get(ct.clip_id);
+            if (!gid) return;
+            const s = byId.get(gid) ?? new Set<string>();
+            s.add(ct.tag_id);
+            byId.set(gid, s);
+          });
+        }
+      }
+      if (!cancelled) setGameTagsById(byId);
+    })();
+    return () => { cancelled = true; };
+  }, [games]);
 
   async function fetchTags() {
     const { data } = await supabase.from('tags').select('*').order('category', { ascending: true });
@@ -535,21 +637,37 @@ export default function ExportScreen() {
         </TouchableOpacity>
         <Text style={styles.title}>Export Highlights</Text>
         <Text style={styles.subtitle}>Step 1 of 3 — Pick games to include</Text>
+        <FilterBar
+          items={gameItems}
+          tagsById={gameTagsById}
+          tagMeta={gameTagMeta}
+          teamOptions={gameTeamOptions}
+          typeOptions={GAME_TYPE_OPTIONS}
+          sortOptions={GAME_SORT_OPTIONS}
+          extraFilters={gameExtraFilters}
+          searchPlaceholder="Search games"
+          onVisibleChange={setVisibleGameItems}
+        />
         <FlatList
-          data={games}
+          style={{ flex: 1 }}
+          data={visibleGameItems}
           keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.selectCard, selectedGames.includes(item.id) && styles.selectedCard]}
-              onPress={() => toggleGame(item.id)}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.cardTitle, selectedGames.includes(item.id) && styles.selectedText]}>{item.title}</Text>
-                <Text style={[styles.cardSub, selectedGames.includes(item.id) && { color: '#ddd' }]}>{item.game_date}</Text>
-              </View>
-              {selectedGames.includes(item.id) && <Text style={styles.check}>✓</Text>}
-            </TouchableOpacity>
-          )}
+          renderItem={({ item }) => {
+            const g = gamesById.get(item.id);
+            if (!g) return null;
+            return (
+              <TouchableOpacity
+                style={[styles.selectCard, selectedGames.includes(g.id) && styles.selectedCard]}
+                onPress={() => toggleGame(g.id)}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.cardTitle, selectedGames.includes(g.id) && styles.selectedText]}>{g.title}</Text>
+                  <Text style={[styles.cardSub, selectedGames.includes(g.id) && { color: '#ddd' }]}>{g.game_date}</Text>
+                </View>
+                {selectedGames.includes(g.id) && <Text style={styles.check}>✓</Text>}
+              </TouchableOpacity>
+            );
+          }}
         />
         <TouchableOpacity
           style={[styles.nextBtn, selectedGames.length === 0 && styles.disabledBtn]}
