@@ -1,5 +1,6 @@
 import { Alert } from 'react-native';
 import { blockUser, reportContent, type ReportReason } from '@/lib/core/moderation';
+import { supabase } from '@/supabase';
 
 // Shared "Report or block" action sheet, opened from a long-press on any piece
 // of another user's content (wall feeds, coaches' board, shared viewers). Keeps
@@ -21,7 +22,12 @@ type Target = {
   onChanged?: () => void; // called after a successful report/block so the caller can refresh
 };
 
-export function showContentActions(t: Target) {
+export async function showContentActions(t: Target) {
+  // Never offer report/block on the viewer's OWN content — you don't report
+  // yourself. On your own posts this is a no-op (delete lives elsewhere).
+  const { data: { user } } = await supabase.auth.getUser();
+  if (t.sharedByUserId && user && t.sharedByUserId === user.id) return;
+
   const buttons: any[] = [
     { text: 'Report this content', onPress: () => promptReason(t) },
   ];

@@ -1,4 +1,5 @@
 import { useTeamContext } from '@/context';
+import { loadModeration } from '@/lib/core/moderation';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
 import ContentTypeBadge from './components/ContentTypeBadge';
 import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
+import { showContentActions } from './moderationActions';
 import { initials, teamColor } from './select-team';
 
 // Wall filter tabs — placeholders for now (selecting just highlights).
@@ -183,10 +185,16 @@ export default function KidWallScreen() {
     }));
     const nameById = new Map(nameEntries);
 
-    setInbox(items.map(i => ({
+    const withNames = items.map(i => ({
       ...i,
       sharedByName: i.sharedBy ? nameById.get(i.sharedBy) ?? null : null,
-    })));
+    }));
+    // Hide content from blocked users or that the viewer has reported.
+    const mod = await loadModeration();
+    setInbox(withNames.filter(i =>
+      !(i.sharedBy && mod.blockedUserIds.has(i.sharedBy)) &&
+      !mod.reportedKeys.has(`${i.contentType}:${i.contentId}`),
+    ));
     setInboxLoading(false);
   }
 
@@ -581,7 +589,11 @@ export default function KidWallScreen() {
             <ScrollView style={styles.inboxList} contentContainerStyle={{ paddingBottom: 20 }}>
               {inbox.map(item => (
                 <View key={item.shareId} style={styles.inboxCard}>
-                  <TouchableOpacity style={styles.inboxMain} onPress={() => openShared(item)}>
+                  <TouchableOpacity
+                    style={styles.inboxMain}
+                    onPress={() => openShared(item)}
+                    onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedBy, onChanged: loadInbox })}
+                  >
                     <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
                     <Text style={styles.inboxTitle} numberOfLines={1}>{item.title}</Text>
                     <Text style={styles.inboxMeta}>
