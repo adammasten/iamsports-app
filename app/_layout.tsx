@@ -99,12 +99,14 @@ function NameCaptureGate() {
     (async () => {
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('display_name')
+        .select('display_name, deactivated_at')
         .eq('user_id', userId)
         .maybeSingle();
       if (cancelled) return;
       // On error (e.g. migration not yet applied) don't block the app — skip.
       if (error) { setNeedsName(false); return; }
+      // Logging back in reactivates a deactivated account — "come back anytime".
+      if (data?.deactivated_at) supabase.rpc('reactivate_my_account').then(() => {});
       const name = data?.display_name;
       setNeedsName(!name || name.trim() === '');
     })();
@@ -156,6 +158,7 @@ export default function RootLayout() {
           <Stack.Screen name="shared-game" options={{ headerShown: false }} />
           <Stack.Screen name="edit-game" options={{ headerShown: false }} />
           <Stack.Screen name="edit-reel" options={{ headerShown: false }} />
+          <Stack.Screen name="account" options={{ headerShown: false }} />
         </Stack>
         <AuthGate />
         <NameCaptureGate />

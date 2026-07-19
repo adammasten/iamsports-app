@@ -152,7 +152,6 @@ export default function HomeScreen() {
     });
   }
 
-  async function signOut() { await supabase.auth.signOut(); }
 
   // TEMP diagnostic — rendered in BOTH the no-team gate and the feed so the
   // numbers show regardless of whether activeTeam resolved. Remove after verify.
@@ -169,7 +168,7 @@ export default function HomeScreen() {
       <View style={styles.container}>
         <View style={styles.header}>
           <View />
-          <TouchableOpacity onPress={signOut}><Text style={styles.signOut}>Sign out</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/account')}><Text style={styles.signOut}>Account</Text></TouchableOpacity>
         </View>
         {debugPanel}
         <Text style={styles.heading}>No team selected</Text>
@@ -192,7 +191,7 @@ export default function HomeScreen() {
               <Text style={styles.manageBtn}>Permissions</Text>
             </TouchableOpacity>
           ) : null}
-          <TouchableOpacity onPress={signOut}><Text style={styles.signOut}>Sign out</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/account')}><Text style={styles.signOut}>Account</Text></TouchableOpacity>
         </View>
       </View>
 
