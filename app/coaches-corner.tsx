@@ -1,5 +1,7 @@
 import { COACH_ROLES, useTeamContext } from '@/context';
+import { filterModerated, loadModeration } from '@/lib/core/moderation';
 import { supabase } from '@/supabase';
+import { showContentActions } from './moderationActions';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -51,6 +53,7 @@ type Post = {
   storagePath: string | null;
   startTime: number | null;
   endTime: number | null;
+  sharedByUserId: string | null;
 };
 
 export default function CoachesCornerScreen() {
@@ -74,7 +77,7 @@ export default function CoachesCornerScreen() {
     setLoading(true);
     const { data: rows } = await supabase
       .from('shares')
-      .select('id, content_type, content_id, team_id, created_at, teams ( name )')
+      .select('id, content_type, content_id, team_id, shared_by_user_id, created_at, teams ( name )')
       .eq('audience', 'coaches')
       .order('created_at', { ascending: false });
     const items = await Promise.all((rows || []).map(async (r: any) => {
@@ -93,9 +96,10 @@ export default function CoachesCornerScreen() {
         storagePath: c?.storage_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
+        sharedByUserId: r.shared_by_user_id ?? null,
       };
     }));
-    setPosts(items);
+    setPosts(filterModerated(items, await loadModeration()));
     setLoading(false);
   }
 
@@ -221,7 +225,12 @@ export default function CoachesCornerScreen() {
               const item = postsById.get(fi.id);
               if (!item) return null;
               return (
-                <TouchableOpacity key={item.shareId} style={styles.card} onPress={() => openShared(item)}>
+                <TouchableOpacity
+                  key={item.shareId}
+                  style={styles.card}
+                  onPress={() => openShared(item)}
+                  onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, onChanged: loadCoachesBoard })}
+                >
                   <View style={styles.cardTop}>
                     <Text style={styles.teamPill} numberOfLines={1}>{item.teamName}</Text>
                     <ContentTypeBadge type={item.contentType} />
