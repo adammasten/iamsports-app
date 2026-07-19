@@ -1,8 +1,9 @@
+import { SUPPORT_EMAIL } from '@/constants/legal';
 import { colors } from '@/constants/theme';
 import { supabase } from '@/supabase';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Account controls. Two very different "leaving" paths, deliberately ranked:
@@ -79,6 +80,17 @@ export default function AccountScreen() {
           <Text style={styles.signOutText}>Sign out</Text>
         </TouchableOpacity>
 
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Help &amp; safety</Text>
+          <Text style={styles.cardBody}>Report content or block a user by long-pressing it anywhere it&apos;s shared. Questions or concerns — reach us anytime.</Text>
+          <TouchableOpacity style={styles.linkRow} onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}>
+            <Text style={styles.linkText}>Contact support</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/terms')}>
+            <Text style={styles.linkText}>Terms of Use</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Permanent — clearly the serious one, at the bottom. */}
         <View style={[styles.card, styles.dangerCard]}>
           <Text style={styles.dangerTitle}>Delete account</Text>
@@ -109,6 +121,8 @@ const styles = StyleSheet.create({
 
   signOutRow: { padding: 14, alignItems: 'center', marginBottom: 24 },
   signOutText: { color: colors.textSecondary, fontSize: 15, fontWeight: '600' },
+  linkRow: { paddingVertical: 8 },
+  linkText: { color: colors.brandLight, fontSize: 15, fontWeight: '600' },
 
   dangerCard: { borderColor: colors.danger },
   dangerTitle: { color: colors.danger, fontSize: 17, fontWeight: '700', marginBottom: 6 },

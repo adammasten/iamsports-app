@@ -8,7 +8,9 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
+import { TERMS_VERSION } from '@/constants/legal';
 import NameCaptureSheet from './components/NameCaptureSheet';
+import TermsAcceptSheet from './components/TermsAcceptSheet';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -125,6 +127,48 @@ function NameCaptureGate() {
   return <NameCaptureSheet onSubmit={handleSubmit} submitting={submitting} />;
 }
 
+// First-login Terms/EULA gate (App Store Guideline 1.2 — affirmative agreement
+// before posting UGC). Blocks the app until the user accepts the current terms
+// version, or declines and signs out. Mirrors NameCaptureGate's once-per-user
+// check. Skips silently on error (e.g. migration not yet applied).
+function TermsGate() {
+  const { sessionResolved, userId } = useTeamContext();
+  const [needsAccept, setNeedsAccept] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const checkedForUserRef = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!sessionResolved) return;
+    if (!userId) { setNeedsAccept(false); checkedForUserRef.current = null; return; }
+    if (checkedForUserRef.current === userId) return;
+    checkedForUserRef.current = userId;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('user_profiles').select('accepted_terms_version').eq('user_id', userId).maybeSingle();
+      if (cancelled) return;
+      if (error) { setNeedsAccept(false); return; }
+      setNeedsAccept((data?.accepted_terms_version ?? 0) < TERMS_VERSION);
+    })();
+    return () => { cancelled = true; };
+  }, [sessionResolved, userId]);
+
+  async function accept() {
+    setSubmitting(true);
+    const { error } = await supabase.rpc('accept_terms', { p_version: TERMS_VERSION });
+    setSubmitting(false);
+    if (error) { Alert.alert('Error', error.message); return; }
+    setNeedsAccept(false);
+  }
+  async function decline() {
+    setNeedsAccept(false);
+    await supabase.auth.signOut();
+  }
+
+  if (!needsAccept) return null;
+  return <TermsAcceptSheet onAccept={accept} onDecline={decline} submitting={submitting} />;
+}
+
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
@@ -159,9 +203,11 @@ export default function RootLayout() {
           <Stack.Screen name="edit-game" options={{ headerShown: false }} />
           <Stack.Screen name="edit-reel" options={{ headerShown: false }} />
           <Stack.Screen name="account" options={{ headerShown: false }} />
+          <Stack.Screen name="terms" options={{ headerShown: false }} />
         </Stack>
         <AuthGate />
         <NameCaptureGate />
+        <TermsGate />
         <StatusBar style="auto" />
       </ThemeProvider>
     </TeamProvider>
