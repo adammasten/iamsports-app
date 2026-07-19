@@ -1,4 +1,5 @@
 import { supabase } from '@/supabase';
+import { filterModerated, loadModeration } from './moderation';
 
 // ============================================================
 // Feed logic — the SINGLE source of truth for both feed surfaces. There are
@@ -15,7 +16,7 @@ import { supabase } from '@/supabase';
 // rows collapsed later (dupes) can't crowd genuine content out of it.
 export const FEED_FETCH_LIMIT = 500;
 
-const SELECT = 'id, content_type, content_id, audience, team_id, target_player_id, created_at, teams ( name )';
+const SELECT = 'id, content_type, content_id, audience, team_id, target_player_id, shared_by_user_id, created_at, teams ( name )';
 
 // One card per piece of content (a game/reel), deduped across every wall it's
 // posted to. `sources` collects the wall labels it lives on ("Warriors", "Family")
@@ -26,6 +27,8 @@ export type WallPost = {
   title: string; storagePath: string | null;
   startTime: number | null; endTime: number | null;
   sources: string[]; teamId: string; teamName: string;
+  // Who posted it — drives the block filter + the "Block this person" action.
+  sharedByUserId: string | null;
 };
 
 // Per-stage counts + the (otherwise-swallowed) Postgres errors, so a blank feed
@@ -65,6 +68,7 @@ async function resolveAndDedup(rows: any[]): Promise<WallPost[]> {
       title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
       storagePath: c?.storage_path ?? null,
       startTime: c?.start_time ?? null, endTime: c?.end_time ?? null,
+      sharedByUserId: (r.shared_by_user_id as string) ?? null,
       teamId: (r.team_id as string) ?? '',
       teamName: r.team_id ? (r.teams?.name ?? 'Team') : '',
       // The wall label this share lives on: the team name for a team wall, or the
@@ -85,6 +89,7 @@ async function resolveAndDedup(rows: any[]): Promise<WallPost[]> {
         key, shareId: r.shareId, contentType: r.contentType, contentId: r.contentId,
         createdAt: r.createdAt, title: r.title, storagePath: r.storagePath,
         startTime: r.startTime, endTime: r.endTime,
+        sharedByUserId: r.sharedByUserId,
         teamId: r.teamId, teamName: r.teamName, sources: [r.sourceLabel],
       });
     } else {
@@ -151,7 +156,8 @@ export async function loadMergedFeed(
     .filter((r: any) => r.audience !== 'coaches')
     .sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
 
-  const posts = await resolveAndDedup(rows);
+  const resolved = await resolveAndDedup(rows);
+  const posts = filterModerated(resolved, await loadModeration());
   return {
     posts,
     debug: {
@@ -175,7 +181,8 @@ export async function loadTeamWall(
     .order('created_at', { ascending: false })
     .limit(FEED_FETCH_LIMIT);
 
-  const posts = await resolveAndDedup(data || []);
+  const resolved = await resolveAndDedup(data || []);
+  const posts = filterModerated(resolved, await loadModeration());
   return {
     posts,
     // Reuse the FeedDebug shape; a team wall has no public/player-scope stage, so

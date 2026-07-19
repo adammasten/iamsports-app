@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { loadTeamWall, type WallPost } from '@/lib/core/homeFeed';
+import { showContentActions } from '../moderationActions';
 import ContentTypeBadge from '../components/ContentTypeBadge';
 import { type DropdownOption } from '../components/Dropdown';
 import FilterBar, { type FilterableItem } from '../components/FilterBar';
@@ -230,7 +231,12 @@ export default function HomeScreen() {
                   // Show the wall labels this content lives on, teams before Family.
                   const sources = [...item.sources].sort((a, b) => (a === 'Family' ? 1 : 0) - (b === 'Family' ? 1 : 0));
                   return (
-                    <TouchableOpacity key={item.key} style={styles.card} onPress={() => openShared(item)}>
+                    <TouchableOpacity
+                      key={item.key}
+                      style={styles.card}
+                      onPress={() => openShared(item)}
+                      onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, onChanged: loadHome })}
+                    >
                       <View style={styles.cardTop}>
                         <ContentTypeBadge type={item.contentType} />
                         {sources.map(s => (

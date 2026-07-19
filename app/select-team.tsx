@@ -1,5 +1,6 @@
 import { useTeamContext } from '@/context';
 import { loadMergedFeed, type FeedDebug, type WallPost } from '@/lib/core/homeFeed';
+import { showContentActions } from './moderationActions';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -72,6 +73,12 @@ export default function SelectTeamScreen() {
 
   // Open a feed card. Mirrors the tabs Home's handler — navigation is UI, so it
   // stays per-screen (only the feed *data* logic is shared in lib/core).
+  // Reload the feed after a report/block so the hidden content drops out.
+  async function reloadFeed() {
+    const { posts } = await loadMergedFeed(userTeams, userKids);
+    setFeedPosts(posts);
+  }
+
   function openShared(item: WallPost) {
     if (item.contentType === 'game') {
       router.push({ pathname: '/shared-game', params: { shareId: item.shareId, title: item.title } });
@@ -364,7 +371,12 @@ export default function SelectTeamScreen() {
               // Teams before "Family" in the source pills.
               const sources = [...item.sources].sort((a, b) => (a === 'Family' ? 1 : 0) - (b === 'Family' ? 1 : 0));
               return (
-                <TouchableOpacity key={item.key} style={styles.card} onPress={() => openShared(item)}>
+                <TouchableOpacity
+                  key={item.key}
+                  style={styles.card}
+                  onPress={() => openShared(item)}
+                  onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, onChanged: reloadFeed })}
+                >
                   <View style={styles.cardTop}>
                     <ContentTypeBadge type={item.contentType === 'video' ? 'game' : item.contentType} />
                     {sources.map(s => (
