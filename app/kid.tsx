@@ -151,6 +151,7 @@ export default function KidWallScreen() {
       .select('id, content_type, content_id, shared_by_user_id, created_at')
       .eq('target_player_id', playerId)
       .eq('audience', 'player')
+      .eq('visible', true)
       .order('created_at', { ascending: false });
     const items = await Promise.all((rows || []).map(async (r: any) => {
       const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });

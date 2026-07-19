@@ -128,6 +128,7 @@ export async function loadMergedFeed(
   const { data: teamPlayerRows, error: q1Err } = await supabase
     .from('shares').select(SELECT)
     .in('audience', ['team', 'player'])
+    .eq('visible', true) // moderation takedown: hidden shares drop from every feed
     .order('created_at', { ascending: false })
     .limit(FEED_FETCH_LIMIT);
 
@@ -178,6 +179,7 @@ export async function loadTeamWall(
     .from('shares').select(SELECT)
     .eq('team_id', teamId)
     .eq('audience', 'team')
+    .eq('visible', true) // moderation takedown
     .order('created_at', { ascending: false })
     .limit(FEED_FETCH_LIMIT);
 
