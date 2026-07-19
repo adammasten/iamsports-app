@@ -1,9 +1,11 @@
+import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { showContentActions } from './moderationActions';
 
 // Shared game viewer — opens a game posted to a wall and lists its videos. Loads
 // via resolve_shared_game(shareId), a SECURITY DEFINER RPC that returns the
@@ -22,6 +24,10 @@ export default function SharedGameScreen() {
   const params = useLocalSearchParams();
   const shareId = param(params.shareId);
   const headerTitle = param(params.title) || 'Shared game';
+  const { userId } = useTeamContext();
+  const contentId = param(params.contentId);
+  const sharedBy = param(params.sharedBy);
+  const canReport = !!contentId && !!sharedBy && sharedBy !== userId;
 
   const [videos, setVideos] = useState<GameVideo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,6 +61,11 @@ export default function SharedGameScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.back}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
+        {canReport && (
+          <TouchableOpacity onPress={() => showContentActions({ contentType: 'game', contentId, shareId, sharedByUserId: sharedBy })} style={styles.back}>
+            <Text style={styles.reportText}>Report</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.headerBlock}>
@@ -90,6 +101,7 @@ export default function SharedGameScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000', paddingHorizontal: 20 },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  reportText: { color: '#534AB7', fontSize: 15 },
   back: { paddingVertical: 8 },
   backText: { color: '#534AB7', fontSize: 16 },
   headerBlock: { alignItems: 'center', marginTop: 8, marginBottom: 20 },

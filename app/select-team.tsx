@@ -80,8 +80,9 @@ export default function SelectTeamScreen() {
   }
 
   function openShared(item: WallPost) {
+    const mod = { contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedBy: item.sharedByUserId ?? '' };
     if (item.contentType === 'game') {
-      router.push({ pathname: '/shared-game', params: { shareId: item.shareId, title: item.title } });
+      router.push({ pathname: '/shared-game', params: { title: item.title, ...mod } });
       return;
     }
     if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
@@ -91,6 +92,7 @@ export default function SelectTeamScreen() {
         title: item.title, storagePath: item.storagePath,
         startTime: item.startTime != null ? String(item.startTime) : '',
         endTime: item.endTime != null ? String(item.endTime) : '',
+        ...mod,
       },
     });
   }

@@ -255,9 +255,12 @@ export default function KidWallScreen() {
     ]);
   }
 
-  function openShared(item: { shareId: string; contentType: string; title: string; storagePath: string | null; startTime: number | null; endTime: number | null }) {
+  function openShared(item: { shareId: string; contentType: string; title: string; storagePath: string | null; startTime: number | null; endTime: number | null; contentId?: string; sharedBy?: string | null }) {
+    // moderation params only carry through for inbox items (others' content);
+    // wall items are the viewer's own posts, so sharedBy stays empty → no report.
+    const mod = { contentType: item.contentType, contentId: item.contentId ?? '', shareId: item.shareId, sharedBy: item.sharedBy ?? '' };
     if (item.contentType === 'game') {
-      router.push({ pathname: '/shared-game', params: { shareId: item.shareId, title: item.title } });
+      router.push({ pathname: '/shared-game', params: { title: item.title, ...mod } });
       return;
     }
     if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
@@ -268,6 +271,7 @@ export default function KidWallScreen() {
         storagePath: item.storagePath,
         startTime: item.startTime != null ? String(item.startTime) : '',
         endTime: item.endTime != null ? String(item.endTime) : '',
+        ...mod,
       },
     });
   }
