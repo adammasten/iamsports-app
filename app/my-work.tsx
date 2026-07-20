@@ -985,7 +985,8 @@ export default function MyWorkScreen() {
                                 <Text style={[styles.videoCheckLabel, v.taggingComplete && styles.videoCheckLabelDone]}>Tagged</Text>
                               </TouchableOpacity>
                               <TouchableOpacity
-                                style={styles.videoRowMain}
+                                style={styles.videoOptionsCell}
+                                activeOpacity={0.7}
                                 onLongPress={() => confirmDeleteVideo(v)}
                                 onPress={() => Alert.alert(v.label, undefined, [
                                   { text: 'Tag video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } }) },
@@ -996,7 +997,12 @@ export default function MyWorkScreen() {
                                   { text: 'Cancel', style: 'cancel' },
                                 ])}
                               >
-                                <Text style={styles.videoRowText} numberOfLines={1}>{v.label}</Text>
+                                <Ionicons name="film-outline" size={18} color="#888" />
+                                <View style={styles.videoOptBody}>
+                                  <Text style={styles.videoOptTitle} numberOfLines={1}>{v.label}</Text>
+                                  <Text style={styles.videoOptHint}>Tap for options • Hold to delete</Text>
+                                </View>
+                                <Ionicons name="ellipsis-horizontal" size={18} color="#888" />
                               </TouchableOpacity>
                             </View>
                           ))
@@ -1199,17 +1205,22 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2a2a2a',
   },
   videoList: {
-    marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#2a2a2a', gap: 2,
+    marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#2a2a2a', gap: 8,
   },
-  videoRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 8, paddingHorizontal: 4,
-  },
+  videoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   videoCheck: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   videoCheckLabel: { color: '#666', fontSize: 12, fontWeight: '600' },
   videoCheckLabelDone: { color: TAG_STATUS.done },
-  videoRowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  videoRowText: { color: '#fff', fontSize: 14, fontWeight: '500', flex: 1 },
+  // Filled, rounded "tap for options" cell — inset #0d0d0d contrasts the #1a1a1a
+  // game card; the ••• + hint signal a menu, not playback.
+  videoOptionsCell: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#0d0d0d', borderRadius: 8, borderWidth: 1, borderColor: '#2a2a2a',
+    paddingVertical: 10, paddingHorizontal: 12,
+  },
+  videoOptBody: { flex: 1 },
+  videoOptTitle: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  videoOptHint: { color: '#888', fontSize: 11, marginTop: 1 },
   gamePostBtn: { alignSelf: 'flex-start', backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 10 },
   gameAddBtn: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 8 },
   gameAddText: { color: '#534AB7', fontSize: 12, fontWeight: '700' },
