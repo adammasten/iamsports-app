@@ -43,6 +43,13 @@ type Props = {
   onVisibleChange: (visible: FilterableItem[]) => void;
 };
 
+// Stable empty default. Without this, callers that don't pass `extraFilters`
+// would get a FRESH `[]` every render — and since `extraFilters` is in the
+// `visible` memo's deps, that churns the memo, refires the onVisibleChange
+// effect every render, and infinite-loops ("Maximum update depth exceeded").
+// One shared identity fixes it for all no-prop callers (team wall, Coaches').
+const NO_EXTRA_FILTERS: NonNullable<Props['extraFilters']> = [];
+
 // Reusable filter bar: a search field + a horizontal row of single-select
 // dropdowns (Team / Type / Sort + per-category tag filters). Presentational +
 // in-memory filtering only — it never loads data. The parent passes items + tag
@@ -50,7 +57,7 @@ type Props = {
 // Extracted from coaches-corner.tsx; behavior identical.
 export default function FilterBar({
   items, tagsById, tagMeta, teamOptions, typeOptions, sortOptions,
-  extraFilters = [],
+  extraFilters = NO_EXTRA_FILTERS,
   searchPlaceholder = 'Search', onVisibleChange,
 }: Props) {
   const [search, setSearch] = useState('');
