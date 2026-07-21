@@ -2,9 +2,13 @@ import { Alert } from 'react-native';
 import { blockUser, reportContent, type ReportReason } from '@/lib/core/moderation';
 import { supabase } from '@/supabase';
 
-// Shared "Report or block" action sheet, opened from a long-press on any piece
-// of another user's content (wall feeds, coaches' board, shared viewers). Keeps
-// every surface's report/block behaviour identical — Guideline 1.2.
+// Shared long-press action sheet for content shown on a wall (team wall, kid
+// wall, coaches' board, shared viewers). Adapts to what the viewer can do:
+//   • Report / Block — for ANOTHER user's content (Guideline 1.2).
+//   • Remove from this wall — delete the share (own post, or a team coach). RLS
+//     enforces; we detect a no-op delete and explain.
+//   • Hide from <kid>'s wall — family-hide (hidden_by_family) content someone
+//     ELSE posted to your kid's wall, when you can't delete it.
 
 const REASONS: { key: ReportReason; label: string }[] = [
   { key: 'inappropriate', label: 'Inappropriate content' },
@@ -19,23 +23,74 @@ type Target = {
   contentId: string;
   shareId?: string | null;
   sharedByUserId?: string | null;
-  onChanged?: () => void; // called after a successful report/block so the caller can refresh
+  canRemove?: boolean;         // may DELETE this share (own post or team coach) → "Remove from this wall"
+  hideFromWallLabel?: string;  // if set, offer a family-hide with this label (e.g. "Hide from Lars's wall")
+  onChanged?: () => void;      // called after a successful action so the caller can refresh
 };
 
 export async function showContentActions(t: Target) {
-  // Never offer report/block on the viewer's OWN content — you don't report
-  // yourself. On your own posts this is a no-op (delete lives elsewhere).
   const { data: { user } } = await supabase.auth.getUser();
-  if (t.sharedByUserId && user && t.sharedByUserId === user.id) return;
+  const isOwn = !!(t.sharedByUserId && user && t.sharedByUserId === user.id);
 
-  const buttons: any[] = [
-    { text: 'Report this content', onPress: () => promptReason(t) },
-  ];
-  if (t.sharedByUserId) {
-    buttons.push({ text: 'Block this person', style: 'destructive', onPress: () => confirmBlock(t) });
+  const buttons: any[] = [];
+  if (t.canRemove && t.shareId) {
+    buttons.push({ text: 'Remove from this wall', style: 'destructive', onPress: () => confirmRemove(t) });
+  } else if (t.hideFromWallLabel && t.shareId) {
+    buttons.push({ text: t.hideFromWallLabel, style: 'destructive', onPress: () => confirmHide(t) });
   }
+  // Report/Block only apply to OTHER people's content.
+  if (!isOwn) {
+    buttons.push({ text: 'Report this content', onPress: () => promptReason(t) });
+    if (t.sharedByUserId) buttons.push({ text: 'Block this person', style: 'destructive', onPress: () => confirmBlock(t) });
+  }
+  if (buttons.length === 0) return; // your own content with nothing to remove → no menu
   buttons.push({ text: 'Cancel', style: 'cancel' });
-  Alert.alert('Report or block', 'Help keep IamSports safe.', buttons);
+  Alert.alert('Options', undefined, buttons);
+}
+
+function confirmRemove(t: Target) {
+  Alert.alert(
+    'Remove from this wall?',
+    'This takes it off this wall. It stays in your Film Room.',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          if (!t.shareId) return;
+          const { data, error } = await supabase.from('shares').delete().eq('id', t.shareId).select('id');
+          if (error) { Alert.alert('Couldn’t remove', error.message); return; }
+          if (!data || data.length === 0) {
+            Alert.alert('Couldn’t remove', 'You can only remove content you posted, or content on a team you coach.');
+            return;
+          }
+          t.onChanged?.();
+        },
+      },
+    ],
+  );
+}
+
+function confirmHide(t: Target) {
+  Alert.alert(
+    t.hideFromWallLabel ?? 'Hide from this wall?',
+    'This hides it from your family’s view. It doesn’t delete what someone else posted.',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Hide',
+        style: 'destructive',
+        onPress: async () => {
+          if (!t.shareId) return;
+          const { data, error } = await supabase.from('shares').update({ hidden_by_family: true }).eq('id', t.shareId).select('id');
+          if (error) { Alert.alert('Couldn’t hide', error.message); return; }
+          if (!data || data.length === 0) { Alert.alert('Couldn’t hide', 'You don’t have permission to hide this.'); return; }
+          t.onChanged?.();
+        },
+      },
+    ],
+  );
 }
 
 function promptReason(t: Target) {

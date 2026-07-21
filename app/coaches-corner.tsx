@@ -232,7 +232,7 @@ export default function CoachesCornerScreen() {
                   key={item.shareId}
                   style={styles.card}
                   onPress={() => openShared(item)}
-                  onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, onChanged: loadCoachesBoard })}
+                  onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: true, onChanged: loadCoachesBoard })}
                 >
                   <View style={styles.cardTop}>
                     <Text style={styles.teamPill} numberOfLines={1}>{item.teamName}</Text>

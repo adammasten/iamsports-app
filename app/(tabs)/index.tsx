@@ -28,7 +28,7 @@ const SORT_OPTIONS: DropdownOption[] = [
 // screen (select-team.tsx). This screen only renders + filters the result.
 
 export default function HomeScreen() {
-  const { activeTeam, activeRole } = useTeamContext();
+  const { activeTeam, activeRole, userId } = useTeamContext();
   const isCoach = !!activeRole && COACH_ROLES.includes(activeRole);
 
   // This is a TEAM page: the feed shows ONLY the active team's own wall (its
@@ -237,7 +237,7 @@ export default function HomeScreen() {
                       key={item.key}
                       style={styles.card}
                       onPress={() => openShared(item)}
-                      onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, onChanged: loadHome })}
+                      onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: item.sharedByUserId === userId || isCoach, onChanged: loadHome })}
                     >
                       <View style={styles.cardTop}>
                         <ContentTypeBadge type={item.contentType} />

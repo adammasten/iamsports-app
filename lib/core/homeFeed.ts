@@ -129,6 +129,7 @@ export async function loadMergedFeed(
     .from('shares').select(SELECT)
     .in('audience', ['team', 'player'])
     .eq('visible', true) // moderation takedown: hidden shares drop from every feed
+    .eq('hidden_by_family', false) // a family-hidden kid-wall post drops from the family feed too
     .order('created_at', { ascending: false })
     .limit(FEED_FETCH_LIMIT);
 

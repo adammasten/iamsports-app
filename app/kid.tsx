@@ -152,6 +152,7 @@ export default function KidWallScreen() {
       .eq('target_player_id', playerId)
       .eq('audience', 'player')
       .eq('visible', true)
+      .eq('hidden_by_family', false)  // family-hidden posts drop off the kid's wall
       .order('created_at', { ascending: false });
     const items = await Promise.all((rows || []).map(async (r: any) => {
       const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
@@ -597,7 +598,12 @@ export default function KidWallScreen() {
                   <TouchableOpacity
                     style={styles.inboxMain}
                     onPress={() => openShared(item)}
-                    onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedBy, onChanged: loadInbox })}
+                    onLongPress={() => showContentActions({
+                      contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedBy,
+                      canRemove: item.sharedBy === userId,
+                      hideFromWallLabel: item.sharedBy && item.sharedBy !== userId ? (name ? `Hide from ${name}’s wall` : 'Hide from this wall') : undefined,
+                      onChanged: loadInbox,
+                    })}
                   >
                     <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
                     <Text style={styles.inboxTitle} numberOfLines={1}>{item.title}</Text>
