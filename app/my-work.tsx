@@ -21,11 +21,17 @@ import VisibilityPicker, { type VisibilitySelection } from './components/Visibil
 // 'reel' shares these badges read) ships in the next slice — until then most
 // reels correctly show the "Only you" lock. Built to extend cleanly.
 
+// Carries the team/player id so a destination can be precisely un-posted from
+// the Film Room (delete the exact shares row).
 type Destination =
   | { kind: 'public' }
-  | { kind: 'team'; teamName: string }
-  | { kind: 'coaches' }
-  | { kind: 'player'; kidName: string };
+  | { kind: 'team'; teamName: string; teamId: string }
+  | { kind: 'coaches'; teamName: string; teamId: string }
+  | { kind: 'player'; kidName: string; playerId: string };
+
+// Stable identity for a destination — dedup + optimistic add/remove.
+const destKey = (d: Destination): string =>
+  d.kind === 'team' ? `team:${d.teamId}` : d.kind === 'coaches' ? `coaches:${d.teamId}` : d.kind === 'player' ? `player:${d.playerId}` : 'public';
 
 type Reel = {
   id: string;
@@ -183,17 +189,14 @@ export default function MyWorkScreen() {
           if (!list.some(d => d.kind === 'public')) list.push({ kind: 'public' });
         } else if (s.audience === 'team') {
           const teamName = s.teams?.name ?? 'Team';
-          if (!list.some(d => d.kind === 'team' && d.teamName === teamName)) {
-            list.push({ kind: 'team', teamName });
-          }
+          if (!list.some(d => d.kind === 'team' && d.teamId === s.team_id)) list.push({ kind: 'team', teamName, teamId: s.team_id });
         } else if (s.audience === 'coaches') {
-          if (!list.some(d => d.kind === 'coaches')) list.push({ kind: 'coaches' });
+          const teamName = s.teams?.name ?? 'Team';
+          if (!list.some(d => d.kind === 'coaches' && d.teamId === s.team_id)) list.push({ kind: 'coaches', teamName, teamId: s.team_id });
         } else if (s.audience === 'player') {
           // A 'player' post lands on the kid's own wall (family-only).
           const kidName = kidNameById.get(s.target_player_id) ?? 'Kid';
-          if (!list.some(d => d.kind === 'player' && d.kidName === kidName)) {
-            list.push({ kind: 'player', kidName });
-          }
+          if (!list.some(d => d.kind === 'player' && d.playerId === s.target_player_id)) list.push({ kind: 'player', kidName, playerId: s.target_player_id });
         }
         destByReel.set(s.content_id, list);
       });
@@ -282,12 +285,13 @@ export default function MyWorkScreen() {
           if (!g.destinations.some(d => d.kind === 'public')) g.destinations.push({ kind: 'public' });
         } else if (s.audience === 'team') {
           const teamName = s.teams?.name ?? 'Team';
-          if (!g.destinations.some(d => d.kind === 'team' && d.teamName === teamName)) g.destinations.push({ kind: 'team', teamName });
+          if (!g.destinations.some(d => d.kind === 'team' && d.teamId === s.team_id)) g.destinations.push({ kind: 'team', teamName, teamId: s.team_id });
         } else if (s.audience === 'coaches') {
-          if (!g.destinations.some(d => d.kind === 'coaches')) g.destinations.push({ kind: 'coaches' });
+          const teamName = s.teams?.name ?? 'Team';
+          if (!g.destinations.some(d => d.kind === 'coaches' && d.teamId === s.team_id)) g.destinations.push({ kind: 'coaches', teamName, teamId: s.team_id });
         } else if (s.audience === 'player') {
           const kidName = kidNameById.get(s.target_player_id) ?? 'Kid';
-          if (!g.destinations.some(d => d.kind === 'player' && d.kidName === kidName)) g.destinations.push({ kind: 'player', kidName });
+          if (!g.destinations.some(d => d.kind === 'player' && d.playerId === s.target_player_id)) g.destinations.push({ kind: 'player', kidName, playerId: s.target_player_id });
         }
       });
     }
@@ -641,12 +645,10 @@ export default function MyWorkScreen() {
 
   // Merge destination badges onto content (dedup by kind; team by name).
   function mergeDests(existing: Destination[], incoming: Destination[]): Destination[] {
-    const keyOf = (d: Destination) =>
-      d.kind === 'team' ? `team:${d.teamName}` : d.kind === 'player' ? `player:${d.kidName}` : d.kind;
-    const have = new Set(existing.map(keyOf));
+    const have = new Set(existing.map(destKey));
     const merged = [...existing];
     for (const d of incoming) {
-      const k = keyOf(d);
+      const k = destKey(d);
       if (!have.has(k)) { have.add(k); merged.push(d); }
     }
     return merged;
@@ -657,6 +659,43 @@ export default function MyWorkScreen() {
   function addDestinations(contentId: string, dests: Destination[]) {
     setReels(prev => prev.map(r => (r.id === contentId ? { ...r, destinations: mergeDests(r.destinations, dests) } : r)));
     setGames(prev => prev.map(g => (g.id === contentId ? { ...g, destinations: mergeDests(g.destinations, dests) } : g)));
+  }
+
+  // Optimistically drop a destination badge from a card after un-posting.
+  function removeDestinationLocal(contentId: string, dest: Destination) {
+    const k = destKey(dest);
+    setReels(prev => prev.map(r => (r.id === contentId ? { ...r, destinations: r.destinations.filter(d => destKey(d) !== k) } : r)));
+    setGames(prev => prev.map(g => (g.id === contentId ? { ...g, destinations: g.destinations.filter(d => destKey(d) !== k) } : g)));
+  }
+
+  // Delete the shares row(s) for one destination (precise via team/player id),
+  // then drop the badge. RLS lets the sharer or a team coach delete; a no-op
+  // delete (0 rows) means the user isn't permitted.
+  async function removeDestination(item: Postable, dest: Destination) {
+    let q = supabase.from('shares').delete().eq('content_type', item.contentType).eq('content_id', item.contentId);
+    if (dest.kind === 'public') q = q.eq('audience', 'public');
+    else if (dest.kind === 'team') q = q.eq('audience', 'team').eq('team_id', dest.teamId);
+    else if (dest.kind === 'coaches') q = q.eq('audience', 'coaches').eq('team_id', dest.teamId);
+    else q = q.eq('audience', 'player').eq('target_player_id', dest.playerId);
+    const { data, error } = await q.select('id');
+    if (error) { Alert.alert('Couldn’t remove', error.message); return; }
+    if (!data || data.length === 0) {
+      Alert.alert('Couldn’t remove', 'You can only remove things you posted, or content on a team you coach.');
+      return;
+    }
+    removeDestinationLocal(item.contentId, dest);
+  }
+
+  // Film Room "Manage sharing" sheet: an Alert listing each current destination
+  // with a Remove, plus "Post to a wall" (the existing add flow).
+  function manageSharing(item: Postable, destinations: Destination[]) {
+    const label = (d: Destination) =>
+      d.kind === 'public' ? 'Public' : d.kind === 'team' ? d.teamName : d.kind === 'coaches' ? `${d.teamName} coaches` : `${d.kidName}’s wall`;
+    Alert.alert('Sharing', item.title, [
+      ...destinations.map(d => ({ text: `Remove from ${label(d)}`, style: 'destructive' as const, onPress: () => removeDestination(item, d) })),
+      { text: 'Post to a wall', onPress: () => confirmPostToWall(item) },
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
   }
 
   // Post a reel to a team WALL (player-less, coach-gated). "Public" ALSO posts a
@@ -676,7 +715,7 @@ export default function MyWorkScreen() {
     });
     if (teamErr) { Alert.alert('Error', teamErr.message); return; }
 
-    const dests: Destination[] = [{ kind: 'team', teamName }];
+    const dests: Destination[] = [{ kind: 'team', teamName, teamId }];
     if (alsoPublic) {
       const { error: pubErr } = await supabase.rpc('post_to_wall', {
         p_content_type: item.contentType,
@@ -705,7 +744,7 @@ export default function MyWorkScreen() {
       p_team_id: teamId,
     });
     if (error) { Alert.alert('Error', error.message); return; }
-    addDestinations(item.contentId, [{ kind: 'coaches' }]);
+    addDestinations(item.contentId, [{ kind: 'coaches', teamId, teamName }]);
     Alert.alert('Posted', `Posted to ${teamName} coaches' board.`);
   }
 
@@ -722,14 +761,14 @@ export default function MyWorkScreen() {
     // Build the list of audiences to post, each with the badge it maps to.
     const targets: { audience: 'player' | 'public' | 'team'; teamId?: string; label: string; dest: Destination }[] = [];
     if (sel.friendsFamily) {
-      targets.push({ audience: 'player', label: 'Friends & Family', dest: { kind: 'player', kidName } });
+      targets.push({ audience: 'player', label: 'Friends & Family', dest: { kind: 'player', kidName, playerId } });
     }
     if (sel.public) {
       targets.push({ audience: 'public', label: 'Public', dest: { kind: 'public' } });
     }
     if (sel.teamWall && sel.teamId) {
       const teamName = sel.teamName ?? 'Team';
-      targets.push({ audience: 'team', teamId: sel.teamId, label: `${teamName} wall`, dest: { kind: 'team', teamName } });
+      targets.push({ audience: 'team', teamId: sel.teamId, label: `${teamName} wall`, dest: { kind: 'team', teamName, teamId: sel.teamId } });
     }
 
     // Only-me (or an empty set) means no wall placement at all.
@@ -839,7 +878,7 @@ export default function MyWorkScreen() {
       </View>
 
       <Text style={styles.title}>Film Room</Text>
-      <Text style={styles.subtitle}>Your workbench. Everything you’ve made — games and reels. Tap “Post to wall” to share.</Text>
+      <Text style={styles.subtitle}>Your workbench. Everything you’ve made — games and reels. Tap “Share” to post to a wall, “Manage sharing” to change where it lives.</Text>
 
       <FilterBar
         items={items}
@@ -939,8 +978,11 @@ export default function MyWorkScreen() {
                       <View style={styles.badgeRow}>{renderBadges(reel.destinations)}</View>
 
                       <View style={styles.actions}>
-                        <TouchableOpacity style={styles.postBtn} onPress={() => confirmPostToWall({ contentType: 'reel', contentId: reel.id, title: reel.name })}>
-                          <Text style={styles.postBtnText}>Post to wall</Text>
+                        <TouchableOpacity style={styles.postBtn} onPress={() => {
+                          const item: Postable = { contentType: 'reel', contentId: reel.id, title: reel.name };
+                          reel.destinations.length ? manageSharing(item, reel.destinations) : confirmPostToWall(item);
+                        }}>
+                          <Text style={styles.postBtnText}>{reel.destinations.length ? 'Manage sharing' : 'Share'}</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity style={styles.trashBtn} onPress={() => confirmDelete(reel)}>
@@ -987,9 +1029,12 @@ export default function MyWorkScreen() {
                     <View style={[styles.badgeRow, { marginTop: 10 }]}>{renderBadges(game.destinations)}</View>
                     <TouchableOpacity
                       style={styles.gamePostBtn}
-                      onPress={() => confirmPostToWall({ contentType: 'game', contentId: game.id, title: game.title })}
+                      onPress={() => {
+                        const item: Postable = { contentType: 'game', contentId: game.id, title: game.title };
+                        game.destinations.length ? manageSharing(item, game.destinations) : confirmPostToWall(item);
+                      }}
                     >
-                      <Text style={styles.postBtnText}>Post to wall</Text>
+                      <Text style={styles.postBtnText}>{game.destinations.length ? 'Manage sharing' : 'Share'}</Text>
                     </TouchableOpacity>
                     {expanded && (
                       <View style={styles.videoList}>
