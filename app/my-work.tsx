@@ -1191,11 +1191,7 @@ export default function MyWorkScreen() {
                 <TouchableOpacity style={styles.sheetRow} onPress={() => postTeamWall(teamWallChoice, false)}>
                   <Text style={styles.sheetRowText}>Team only</Text>
                 </TouchableOpacity>
-                {teamWallChoice.item.contentType !== 'game' && (
-                  <TouchableOpacity style={styles.sheetRow} onPress={() => postTeamWall(teamWallChoice, true)}>
-                    <Text style={styles.sheetRowText}>Public</Text>
-                  </TouchableOpacity>
-                )}
+                {/* "Public" removed — retired app-wide (child-safety data-leak). */}
               </ScrollView>
               <TouchableOpacity style={styles.sheetCancel} onPress={() => setTeamWallChoice(null)}>
                 <Text style={styles.sheetCancelText}>Cancel</Text>
@@ -1234,7 +1230,6 @@ export default function MyWorkScreen() {
       {pendingPost && (
         <VisibilityPicker
           teams={userTeams.map(t => ({ id: t.team_id, name: t.name }))}
-          allowPublic={pendingPost.item.contentType !== 'game'}
           onSelect={handleVisibilitySelect}
           onCancel={() => setPendingPost(null)}
         />

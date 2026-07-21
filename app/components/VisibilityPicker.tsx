@@ -17,18 +17,17 @@ type Props = {
   teams: Team[];
   onSelect: (selection: VisibilitySelection) => void;
   onCancel: () => void;
-  // When false, hide the "Public" option (e.g. team-gated content like games).
-  allowPublic?: boolean;
 };
 
 // Presentational multi-select picker only — it never calls post_to_wall or any
 // RPC. It collects a SET of visibility choices (checkboxes) and hands them back
 // via onSelect; the caller fans them out into one share row per selection.
 // Bottom-sheet styling mirrors kid.tsx's picker so the two stay consistent.
-export default function VisibilityPicker({ teams, onSelect, onCancel, allowPublic = true }: Props) {
+export default function VisibilityPicker({ teams, onSelect, onCancel }: Props) {
+  // "Public" is RETIRED app-wide (child-safety data-leak — see the retire-public
+  // migration). The picker never offers it and always reports public: false.
   const [onlyMe, setOnlyMe] = useState(false);
   const [friendsFamily, setFriendsFamily] = useState(false);
-  const [isPublic, setIsPublic] = useState(false);
   const [teamWall, setTeamWall] = useState(false);
   // Exactly one team → auto-select it; >1 → user picks once "Team wall" is on.
   const [team, setTeam] = useState<Team | null>(teams.length === 1 ? teams[0] : null);
@@ -41,7 +40,6 @@ export default function VisibilityPicker({ teams, onSelect, onCancel, allowPubli
     if (onlyMe) { setOnlyMe(false); return; }
     setOnlyMe(true);
     setFriendsFamily(false);
-    setIsPublic(false);
     setTeamWall(false);
   }
   function toggleShared(current: boolean, set: (b: boolean) => void) {
@@ -50,7 +48,7 @@ export default function VisibilityPicker({ teams, onSelect, onCancel, allowPubli
     setOnlyMe(false);
   }
 
-  const anySelected = onlyMe || friendsFamily || isPublic || teamWall;
+  const anySelected = onlyMe || friendsFamily || teamWall;
   // A team-wall post needs a chosen team; with one team that's automatic.
   const teamReady = !teamWall || !!team;
   const canPost = anySelected && teamReady;
@@ -60,7 +58,7 @@ export default function VisibilityPicker({ teams, onSelect, onCancel, allowPubli
     onSelect({
       onlyMe,
       friendsFamily,
-      public: isPublic,
+      public: false, // retired app-wide
       teamWall,
       teamId: team?.id,
       teamName: team?.name,
@@ -86,14 +84,6 @@ export default function VisibilityPicker({ teams, onSelect, onCancel, allowPubli
               selected={friendsFamily}
               onPress={() => toggleShared(friendsFamily, setFriendsFamily)}
             />
-            {allowPublic && (
-              <CheckRow
-                label="Public"
-                helper="Anyone can see it."
-                selected={isPublic}
-                onPress={() => toggleShared(isPublic, setIsPublic)}
-              />
-            )}
             {hasTeams && (
               <CheckRow
                 label="Team wall"
