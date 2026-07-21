@@ -64,6 +64,9 @@ type Game = {
   seasonName: string | null;
   tournamentId: string | null;
   tournamentName: string | null;
+  // Where this game is posted (team wall / kid wall / coaches / public), so the
+  // card can show its visibility — same shape reels use.
+  destinations: Destination[];
 };
 
 // Tagging-status traffic light for the GAME badge outline. Vivid hues so they
@@ -247,6 +250,7 @@ export default function MyWorkScreen() {
           seasonName: g.seasons?.name ?? null,
           tournamentId: g.tournament_id ?? null,
           tournamentName: g.tournaments?.name ?? null,
+          destinations: [],
         };
         byId.set(row.game_id, game);
       }
@@ -260,6 +264,34 @@ export default function MyWorkScreen() {
     for (const game of byId.values()) {
       game.videos.sort((a, b) => a.sortOrder - b.sortOrder);
     }
+
+    // Where each game is posted — one batched shares query, keyed by game id
+    // (content_type='game'). Mirrors the reel destination load exactly.
+    const gameIds = [...byId.keys()];
+    if (gameIds.length > 0) {
+      const kidNameById = new Map(userKids.map(k => [k.player_id, k.name]));
+      const { data: shareRows } = await supabase
+        .from('shares')
+        .select('content_id, audience, team_id, visible, target_player_id, teams ( name )')
+        .eq('content_type', 'game')
+        .in('content_id', gameIds);
+      (shareRows || []).forEach((s: any) => {
+        const g = byId.get(s.content_id);
+        if (!g) return;
+        if (s.audience === 'public' && s.visible) {
+          if (!g.destinations.some(d => d.kind === 'public')) g.destinations.push({ kind: 'public' });
+        } else if (s.audience === 'team') {
+          const teamName = s.teams?.name ?? 'Team';
+          if (!g.destinations.some(d => d.kind === 'team' && d.teamName === teamName)) g.destinations.push({ kind: 'team', teamName });
+        } else if (s.audience === 'coaches') {
+          if (!g.destinations.some(d => d.kind === 'coaches')) g.destinations.push({ kind: 'coaches' });
+        } else if (s.audience === 'player') {
+          const kidName = kidNameById.get(s.target_player_id) ?? 'Kid';
+          if (!g.destinations.some(d => d.kind === 'player' && d.kidName === kidName)) g.destinations.push({ kind: 'player', kidName });
+        }
+      });
+    }
+
     // Newest loose footage first; strip the sort-only createdAt back to GameVideo.
     loose.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     setGames([...byId.values()]);
@@ -607,22 +639,24 @@ export default function MyWorkScreen() {
     setPendingPost({ item, playerId, kidName });
   }
 
-  // Merge new destination badges onto a reel optimistically (dedup by kind; team
-  // by name) so the card reflects the post without a reload — mirrors the
-  // post-to-kid flow's optimistic update.
-  function addReelDestinations(reelId: string, dests: Destination[]) {
+  // Merge destination badges onto content (dedup by kind; team by name).
+  function mergeDests(existing: Destination[], incoming: Destination[]): Destination[] {
     const keyOf = (d: Destination) =>
       d.kind === 'team' ? `team:${d.teamName}` : d.kind === 'player' ? `player:${d.kidName}` : d.kind;
-    setReels(prev => prev.map(r => {
-      if (r.id !== reelId) return r;
-      const have = new Set(r.destinations.map(keyOf));
-      const merged = [...r.destinations];
-      for (const d of dests) {
-        const k = keyOf(d);
-        if (!have.has(k)) { have.add(k); merged.push(d); }
-      }
-      return { ...r, destinations: merged };
-    }));
+    const have = new Set(existing.map(keyOf));
+    const merged = [...existing];
+    for (const d of incoming) {
+      const k = keyOf(d);
+      if (!have.has(k)) { have.add(k); merged.push(d); }
+    }
+    return merged;
+  }
+
+  // Optimistically reflect a post on the card (reel OR game) without a reload —
+  // loadReels/loadGames read all destinations back, so badges survive a refresh.
+  function addDestinations(contentId: string, dests: Destination[]) {
+    setReels(prev => prev.map(r => (r.id === contentId ? { ...r, destinations: mergeDests(r.destinations, dests) } : r)));
+    setGames(prev => prev.map(g => (g.id === contentId ? { ...g, destinations: mergeDests(g.destinations, dests) } : g)));
   }
 
   // Post a reel to a team WALL (player-less, coach-gated). "Public" ALSO posts a
@@ -655,7 +689,7 @@ export default function MyWorkScreen() {
       dests.push({ kind: 'public' });
     }
 
-    addReelDestinations(item.contentId, dests);
+    addDestinations(item.contentId, dests);
     Alert.alert('Posted', alsoPublic ? `Posted to ${teamName} wall and public.` : `Posted to ${teamName} wall.`);
   }
 
@@ -671,7 +705,7 @@ export default function MyWorkScreen() {
       p_team_id: teamId,
     });
     if (error) { Alert.alert('Error', error.message); return; }
-    addReelDestinations(item.contentId, [{ kind: 'coaches' }]);
+    addDestinations(item.contentId, [{ kind: 'coaches' }]);
     Alert.alert('Posted', `Posted to ${teamName} coaches' board.`);
   }
 
@@ -723,19 +757,9 @@ export default function MyWorkScreen() {
       newDests.push(t.dest);
     }
 
-    // Optimistic badges for everything that posted — no full reload. loadReels
-    // reads all three kinds back, so badges survive a refresh. Dedup by kind
-    // (team by name, player by kid).
-    if (newDests.length > 0) {
-      const key = (d: Destination) =>
-        d.kind === 'team' ? `team:${d.teamName}` : d.kind === 'player' ? `player:${d.kidName}` : d.kind;
-      setReels(prev => prev.map(r => {
-        if (r.id !== item.contentId) return r;
-        const have = new Set(r.destinations.map(key));
-        const add = newDests.filter(d => !have.has(key(d)));
-        return add.length ? { ...r, destinations: [...r.destinations, ...add] } : r;
-      }));
-    }
+    // Optimistic badges for everything that posted — no full reload. loadReels/
+    // loadGames read all kinds back, so badges survive a refresh.
+    if (newDests.length > 0) addDestinations(item.contentId, newDests);
 
     // Summarize what landed.
     if (failed.length === 0) {
@@ -960,6 +984,7 @@ export default function MyWorkScreen() {
                       </View>
                       <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={20} color="#888" />
                     </TouchableOpacity>
+                    <View style={[styles.badgeRow, { marginTop: 10 }]}>{renderBadges(game.destinations)}</View>
                     <TouchableOpacity
                       style={styles.gamePostBtn}
                       onPress={() => confirmPostToWall({ contentType: 'game', contentId: game.id, title: game.title })}
