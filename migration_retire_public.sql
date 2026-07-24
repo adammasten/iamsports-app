@@ -41,6 +41,10 @@ create policy shares_read on shares
 
 -- 3. resolve_shared_content — REMOVE the public branch from the entitlement
 --    check, so a direct RPC call can't resolve a public share to a storage path.
+--    Body is rebased on migration_resolve_shared_content_game.sql (Jul 4, live):
+--    the reel/video/clip/GAME branches are all preserved verbatim — only the
+--    public entitlement line is dropped. (Earlier draft mistakenly omitted the
+--    game branch, which team.tsx:56 + coaches-corner.tsx:85 depend on.)
 create or replace function resolve_shared_content(p_share_id uuid)
 returns table (
   content_type     share_content,
@@ -103,6 +107,16 @@ begin
       from clips c
       join videos v on v.id = c.video_id
       where c.id = s.content_id;
+  elsif s.content_type = 'game' then
+    -- PRESERVED from migration_resolve_shared_content_game.sql (Jul 4, live).
+    -- A game has multiple videos + no single file: return its title only.
+    -- Playback happens per-video via resolve_shared_game in the /shared-game view.
+    -- team.tsx:56 and coaches-corner.tsx:85 depend on this branch — do NOT drop it.
+    return query
+      select 'game'::share_content, g.id, g.title, null::text,
+             null::numeric, null::numeric, null::numeric
+      from games g
+      where g.id = s.content_id;
   end if;
 end;
 $$;
