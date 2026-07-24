@@ -18,19 +18,23 @@ import { supabase } from '@/supabase';
 
 export async function getSignedVideoUrl(
   path: string,
-  expiresInSeconds = 60 * 60 * 3
+  expiresInSeconds = 60 * 60 * 3 // kept for call-site compatibility; TTL is now set server-side
 ): Promise<string | null> {
   try {
-    const { data, error } = await supabase.storage
-      .from('Videos')
-      .createSignedUrl(path, expiresInSeconds);
-    if (error || !data) {
-      console.warn('[video-url] createSignedUrl failed:', error);
+    // Route through the entitlement-checked 'sign-media' Edge Function instead of
+    // signing directly. The private 'Videos' bucket is (being) locked so the client
+    // can no longer mint URLs for arbitrary objects — the function verifies the
+    // caller may see this video/reel/photo, then signs. invoke() attaches the JWT.
+    const { data, error } = await supabase.functions.invoke('sign-media', {
+      body: { key: path },
+    });
+    if (error || !data?.url) {
+      console.warn('[video-url] sign-media failed:', error ?? data);
       return null;
     }
-    return data.signedUrl;
+    return data.url as string;
   } catch (e) {
-    console.warn('[video-url] createSignedUrl threw:', e);
+    console.warn('[video-url] sign-media threw:', e);
     return null;
   }
 }
