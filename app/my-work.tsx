@@ -52,6 +52,18 @@ type Postable = { contentType: 'reel' | 'clip' | 'video' | 'game'; contentId: st
 // owner column on games. Each Game carries its videos pre-grouped so the inline
 // expand can render without a second query.
 type GameVideo = { id: string; label: string; url: string; sortOrder: number; taggingComplete: boolean };
+
+// A "Saved to My Film" bookmark, resolved for display via resolve_shared_content.
+type SavedEntry = {
+  savedId: string;
+  shareId: string;
+  contentType: string;
+  contentId: string;
+  title: string;
+  storagePath: string | null;
+  startTime: number | null;
+  endTime: number | null;
+};
 type Game = {
   id: string;
   title: string;
@@ -137,6 +149,7 @@ export default function MyWorkScreen() {
   // Inline rename state: which reel is being renamed + the working draft.
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [savedItems, setSavedItems] = useState<SavedEntry[]>([]);
   const [draftName, setDraftName] = useState('');
 
   // Post-to-wall picker state: which reel + kid the user chose in the Alert,
@@ -375,6 +388,7 @@ export default function MyWorkScreen() {
     useCallback(() => {
       loadReels();
       loadGames();
+      loadSaved();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [userId]),
   );
@@ -732,6 +746,60 @@ export default function MyWorkScreen() {
     }
   }
 
+  // "Saved to My Film" — live bookmarks to shares. Resolve each via
+  // resolve_shared_content (which re-checks entitlement); anything you've lost
+  // access to simply drops out. Save lives in the single-file shared viewer, so
+  // saved items always carry a storagePath.
+  async function loadSaved() {
+    if (!userId) { setSavedItems([]); return; }
+    const { data: rows } = await supabase
+      .from('saved_items').select('id, share_id').eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (!rows?.length) { setSavedItems([]); return; }
+    const entries: SavedEntry[] = [];
+    for (const row of rows) {
+      const { data: resolved, error } = await supabase.rpc('resolve_shared_content', { p_share_id: row.share_id });
+      if (error || !resolved?.length) continue; // un-shared / lost access → skip
+      const c = resolved[0];
+      entries.push({
+        savedId: row.id, shareId: row.share_id,
+        contentType: c.content_type, contentId: c.content_id,
+        title: c.title, storagePath: c.storage_path,
+        startTime: c.start_time, endTime: c.end_time,
+      });
+    }
+    setSavedItems(entries);
+  }
+
+  function openSaved(e: SavedEntry) {
+    if (!e.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
+    router.push({ pathname: '/shared-viewer', params: {
+      title: e.title, storagePath: e.storagePath, contentType: e.contentType, contentId: e.contentId,
+      shareId: e.shareId,
+      startTime: e.startTime != null ? String(e.startTime) : '',
+      endTime: e.endTime != null ? String(e.endTime) : '',
+    } });
+  }
+
+  async function removeSaved(e: SavedEntry) {
+    const { error } = await supabase.from('saved_items').delete().eq('id', e.savedId);
+    if (error) { Alert.alert('Couldn’t remove', error.message); return; }
+    setSavedItems(prev => prev.filter(x => x.savedId !== e.savedId));
+  }
+
+  async function downloadSaved(e: SavedEntry) {
+    if (!e.storagePath) return;
+    setDownloadingId(e.savedId);
+    try {
+      const { failed } = await downloadMedia([{ key: e.storagePath, filename: e.title }]);
+      Alert.alert('Download', failed ? 'Couldn’t save this video.' : 'Saved to your device.');
+    } catch (err: any) {
+      Alert.alert('Download', err?.message ?? 'Download failed.');
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
   // Post a reel to a team WALL (player-less, coach-gated). "Public" ALSO posts a
   // separate public share — mirroring the kid flow's treatment of public vs team
   // as independent audiences (so a public team post is visible publicly AND on
@@ -929,7 +997,7 @@ export default function MyWorkScreen() {
       <View style={[styles.content, (visibleReels.length > 0 || looseVideos.length > 0) && styles.contentTop]}>
         {loading ? (
           <ActivityIndicator size="large" color="#534AB7" />
-        ) : reels.length === 0 && games.length === 0 && looseVideos.length === 0 ? (
+        ) : reels.length === 0 && games.length === 0 && looseVideos.length === 0 && savedItems.length === 0 ? (
           <Text style={styles.empty}>Nothing here yet. Export a reel or upload game film to see it.</Text>
         ) : (
           <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
@@ -957,6 +1025,34 @@ export default function MyWorkScreen() {
                     </View>
                     <Ionicons name="pricetag-outline" size={18} color="#534AB7" />
                   </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Saved to My Film — live bookmarks to content shared with you.
+                Always shown when present, independent of the reels/games filter. */}
+            {savedItems.length > 0 && (
+              <View style={styles.unsortedSection}>
+                <Text style={styles.sectionHeader}>Saved to My Film</Text>
+                <Text style={styles.sectionHint}>Shared with you — stays here while it’s shared.</Text>
+                {savedItems.map(e => (
+                  <View key={e.savedId} style={styles.looseCard}>
+                    <TouchableOpacity style={styles.looseThumb} onPress={() => openSaved(e)}>
+                      <Ionicons name="play-circle-outline" size={24} color="#534AB7" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.cardBody} onPress={() => openSaved(e)}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>{e.title || 'Shared video'}</Text>
+                      <Text style={styles.cardMeta}>Saved · tap to play</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.trashBtn} onPress={() => downloadSaved(e)} disabled={downloadingId === e.savedId}>
+                      {downloadingId === e.savedId
+                        ? <ActivityIndicator size="small" color="#4a90d9" />
+                        : <Ionicons name="download-outline" size={18} color="#4a90d9" />}
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.trashBtn} onPress={() => removeSaved(e)}>
+                      <Ionicons name="close" size={18} color="#a55" />
+                    </TouchableOpacity>
+                  </View>
                 ))}
               </View>
             )}
