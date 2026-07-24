@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
+import { downloadMedia } from '@/lib/native/download-media';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 import ContentTypeBadge from './components/ContentTypeBadge';
@@ -135,6 +136,7 @@ export default function MyWorkScreen() {
 
   // Inline rename state: which reel is being renamed + the working draft.
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
 
   // Post-to-wall picker state: which reel + kid the user chose in the Alert,
@@ -698,6 +700,38 @@ export default function MyWorkScreen() {
     ]);
   }
 
+  // Download to the device — reel = its one file, game = all its videos. Goes
+  // through getSignedVideoUrl → sign-media, so you can only download what you're
+  // entitled to watch. Camera roll on phone, browser download on web.
+  async function downloadReel(reel: Reel) {
+    if (!reel.storagePath) { Alert.alert('Download', 'This reel isn’t ready yet.'); return; }
+    setDownloadingId(reel.id);
+    try {
+      const { failed } = await downloadMedia([{ key: reel.storagePath, filename: reel.name }]);
+      Alert.alert('Download', failed ? 'Couldn’t save the reel.' : 'Saved to your device.');
+    } catch (e: any) {
+      Alert.alert('Download', e?.message ?? 'Download failed.');
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  async function downloadGame(game: Game) {
+    const items = game.videos.filter(v => v.url).map(v => ({ key: v.url, filename: `${game.title} - ${v.label}` }));
+    if (items.length === 0) { Alert.alert('Download', 'This game has no videos yet.'); return; }
+    setDownloadingId(game.id);
+    try {
+      const { saved, failed } = await downloadMedia(items);
+      Alert.alert('Download', failed
+        ? `Saved ${saved} of ${items.length}. ${failed} couldn’t be saved.`
+        : `Saved ${saved} video${saved === 1 ? '' : 's'} to your device.`);
+    } catch (e: any) {
+      Alert.alert('Download', e?.message ?? 'Download failed.');
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
   // Post a reel to a team WALL (player-less, coach-gated). "Public" ALSO posts a
   // separate public share — mirroring the kid flow's treatment of public vs team
   // as independent audiences (so a public team post is visible publicly AND on
@@ -985,6 +1019,12 @@ export default function MyWorkScreen() {
                           <Text style={styles.postBtnText}>{reel.destinations.length ? 'Manage sharing' : 'Share'}</Text>
                         </TouchableOpacity>
 
+                        <TouchableOpacity style={styles.trashBtn} onPress={() => downloadReel(reel)} disabled={downloadingId === reel.id}>
+                          {downloadingId === reel.id
+                            ? <ActivityIndicator size="small" color="#4a90d9" />
+                            : <Ionicons name="download-outline" size={18} color="#4a90d9" />}
+                        </TouchableOpacity>
+
                         <TouchableOpacity style={styles.trashBtn} onPress={() => confirmDelete(reel)}>
                           <Ionicons name="trash-outline" size={18} color="#a55" />
                         </TouchableOpacity>
@@ -1027,15 +1067,22 @@ export default function MyWorkScreen() {
                       <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={20} color="#888" />
                     </TouchableOpacity>
                     <View style={[styles.badgeRow, { marginTop: 10 }]}>{renderBadges(game.destinations)}</View>
-                    <TouchableOpacity
-                      style={styles.gamePostBtn}
-                      onPress={() => {
-                        const item: Postable = { contentType: 'game', contentId: game.id, title: game.title };
-                        game.destinations.length ? manageSharing(item, game.destinations) : confirmPostToWall(item);
-                      }}
-                    >
-                      <Text style={styles.postBtnText}>{game.destinations.length ? 'Manage sharing' : 'Share'}</Text>
-                    </TouchableOpacity>
+                    <View style={styles.actions}>
+                      <TouchableOpacity
+                        style={[styles.gamePostBtn, { flex: 1 }]}
+                        onPress={() => {
+                          const item: Postable = { contentType: 'game', contentId: game.id, title: game.title };
+                          game.destinations.length ? manageSharing(item, game.destinations) : confirmPostToWall(item);
+                        }}
+                      >
+                        <Text style={styles.postBtnText}>{game.destinations.length ? 'Manage sharing' : 'Share'}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.trashBtn} onPress={() => downloadGame(game)} disabled={downloadingId === game.id}>
+                        {downloadingId === game.id
+                          ? <ActivityIndicator size="small" color="#4a90d9" />
+                          : <Ionicons name="download-outline" size={18} color="#4a90d9" />}
+                      </TouchableOpacity>
+                    </View>
                     {expanded && (
                       <View style={styles.videoList}>
                         {game.videos.length === 0 ? (
