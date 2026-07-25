@@ -7,6 +7,7 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Tex
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
 import { downloadMedia } from '@/lib/native/download-media';
+import { requirePermission } from './permissionGuard';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 import ContentTypeBadge from './components/ContentTypeBadge';
@@ -807,6 +808,7 @@ export default function MyWorkScreen() {
   async function postTeamWall(choice: { item: Postable; teamId: string; teamName: string }, alsoPublic: boolean) {
     const { item, teamId, teamName } = choice;
     setTeamWallChoice(null);
+    if (!(await requirePermission(teamId, 'post_wall'))) return;
 
     const { error: teamErr } = await supabase.rpc('post_to_wall', {
       p_content_type: item.contentType,

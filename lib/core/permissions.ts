@@ -8,6 +8,8 @@
 // RN-agnostic -> lives in lib/core.
 // ============================================================
 
+import { supabase } from '@/supabase';
+
 export type PermissionKey =
   | 'post_wall' | 'upload_video' | 'tag_videos' | 'send_to_team'
   | 'create_games' | 'build_reels' | 'delete_content' | 'manage_roster';
@@ -48,4 +50,17 @@ export function resolvePermission(
   if (override !== undefined) return override;
   if (teamDefault !== undefined) return teamDefault;
   return meta.systemDefault;
+}
+
+// Hybrid app-side check: ask the DB engine (has_team_permission, which applies
+// the coach/admin short-circuit + override -> default -> system-default fallback)
+// whether the CURRENT user may do `key` on `teamId`. A null/empty teamId means
+// "personal / no team", which team permissions don't govern -> always allowed.
+// Fails OPEN on error and logs it: this layer is UX only; child-safety stays in
+// RLS, and we don't want a transient error to block a legitimate action.
+export async function hasPermission(teamId: string | null | undefined, key: PermissionKey): Promise<boolean> {
+  if (!teamId) return true;
+  const { data, error } = await supabase.rpc('has_team_permission', { p_team_id: teamId, p_permission: key });
+  if (error) { console.warn('[permissions] has_team_permission failed:', error.message); return true; }
+  return data === true;
 }

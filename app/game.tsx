@@ -2,6 +2,7 @@ import { useTeamContext } from '@/context';
 import { CacheStatus, getManifest, prefetch, remove as removeFromCache, subscribe } from '@/lib/native/video-cache';
 import { makeVideoLabel } from '@/lib/core/upload-meta';
 import { pickVideo, uploadVideoToBucket } from '@/lib/native/video-upload';
+import { requirePermission } from './permissionGuard';
 import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -92,6 +93,7 @@ export default function GameScreen() {
       Alert.alert('Couldn’t determine this game’s team — can’t add video');
       return;
     }
+    if (!(await requirePermission(gameTeamId, 'upload_video'))) return;
     // Blank label → the shared "{date} {index}" default (index continues from the
     // game's current video count, in sync with sort_order). A typed label wins.
     const finalLabel = videoLabel.trim() || makeVideoLabel('', videos.length, true);

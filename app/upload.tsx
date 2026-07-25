@@ -1,5 +1,6 @@
 import { useTeamContext } from '@/context';
 import { pickVideos, uploadVideoToBucket, type PendingFile } from '@/lib/native/video-upload';
+import { requirePermission } from './permissionGuard';
 import {
   defaultUploadTitle, dateToYMD, deriveResult, EVENT_TYPES, makeVideoLabel, NEW_TOURNAMENT, SEASON_TERMS, SPORTS,
   type EventTypeKey,
@@ -122,6 +123,7 @@ export default function UploadScreen() {
   async function doUpload() {
     if (pending.length === 0) { await pick(); return; }
     if (!userId) { Alert.alert('Not signed in'); return; }
+    if (!(await requirePermission(teamId, 'upload_video'))) return;
     setUploading(true);
     setProgress(0);
     setProgressText('');
