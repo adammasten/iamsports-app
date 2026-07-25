@@ -10,7 +10,7 @@
 // requirements; have a lawyer review it, especially the minors/consent section,
 // before public launch.
 
-export const SUPPORT_EMAIL = 'support@iamsports.app'; // TODO: replace with a real, monitored inbox
+export const SUPPORT_EMAIL = 'adam.admin@iamsports.com'; // real, monitored inbox (confirmed 2026-07-24)
 export const TERMS_URL = 'https://iamsports.app/terms'; // TODO: host the Terms here
 export const TERMS_EFFECTIVE = 'July 18, 2026';
 
