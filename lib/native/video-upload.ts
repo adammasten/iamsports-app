@@ -188,6 +188,9 @@ async function uploadVideoMobile(
 
   if (!createResp.ok) {
     const body = await createResp.text();
+    // Log status/body directly — the thrown Error below is swallowed by the
+    // caller, which turned a real failure into "Creating TUS session" then silence.
+    console.error('[Upload] TUS create failed:', createResp.status, body.slice(0, 300));
     throw new Error(`Create upload failed: ${createResp.status} ${body.slice(0, 300)}`);
   }
 

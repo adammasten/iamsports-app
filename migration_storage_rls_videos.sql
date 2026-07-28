@@ -1,4 +1,16 @@
 -- ============================================================
+-- ⚠️  SUPERSEDED — DO NOT REPLAY AS WRITTEN.
+--   The `videos_authenticated_select` policy created below is the BROAD
+--   `USING (bucket_id = 'Videos')` version — it lets ANY authenticated user list
+--   the bucket and sign ANY object (the "Door #2" storage read-leak). It has been
+--   REPLACED on live by migration_storage_lock_videos_v2.sql, which scopes SELECT
+--   to `owner = auth.uid()`. Re-running THIS file as-is recreates the broad policy
+--   and REOPENS the leak — if you must, immediately re-apply
+--   migration_storage_lock_videos_v2.sql afterward (or skip the SELECT policy
+--   here). The INSERT / UPDATE / DELETE policies below remain current.
+-- ============================================================
+--
+-- ============================================================
 -- Storage RLS — 'Videos' bucket: authenticated-only access.
 --
 -- Replaces the dashboard's wide-open {public} CRUD policies
