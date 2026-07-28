@@ -648,7 +648,7 @@ export default function MyWorkScreen() {
     const hasKids = pickerGroups.some(g => g.key === 'kids');
     const hasTeams = coachedTeams.length > 0;
     if (!hasKids && !hasTeams) {
-      Alert.alert('Nothing to post to', 'Add a kid, or join a team as a coach, to post a reel.');
+      Alert.alert('No one to share with', 'Add a kid, or join a team as a coach, to share a reel.');
       return;
     }
     setTierReel(item);
@@ -710,7 +710,7 @@ export default function MyWorkScreen() {
       d.kind === 'public' ? 'Public' : d.kind === 'team' ? d.teamName : d.kind === 'coaches' ? `${d.teamName} coaches` : `${d.kidName}’s wall`;
     Alert.alert('Sharing', item.title, [
       ...destinations.map(d => ({ text: `Remove from ${label(d)}`, style: 'destructive' as const, onPress: () => removeDestination(item, d) })),
-      { text: 'Post to a wall', onPress: () => confirmPostToWall(item) },
+      { text: 'Share…', onPress: () => confirmPostToWall(item) },
       { text: 'Cancel', style: 'cancel' as const },
     ]);
   }
@@ -982,7 +982,7 @@ export default function MyWorkScreen() {
       </View>
 
       <Text style={styles.title}>Film Room</Text>
-      <Text style={styles.subtitle}>Your workbench. Everything you’ve made — games and reels. Tap “Share” to post to a wall, “Manage sharing” to change where it lives.</Text>
+      <Text style={styles.subtitle}>Your workbench. Everything you’ve made — games and reels. Tap “Share” to post to your kid’s wall or share with a team, “Manage sharing” to change where it lives.</Text>
 
       <FilterBar
         items={items}
@@ -1244,7 +1244,7 @@ export default function MyWorkScreen() {
         <Modal visible transparent animationType="fade" onRequestClose={() => setPickerReel(null)}>
           <Pressable style={styles.sheetBackdrop} onPress={() => setPickerReel(null)}>
             <Pressable style={styles.sheet} onPress={() => {}}>
-              <Text style={styles.sheetTitle}>Post to wall</Text>
+              <Text style={styles.sheetTitle}>Share…</Text>
               <ScrollView style={styles.sheetScroll}>
                 {pickerGroups.map(g => (
                   <View key={g.key}>
@@ -1255,7 +1255,7 @@ export default function MyWorkScreen() {
                         style={styles.sheetRow}
                         onPress={() => { postReelToKid(pickerReel, p.player_id, p.name); setPickerReel(null); }}
                       >
-                        <Text style={styles.sheetRowText}>{p.name}</Text>
+                        <Text style={styles.sheetRowText}>{g.key === 'kids' ? `Post to ${p.name}’s wall` : `Share with ${p.name}`}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -1274,7 +1274,7 @@ export default function MyWorkScreen() {
         <Modal visible transparent animationType="fade" onRequestClose={() => setTierReel(null)}>
           <Pressable style={styles.sheetBackdrop} onPress={() => setTierReel(null)}>
             <Pressable style={styles.sheet} onPress={() => {}}>
-              <Text style={styles.sheetTitle}>Post to wall</Text>
+              <Text style={styles.sheetTitle}>Share…</Text>
               <ScrollView style={styles.sheetScroll}>
                 {pickerGroups.some(g => g.key === 'kids') && (
                   <TouchableOpacity style={styles.sheetRow} onPress={() => { setPickerReel(tierReel); setTierReel(null); }}>

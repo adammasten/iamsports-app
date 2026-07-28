@@ -1,17 +1,32 @@
 import { useTeamContext } from '@/context';
-import { loadMergedFeed, type FeedDebug, type WallPost } from '@/lib/core/homeFeed';
-import { showContentActions } from './moderationActions';
+import { loadContentFeed, type ContentFeedDebug, type FeedItem } from '@/lib/core/homeFeed';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentTypeBadge from './components/ContentTypeBadge';
+import Dropdown, { type DropdownOption } from './components/Dropdown';
+import FilterBar, { type FilterableItem } from './components/FilterBar';
 
-// Visual-only filter chips for now — wiring to real data is a later task.
-const FILTERS = ['All', 'Lars', 'Highlights', 'Sent', 'Games'];
+// Type + Sort dropdowns for the home content feed's FilterBar (mirrors Film Room).
+const TYPE_OPTIONS: DropdownOption[] = [
+  { value: 'all', label: 'All' },
+  { value: 'video', label: 'Videos' },
+  { value: 'reel', label: 'Reels' },
+];
+const SORT_OPTIONS: DropdownOption[] = [
+  { value: 'newest', label: 'Newest' },
+  { value: 'oldest', label: 'Oldest' },
+  { value: 'az', label: 'A–Z' },
+  { value: 'longest', label: 'Longest' },
+];
+// Stable empty identities — the feed has no tag dropdowns yet, and a fresh Map
+// each render would churn FilterBar's memos.
+const EMPTY_TAG_IDS = new Map<string, Set<string>>();
+const EMPTY_TAG_META = new Map<string, { name: string; category: string }>();
 
 // Stable palette for team avatars (hashed by team id below).
 const AVATAR_COLORS = ['#534AB7', '#1D9E75', '#D85A30', '#1A6FD4', '#7D3C98', '#C0392B'];
@@ -43,58 +58,99 @@ export default function SelectTeamScreen() {
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamSport, setNewTeamSport] = useState('Basketball');
   const [creating, setCreating] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState('All');
   const [showNewKid, setShowNewKid] = useState(false);
   const [newKidName, setNewKidName] = useState('');
   const [creatingKid, setCreatingKid] = useState(false);
   // player_id -> signed photo URL, minted from each kid's photo_path.
   const [kidPhotoUris, setKidPhotoUris] = useState<Record<string, string>>({});
 
-  // App-home feed: the merged "everything I'm attached to and allowed to see"
-  // list. The merge/dedup is the SINGLE source of truth in @/lib/core/homeFeed —
-  // the exact same call the tabs Home uses. No team selection needed; it scopes
-  // to ALL my teams + ALL my kids and reloads when those memberships resolve.
-  const [feedPosts, setFeedPosts] = useState<WallPost[]>([]);
+  // Home content feed: newest games (quarters collapsed to one card), loose
+  // videos + reels across ALL my teams + kids, deduped in @/lib/core/homeFeed.
+  // `visible` is FilterBar's output (Team/Type/Sort/Event/Season/Tournament); the
+  // Player lens is a separate dropdown (a card can be on several kids' walls).
+  const [items, setItems] = useState<FeedItem[]>([]);
   const [feedLoading, setFeedLoading] = useState(true);
-  const [debug, setDebug] = useState<FeedDebug | null>(null);
+  const [feedDebug, setFeedDebug] = useState<ContentFeedDebug | null>(null);
+  const [selectedPlayer, setSelectedPlayer] = useState('all');
+  const [visible, setVisible] = useState<FilterableItem[]>([]);
 
   useEffect(() => {
+    if (!userId) return;
     let cancelled = false;
     (async () => {
       setFeedLoading(true);
-      const { posts, debug: dbg } = await loadMergedFeed(userTeams, userKids);
+      const { items: it, debug } = await loadContentFeed(userId, userTeams, userKids);
       if (cancelled) return;
-      setFeedPosts(posts);
-      setDebug(dbg);
+      setItems(it);
+      setFeedDebug(debug);
       setFeedLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [userTeams, userKids]);
+  }, [userId, userTeams, userKids]);
 
-  // Open a feed card. Mirrors the tabs Home's handler — navigation is UI, so it
-  // stays per-screen (only the feed *data* logic is shared in lib/core).
-  // Reload the feed after a report/block so the hidden content drops out.
-  async function reloadFeed() {
-    const { posts } = await loadMergedFeed(userTeams, userKids);
-    setFeedPosts(posts);
-  }
+  // Team name lookup for cards + the FilterBar Team dropdown.
+  const teamNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    userTeams.forEach(t => { if (!m.has(t.team_id)) m.set(t.team_id, t.name); });
+    return m;
+  }, [userTeams]);
+  const teamOptions = useMemo<DropdownOption[]>(
+    () => [{ value: 'all', label: 'All teams' }, ...[...teamNameById].map(([value, label]) => ({ value, label }))],
+    [teamNameById],
+  );
 
-  function openShared(item: WallPost) {
-    const mod = { contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedBy: item.sharedByUserId ?? '' };
-    if (item.contentType === 'game') {
-      router.push({ pathname: '/shared-game', params: { title: item.title, ...mod } });
-      return;
+  // Player lens — always lists my kids. "All players" shows everything; picking a
+  // kid narrows to content on THAT kid's wall (player-share) or attributed to
+  // them (player_id). Multi-value, so it lives outside FilterBar's single-value row.
+  const playerOptions = useMemo<DropdownOption[]>(
+    () => [{ value: 'all', label: 'All players' }, ...userKids.map(k => ({ value: k.player_id, label: k.name }))],
+    [userKids],
+  );
+  const scopedItems = useMemo(
+    () => selectedPlayer === 'all' ? items : items.filter(it => it.kidPlayerIds.includes(selectedPlayer)),
+    [items, selectedPlayer],
+  );
+
+  // Event / Season / Tournament dropdowns, built from what's present across the
+  // player-scoped items (Event & Season need 2+ to partition; Tournament with 1).
+  const extraFilters = useMemo(() => {
+    const out: { key: string; label: string; options: DropdownOption[] }[] = [];
+    const events = new Set(scopedItems.map(it => it.eventType).filter(Boolean) as string[]);
+    if (events.size >= 2) {
+      out.push({ key: 'eventType', label: 'Event', options: [{ value: 'all', label: 'All events' }, ...[...events].map(v => ({ value: v, label: v }))] });
     }
-    if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
-    router.push({
-      pathname: '/shared-viewer',
-      params: {
-        title: item.title, storagePath: item.storagePath,
-        startTime: item.startTime != null ? String(item.startTime) : '',
-        endTime: item.endTime != null ? String(item.endTime) : '',
-        ...mod,
-      },
-    });
+    const seasons = new Map<string, string>();
+    scopedItems.forEach(it => { if (it.seasonId) seasons.set(it.seasonId, it.seasonName ?? 'Season'); });
+    if (seasons.size >= 2) {
+      out.push({ key: 'seasonId', label: 'Season', options: [{ value: 'all', label: 'All seasons' }, ...[...seasons].map(([value, label]) => ({ value, label }))] });
+    }
+    const tours = new Map<string, string>();
+    scopedItems.forEach(it => { if (it.tournamentId) tours.set(it.tournamentId, it.tournamentName ?? 'Tournament'); });
+    if (tours.size >= 1) {
+      out.push({ key: 'tournamentId', label: 'Tournament', options: [{ value: 'all', label: 'All' }, ...[...tours].map(([value, label]) => ({ value, label }))] });
+    }
+    return out;
+  }, [scopedItems]);
+
+  // Player-scoped items → FilterableItem for FilterBar. game/loose-video → 'video'
+  // for the Type filter; reels → 'reel'. itemsByKey recovers the row on tap.
+  const filterItems = useMemo<FilterableItem[]>(
+    () => scopedItems.map(it => ({
+      id: it.key, teamId: it.teamId, teamName: teamNameById.get(it.teamId) ?? '',
+      contentType: it.kind === 'reel' ? 'reel' : 'video',
+      title: it.title, createdAt: it.createdAt, durationSeconds: it.durationSeconds,
+      extra: { eventType: it.eventType ?? '', seasonId: it.seasonId ?? '', tournamentId: it.tournamentId ?? '' },
+    })),
+    [scopedItems, teamNameById],
+  );
+  const itemsByKey = useMemo(() => new Map(items.map(it => [it.key, it])), [items]);
+
+  // Open a feed card → play through the entitlement-gated shared-viewer (which
+  // signs via sign-media). A game plays its newest video; reels play whole.
+  function openItem(fi: FilterableItem) {
+    const it = itemsByKey.get(fi.id);
+    if (!it?.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
+    router.push({ pathname: '/shared-viewer', params: { title: it.title, storagePath: it.storagePath } });
   }
 
   // One entry per team, keeping the HIGHEST-ranked role (a user can hold several
@@ -325,68 +381,69 @@ export default function SelectTeamScreen() {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* Filter chips (visual only) */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}
-        >
-          {FILTERS.map(f => {
-            const active = selectedFilter === f;
-            return (
-              <TouchableOpacity
-                key={f}
-                style={[styles.chip, active && styles.chipActive]}
-                onPress={() => setSelectedFilter(f)}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{f}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        {/* Player lens (multi-value) sits above the single-select FilterBar. */}
+        <View style={styles.filterWrap}>
+          {userKids.length > 0 && (
+            <View style={styles.playerRow}>
+              <Dropdown value={selectedPlayer} options={playerOptions} onSelect={setSelectedPlayer} placeholder="Player" />
+            </View>
+          )}
+          <FilterBar
+            items={filterItems}
+            tagsById={EMPTY_TAG_IDS}
+            tagMeta={EMPTY_TAG_META}
+            teamOptions={teamOptions}
+            typeOptions={TYPE_OPTIONS}
+            sortOptions={SORT_OPTIONS}
+            extraFilters={extraFilters}
+            searchPlaceholder="Search videos & reels"
+            onVisibleChange={setVisible}
+          />
+        </View>
 
-        {/* App-home feed — the merged cross-team/cross-kid list (same logic as
-            the tabs Home, from @/lib/core/homeFeed). Tapping a team above still
-            opens that team's page; this feed shows everything on open. */}
-        {__DEV__ && debug ? (
+        {/* Home content feed — newest games (deduped), videos + reels across every
+            team + kid, RLS-scoped (@/lib/core/homeFeed). Tapping a team above
+            still opens that team's page; this feed shows everything on open. */}
+        {/* Surface load errors instead of silently showing an empty feed. */}
+        {feedDebug && (feedDebug.videoErr || feedDebug.reelErr || feedDebug.kidShareErr) ? (
+          <Text style={styles.feedError}>Couldn’t load everything: {feedDebug.videoErr || feedDebug.reelErr || feedDebug.kidShareErr}</Text>
+        ) : null}
+
+        {__DEV__ && feedDebug ? (
           <View style={styles.debugBox}>
             <Text style={styles.debugTitle}>▶ SCREEN: select-team.tsx (app-home)</Text>
             <Text style={styles.debugText}>userTeams {userTeams.length} · userKids {userKids.length}</Text>
-            <Text style={styles.debugText}>Q1 team/player rows: {debug.q1Rows}{debug.q1Err ? `  ⛔ ${debug.q1Err}` : ''}</Text>
-            <Text style={styles.debugText}>Q2 public rows: {debug.q2Rows}{debug.q2Err ? `  ⛔ ${debug.q2Err}` : ''}</Text>
-            {debug.ptErr ? <Text style={styles.debugText}>player_teams ⛔ {debug.ptErr}</Text> : null}
-            <Text style={styles.debugText}>final after dedup: {debug.final}</Text>
+            <Text style={styles.debugText}>games+loose: {feedDebug.videoRows}{feedDebug.videoErr ? `  ⛔ ${feedDebug.videoErr}` : ''}</Text>
+            <Text style={styles.debugText}>reels: {feedDebug.reelRows}{feedDebug.reelErr ? `  ⛔ ${feedDebug.reelErr}` : ''}</Text>
+            <Text style={styles.debugText}>kid-wall shares: {feedDebug.kidShareRows}{feedDebug.kidShareErr ? `  ⛔ ${feedDebug.kidShareErr}` : ''}</Text>
+            <Text style={styles.debugText}>player {selectedPlayer === 'all' ? 'All' : (playerOptions.find(o => o.value === selectedPlayer)?.label ?? '?')} · visible {visible.length}</Text>
           </View>
         ) : null}
 
         {feedLoading ? (
           <ActivityIndicator size="large" color="#534AB7" style={{ marginTop: 30 }} />
-        ) : feedPosts.length === 0 ? (
+        ) : visible.length === 0 ? (
           <View style={styles.feedPlaceholder}>
             <Text style={styles.feedPlaceholderText}>
-              Nothing new yet.{'\n'}Games and reels from your teams and kids show up here.
+              Nothing here yet.{'\n'}Videos and reels from your teams and kids show up here.
             </Text>
           </View>
         ) : (
           <View style={styles.feed}>
-            {feedPosts.map(item => {
-              // Teams before "Family" in the source pills.
-              const sources = [...item.sources].sort((a, b) => (a === 'Family' ? 1 : 0) - (b === 'Family' ? 1 : 0));
+            {visible.map(fi => {
+              const isReel = fi.contentType === 'reel';
               return (
                 <TouchableOpacity
-                  key={item.key}
+                  key={`${fi.contentType}:${fi.id}`}
                   style={styles.card}
-                  onPress={() => openShared(item)}
-                  onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, onChanged: reloadFeed })}
+                  onPress={() => openItem(fi)}
                 >
                   <View style={styles.cardTop}>
-                    <ContentTypeBadge type={item.contentType === 'video' ? 'game' : item.contentType} />
-                    {sources.map(s => (
-                      <Text key={s} style={styles.sourcePill} numberOfLines={1}>{s}</Text>
-                    ))}
+                    <ContentTypeBadge type={isReel ? 'reel' : 'game'} />
+                    {fi.teamName ? <Text style={styles.sourcePill} numberOfLines={1}>{fi.teamName}</Text> : null}
                   </View>
-                  <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                  <Text style={styles.cardMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+                  <Text style={styles.cardTitle} numberOfLines={1}>{fi.title}</Text>
+                  <Text style={styles.cardMeta}>{new Date(fi.createdAt).toLocaleDateString()}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -444,14 +501,9 @@ const styles = StyleSheet.create({
   teamName: { color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' },
   teamRole: { color: '#888', fontSize: 11, textAlign: 'center', textTransform: 'capitalize' },
 
-  chipRow: { gap: 8, paddingVertical: 18, paddingRight: 8 },
-  chip: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18,
-    backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#333',
-  },
-  chipActive: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
-  chipText: { color: '#aaa', fontSize: 13, fontWeight: '600' },
-  chipTextActive: { color: '#fff' },
+  filterWrap: { marginTop: 14, marginBottom: 4 },
+  playerRow: { flexDirection: 'row', marginBottom: 8 },
+  feedError: { color: '#ff8a80', fontSize: 13, marginTop: 12, marginHorizontal: 16, textAlign: 'center' },
 
   feedPlaceholder: { paddingVertical: 60, alignItems: 'center' },
   feedPlaceholderText: { color: '#555', fontSize: 14, textAlign: 'center', lineHeight: 20 },

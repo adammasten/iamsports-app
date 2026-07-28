@@ -206,9 +206,12 @@ export default function KidWallScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTab, playerId]);
 
-  // Load the wall: shares I (the current user) posted for this kid, audience
-  // public/team, newest first, each resolved to its content (reuses the inbox
-  // pattern). teams(name) is embedded for the badge (falls back to "Team").
+  // Load the wall: player-audience shares I (the current user) posted to THIS
+  // kid's wall (Friends & Family), newest first, each resolved to its content.
+  // NOTE: post-retire-Public, "post to a kid's wall" writes audience='player'
+  // (see handleVisilitySelect). This previously queried the retired 'public'
+  // audience, which is why the wall always came up empty. teams(name) embedded
+  // for the badge (falls back to "Team").
   async function loadWall() {
     if (!playerId || !userId) return;
     setWallLoading(true);
@@ -217,7 +220,7 @@ export default function KidWallScreen() {
       .select('id, content_type, audience, team_id, created_at, teams ( name )')
       .eq('target_player_id', playerId)
       .eq('shared_by_user_id', userId)
-      .in('audience', ['public'])
+      .in('audience', ['player'])
       .order('created_at', { ascending: false });
     const items = await Promise.all((rows || []).map(async (r: any) => {
       const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });

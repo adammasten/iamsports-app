@@ -2,13 +2,13 @@ import { supabase } from '@/supabase';
 import { filterModerated, loadModeration } from './moderation';
 
 // ============================================================
-// Feed logic — the SINGLE source of truth for both feed surfaces. There are
-// intentionally NO other copies of this query/dedup logic:
-//   • loadMergedFeed()  → HOME (app/select-team.tsx): everything I'm attached to
-//                          and allowed to see — ALL my teams + ALL my kids.
+// Feed logic (RN-agnostic: Supabase + plain JS → lib/core). Two surfaces:
+//   • loadContentFeed() → HOME (app/select-team.tsx): newest videos + reels
+//                          across ALL my teams + kids (the "everything going on"
+//                          content feed). Defined at the bottom of this file.
 //   • loadTeamWall()    → TEAM PAGE (app/(tabs)/index.tsx): ONLY that one team's
 //                          own wall (team-audience shares for that team_id).
-// Both share resolveAndDedup(). RN-agnostic (Supabase + plain JS) → lib/core.
+// loadTeamWall uses resolveAndDedup() below.
 // ============================================================
 
 // Generous per-query row cap. Real users have far fewer feed items than this; the
@@ -102,74 +102,6 @@ async function resolveAndDedup(rows: any[]): Promise<WallPost[]> {
   return [...byKey.values()];
 }
 
-// HOME feed — the merged "everything I'm attached to and allowed to see" list,
-// scoped to ALL my teams + ALL my kids. No single team selected.
-export async function loadMergedFeed(
-  userTeams: TeamRef[],
-  userKids: KidRef[],
-): Promise<{ posts: WallPost[]; debug: FeedDebug }> {
-  // My access scope for PUBLIC content. RLS makes public shares world-readable,
-  // so the "only teams/players I can access" gate must be applied HERE in the
-  // query, not by RLS. My teams come from userTeams; the players I can access
-  // are my linked kids PLUS every player on my teams (teammates' kids).
-  const myTeamIds = userTeams.map(t => t.team_id);
-  let accessiblePlayerIds = userKids.map(k => k.player_id);
-  let ptErr: string | null = null;
-  if (myTeamIds.length > 0) {
-    const { data: pt, error: ptE } = await supabase.from('player_teams').select('player_id').in('team_id', myTeamIds);
-    ptErr = ptE?.message ?? null;
-    accessiblePlayerIds = [...new Set([...accessiblePlayerIds, ...(pt || []).map((r: any) => r.player_id)])];
-  }
-
-  // 1) Team + kid walls I'm entitled to — RLS scopes these (member / parent).
-  //    The audience filter MUST stay in the query: without it RLS would return
-  //    the whole platform's public content (public is world-readable). Coaches
-  //    audience is NEVER queried → stays exclusive to Coaches' Corner.
-  const { data: teamPlayerRows, error: q1Err } = await supabase
-    .from('shares').select(SELECT)
-    .in('audience', ['team', 'player'])
-    .eq('visible', true) // moderation takedown: hidden shares drop from every feed
-    .eq('hidden_by_family', false) // a family-hidden kid-wall post drops from the family feed too
-    .order('created_at', { ascending: false })
-    .limit(FEED_FETCH_LIMIT);
-
-  // 2) Public content, but ONLY on teams/players I can access. Skip entirely if
-  //    I have neither team nor accessible player (nothing to scope to).
-  let publicRows: any[] = [];
-  let q2Err: string | null = null;
-  const publicScope: string[] = [];
-  if (myTeamIds.length > 0) publicScope.push(`team_id.in.(${myTeamIds.join(',')})`);
-  if (accessiblePlayerIds.length > 0) publicScope.push(`target_player_id.in.(${accessiblePlayerIds.join(',')})`);
-  if (publicScope.length > 0) {
-    const { data, error: q2E } = await supabase
-      .from('shares').select(SELECT)
-      .eq('audience', 'public').eq('visible', true)
-      .or(publicScope.join(','))
-      .order('created_at', { ascending: false })
-      .limit(FEED_FETCH_LIMIT);
-    q2Err = q2E?.message ?? null;
-    publicRows = data || [];
-  }
-
-  // Merge both sets, exclude coaches AFTER the fetch (defensive — the queries
-  // above never fetch it, but this guarantees Coaches' Corner content can never
-  // reach the feed even if a query later broadens), then sort newest-first.
-  const rows = [...(teamPlayerRows || []), ...publicRows]
-    .filter((r: any) => r.audience !== 'coaches')
-    .sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
-
-  const resolved = await resolveAndDedup(rows);
-  const posts = filterModerated(resolved, await loadModeration());
-  return {
-    posts,
-    debug: {
-      q1Rows: (teamPlayerRows || []).length, q1Err: q1Err?.message ?? null,
-      q2Rows: publicRows.length, q2Err,
-      ptErr, final: posts.length,
-    },
-  };
-}
-
 // TEAM PAGE feed — STRICTLY this one team's own wall: team-audience shares posted
 // to this team_id. No public, no player/family, no other teams, no merge. This is
 // the pre-merge team-wall scope, restored so a team page shows only its own stuff.
@@ -193,6 +125,176 @@ export async function loadTeamWall(
     debug: {
       q1Rows: (data || []).length, q1Err: error?.message ?? null,
       q2Rows: 0, q2Err: null, ptErr: null, final: posts.length,
+    },
+  };
+}
+
+// ============================================================
+// HOME CONTENT FEED — the social-style "everything going on" list: newest raw
+// VIDEOS + finished REELS across every team you're on and every kid you're
+// linked to, regardless of who uploaded them. This is the "see it all without
+// clicking team-by-team" surface (app/select-team.tsx) — the HOME feed. (It
+// replaced an older shares/wall merged feed, since removed.)
+//
+// Access is still enforced by RLS on each table (videos_read / highlight_reels_
+// read): a team MEMBER sees the team's footage; a pure parent who is NOT a team
+// member is limited until the Door-2 read authorizers extend parent read access.
+// We surface any query error rather than silently showing an empty feed.
+// ============================================================
+// ONE card per piece of content. A game's quarters collapse into a single
+// 'game' item (dedup); loose uploads and reels stay individual. `kidPlayerIds`
+// is which of MY kids this belongs to — via videos.player_id attribution AND/OR
+// a player-audience share to that kid's wall — so the Player filter can match it.
+export type FeedItem = {
+  key: string;              // dedup + list key: 'game:<id>' | 'video:<id>' | 'reel:<id>'
+  kind: 'game' | 'video' | 'reel';
+  contentId: string;        // game_id / video_id / reel_id
+  title: string;
+  teamId: string;
+  createdAt: string;
+  storagePath: string | null;    // playback key (a game's newest video / video url / reel path)
+  durationSeconds: number | null;
+  kidPlayerIds: string[];
+  eventType: string | null;
+  seasonId: string | null; seasonName: string | null;
+  tournamentId: string | null; tournamentName: string | null;
+};
+export type ContentFeedDebug = {
+  videoRows: number; videoErr: string | null;
+  reelRows: number;  reelErr: string | null;
+  kidShareRows: number; kidShareErr: string | null;
+  items: number;
+};
+
+export async function loadContentFeed(
+  userId: string,
+  userTeams: TeamRef[],
+  userKids: KidRef[],
+): Promise<{ items: FeedItem[]; debug: ContentFeedDebug }> {
+  const myTeamIds = [...new Set(userTeams.map(t => t.team_id))];
+  const myKidIds  = [...new Set(userKids.map(k => k.player_id))];
+
+  // 1) Which of MY kids' WALLS each piece of content is ON — i.e. player-audience
+  //    shares a guardian POSTED to the wall (the approval step). Content merely
+  //    shared *with* the kid by someone else sits in the inbox and is NOT on the
+  //    wall, so it's excluded here (shared_by_user_id = me). Mirrors kid.tsx's
+  //    loadWall. Keyed 'game:<id>' / 'reel:<id>' / 'video:<id>' → set of kid ids.
+  const kidWalls = new Map<string, Set<string>>();
+  let kidShareRows = 0;
+  let kidShareErr: string | null = null;
+  if (myKidIds.length) {
+    const { data, error } = await supabase
+      .from('shares')
+      .select('content_type, content_id, target_player_id')
+      .eq('audience', 'player')
+      .eq('visible', true)
+      .eq('hidden_by_family', false)
+      .eq('shared_by_user_id', userId)
+      .in('target_player_id', myKidIds);
+    kidShareErr = error?.message ?? null;
+    kidShareRows = (data || []).length;
+    for (const s of (data || []) as any[]) {
+      const key = `${s.content_type}:${s.content_id}`;
+      if (!kidWalls.has(key)) kidWalls.set(key, new Set());
+      kidWalls.get(key)!.add(s.target_player_id);
+    }
+  }
+  const wallKids = (key: string): string[] => [...(kidWalls.get(key) ?? [])];
+
+  // 2) VIDEOS — team footage OR kid-attached footage. Collapse a game's quarters
+  //    into ONE 'game' item; game-less "loose" uploads stay individual.
+  let videoErr: string | null = null;
+  const gameItems = new Map<string, FeedItem>();
+  const looseItems: FeedItem[] = [];
+  const vParts: string[] = [];
+  if (myTeamIds.length) vParts.push(`team_id.in.(${myTeamIds.join(',')})`);
+  if (myKidIds.length)  vParts.push(`player_id.in.(${myKidIds.join(',')})`);
+  if (vParts.length) {
+    const { data, error } = await supabase
+      .from('videos')
+      .select('id, label, url, created_at, event_type, team_id, player_id, game_id, games ( title, team_id, season_id, tournament_id, seasons ( name ), tournaments ( name ) )')
+      .or(vParts.join(','))
+      .order('created_at', { ascending: false })
+      .limit(FEED_FETCH_LIMIT);
+    videoErr = error?.message ?? null;
+    for (const v of (data || []) as any[]) {
+      const teamId = (v.team_id as string) ?? (v.games?.team_id as string) ?? '';
+      if (v.game_id) {
+        const key = `game:${v.game_id}`;
+        const existing = gameItems.get(key);
+        if (!existing) {
+          gameItems.set(key, {
+            key, kind: 'game', contentId: v.game_id,
+            title: v.games?.title ?? v.label ?? 'Game',
+            teamId, createdAt: v.created_at,
+            storagePath: v.url ?? null,   // rows are newest-first → this is the newest quarter
+            durationSeconds: null,
+            kidPlayerIds: [...new Set([...(v.player_id ? [v.player_id] : []), ...wallKids(key)])],
+            eventType: v.event_type ?? null,
+            seasonId: v.games?.season_id ?? null,
+            seasonName: v.games?.seasons?.name ?? null,
+            tournamentId: v.games?.tournament_id ?? null,
+            tournamentName: v.games?.tournaments?.name ?? null,
+          });
+        } else if (v.player_id && !existing.kidPlayerIds.includes(v.player_id)) {
+          existing.kidPlayerIds.push(v.player_id);   // another quarter attributed to a kid
+        }
+      } else {
+        const key = `video:${v.id}`;
+        looseItems.push({
+          key, kind: 'video', contentId: v.id,
+          title: v.label ?? 'Video',
+          teamId, createdAt: v.created_at,
+          storagePath: v.url ?? null,
+          durationSeconds: null,
+          kidPlayerIds: [...new Set([...(v.player_id ? [v.player_id] : []), ...wallKids(key)])],
+          eventType: v.event_type ?? null,
+          seasonId: null, seasonName: null, tournamentId: null, tournamentName: null,
+        });
+      }
+    }
+  }
+
+  // 3) REELS — team reels OR reels I created.
+  let reelErr: string | null = null;
+  const reelItems: FeedItem[] = [];
+  const rParts: string[] = [`created_by_user_id.eq.${userId}`];
+  if (myTeamIds.length) rParts.push(`team_id.in.(${myTeamIds.join(',')})`);
+  {
+    const { data, error } = await supabase
+      .from('highlight_reels')
+      .select('id, name, storage_path, duration_seconds, created_at, team_id')
+      .or(rParts.join(','))
+      .order('created_at', { ascending: false })
+      .limit(FEED_FETCH_LIMIT);
+    reelErr = error?.message ?? null;
+    for (const r of (data || []) as any[]) {
+      const key = `reel:${r.id}`;
+      reelItems.push({
+        key, kind: 'reel', contentId: r.id,
+        title: r.name,
+        teamId: (r.team_id as string) ?? '',
+        createdAt: r.created_at,
+        storagePath: r.storage_path ?? null,
+        durationSeconds: r.duration_seconds != null ? Number(r.duration_seconds) : null,
+        kidPlayerIds: wallKids(key),
+        eventType: null, seasonId: null, seasonName: null, tournamentId: null, tournamentName: null,
+      });
+    }
+  }
+
+  // 4) Merge + newest-first. Dedup is inherent: a game's quarters collapse to one
+  //    'game:<id>' item, whether they arrived as team footage or a kid-wall share.
+  const items = [...gameItems.values(), ...looseItems, ...reelItems]
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+
+  return {
+    items,
+    debug: {
+      videoRows: gameItems.size + looseItems.length, videoErr,
+      reelRows: reelItems.length, reelErr,
+      kidShareRows, kidShareErr,
+      items: items.length,
     },
   };
 }
