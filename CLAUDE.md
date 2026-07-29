@@ -1,199 +1,387 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repo.
+
+> **Accuracy rule for this file:** every factual claim here was verified against
+> the live Supabase database (via the Supabase MCP) or the current code. If you
+> add a claim, verify it the same way — or mark it unverified. This file became
+> dangerous once because claims accreted that nobody re-checked; don't restart
+> that. Use the Supabase MCP (`.mcp.json` wires it up) to check live schema/RLS
+> before asserting anything about the database.
 
 ## Overview
 
-**IamSports** (slug `iamsports`, bundle `com.masten32.iamsports`) — Expo / React Native app for tagging sports videos and exporting highlight reels. The repo dir is `hoops-app` but the product is "IamSports". Supabase handles auth, data, and video storage; a separate Railway-hosted ffmpeg service (`https://web-production-1bf7f.up.railway.app`) renders the highlight reels.
+**IamSports** (slug `iamsports`, bundle `com.masten32.iamsports`) — Expo / React
+Native + Supabase app for youth-sports coaches and parents to tag game film, cut
+clips, build highlight reels, and share them to team/kid walls. Repo dir is
+`hoops-app`; product is "IamSports". A separate Railway-hosted ffmpeg service
+(`https://web-production-1bf7f.up.railway.app`) renders the reels.
 
 ## Commands
 
 ```bash
 npm run start    # or: npx expo start — Metro dev server
+```
+```bash
 npm run ios      # expo start --ios
+```
+```bash
 npm run android  # expo start --android
+```
+```bash
 npm run web      # expo start --web
+```
+```bash
 npm run lint     # expo lint (eslint-config-expo, flat config)
 ```
 
-There is no test runner configured. Builds are driven by EAS — see `eas.json` for `development` / `preview` / `production` profiles.
-
-Path alias `@/*` maps to the repo root, so `@/supabase`, `@/context`, `@/components/...` etc. resolve from `tsconfig.json`. TypeScript runs in `strict` mode and Expo Router `typedRoutes` is enabled, so route params are typed.
+No test runner is configured. Builds are driven by EAS (`eas.json`:
+`development` / `preview` / `production`). Path alias `@/*` maps to the repo root
+(`@/supabase`, `@/context`, `@/components/...`). TypeScript is `strict` and Expo
+Router `typedRoutes` is on, so route params are typed.
 
 ## High-level architecture
 
-### Navigation & auth flow
+### Auth & navigation
 
-`app/_layout.tsx` is the root. On mount it calls `supabase.auth.getSession()` and routes to `/login` if there's no session, otherwise `/select-team`. An `onAuthStateChange` subscription mirrors this on session changes. All screens are mounted under a single `Stack`, with the tab navigator at `(tabs)`.
+`app/_layout.tsx` is the root: on mount it calls `supabase.auth.getSession()` and
+routes to `/login` (no session) or `/select-team`. An `onAuthStateChange`
+subscription mirrors that. A Terms/EULA gate and a name-capture gate can block
+ahead of the app (see Security model). Screens mount under one `Stack`, with the
+tab navigator at `(tabs)`.
 
-The session is unwrapped in two stages before any "real" screen renders:
-1. `/login` — email/password against Supabase Auth.
-2. `/select-team` — pick a **profile** (the player), then a **team**. Calling `setTeamContext(...)` from `@/context` populates the `TeamProvider` and replaces to `/` with the same values in route params.
+- `/login` — email/password against Supabase Auth.
+- `/select-team` (`app/select-team.tsx`) — the app home. Shows a **kid rail**
+  (the user's linked players) + a **team rail** (their confirmed team
+  memberships) + a **content feed** (`loadContentFeed` in `lib/core/homeFeed.ts`
+  — newest videos + reels across all the user's teams/kids, with a Player /
+  Team / Type / Sort / Event/Season/Tournament FilterBar). There is **no
+  "pick a profile" step**.
 
-`useTeamContext()` (`context.tsx`) is the global handle for `{ profileId, profileName, teamId, teamName }`. **Important sentinel:** `teamId === 'all'` means "across all of this profile's teams" — most queries branch on it (see `app/(tabs)/index.tsx` and `app/(tabs)/tags.tsx`).
+`useTeamContext()` (`context.tsx`) exposes
+`{ userId, userTeams, userKids, activeTeam, activeRole, sessionResolved,
+membershipsLoaded, kidsLoaded, setActiveTeam, refreshTeams, refreshKids }`.
+`activeTeam` is derived from `activeTeamId: string | null` (**null = no team
+selected**; there is no `'all'` sentinel — `'all'` only appears as FilterBar
+dropdown option values). `userTeams` = confirmed `team_memberships`;
+`userKids` = `parent_player_links` (guardian → player).
 
-### Data model (Supabase Postgres)
+Tabs (`app/(tabs)/_layout.tsx`) register **`index`** (a single team's wall,
+`loadTeamWall`) and **`tags`** (tag management).
 
-- `profiles` — a "player" owned by an auth user.
-- `teams` — owned by a profile.
-- `games` — owned by a team. Title is `vs {opponent}`.
-- `videos` — owned by a game. `url` points at the `Videos` storage bucket public URL.
-- `clips` — `{ video_id, start_time, end_time, is_starred, note }`.
-- `tags` — `{ name, category, sort_order, scope, profile_id?, team_id? }`. `category` is one of `offense | defense | plays | players` (hardcoded everywhere — adding a category means updating the `CATEGORIES` arrays in `app/tagging.tsx`, `app/(tabs)/tags.tsx`, and `app/export.tsx`). `scope` is one of `global | player | team`.
-- `clip_tags` — join table `{ clip_id, tag_id, bundle_number }`. **This is the key contract — see "Bundles" below.**
+### Data model (Supabase Postgres — verified column names)
 
-### Tag scoping
+- **`user_profiles`** — one row per auth user: `user_id` (PK), `display_name`,
+  `accepted_terms_at` / `accepted_terms_version` (Terms gate), `deactivated_at`.
+- **`players`** — the kids: `id`, `team_id?`, `name`, `jersey_number?`,
+  `user_id?`, `season_id?`, `grad_class?`, `photo_path?`, `player_lineage_id?`.
+- **`parent_player_links`** — guardian ↔ player: `parent_user_id`, `player_id`,
+  `relationship?`.
+- **`teams`** — `id`, `name`, `sport` (both NOT NULL), `created_by_user_id`,
+  `grad_class?`. Membership is via `team_memberships`.
+- **`team_memberships`** — `team_id`, `user_id`, `role` (`membership_role`:
+  admin/head_coach/coach/parent/player/follower), `status` (`membership_status`:
+  pending/confirmed, default confirmed), `season_id?`. UNIQUE `(team_id, user_id,
+  role)` — a user can hold several roles on one team.
+- **`player_teams`** — player ↔ team link (read-scoped by membership/parent).
+- **`games`** — an **event container**. NOT NULL: `team_id`, `title`. Nullable:
+  `game_date`, `opponent`, `season_id`, `tournament_id`, `team_score`,
+  `opponent_score`. **There is no `event_type` on `games`** — the kind
+  (game/practice/scrimmage/…) lives on its videos.
+- **`videos`** — `id`, `game_id?` (null = **loose footage**), `team_id?`,
+  `uploaded_by_user_id`, `url` (**storage object KEY, not a URL**), `label`,
+  `sort_order`, `visibility` (`content_visibility`: team / coaches_only /
+  public_link / private_to_creator), `player_id?`, `event_type` (text:
+  game/practice/scrimmage/tournament/skills), `event_date?`, `sport?`,
+  `season_id?`, `tagging_complete`.
+- **`clips`** — `id`, `video_id`, `team_id?`, `created_by_user_id?`,
+  `start_time`, `end_time` (numeric), `is_starred`, `is_point_of_emphasis`,
+  `note`, `visibility`.
+- **`tags`** — `id`, `team_id?`, `name`, `category` (text:
+  offense/defense/plays/players — hardcoded in the tagging + `edit-reel.tsx`
+  CATEGORIES arrays), `sort_order`, `scope`. Per live `tags_read` RLS, tags are
+  **global or team-scoped** (`scope='global'` OR team member); there is **no
+  `profile_id` column and no player scope**.
+- **`clip_tags`** — join `{ clip_id, tag_id, bundle_number }`. See Bundles.
+- **`highlight_reels`** — `id`, `team_id?`, `season_id?`, `created_by_user_id?`,
+  `name`, `storage_path?` (object key), `source_clip_ids[]`, `duration_seconds?`,
+  `overlay_mode`, `status`, `public_share_token?` (dead — retire-Public; zero app
+  refs).
+- **`shares`** — the single sharing chokepoint (see Security model):
+  `content_type` (reel/video/clip/game), `content_id`, `team_id?`, `audience`
+  (`share_audience`: team/coaches/player — **no public**, retired),
+  `target_player_id?`, `shared_by_user_id`, `visible`, `hidden_by_family`.
+- **`seasons`**, **`tournaments`**, **`game_lineups`**, **`saved_items`** ("My
+  Film" bookmarks), **`content_reports`** / **`user_blocks`** (moderation),
+  **`super_admins`**, **`team_member_permissions`** /
+  **`team_permission_defaults`** / **`team_player_permissions`** (permission
+  system), **`video_tagging_rights`**, **`admin_audit_log`**, **`followers`**
+  (see "Don't relitigate").
 
-The same Supabase `.or(...)` filter pattern appears in `app/tagging.tsx` and `app/(tabs)/tags.tsx`. A given player/team combo sees:
-- all `scope='global'` tags, plus
-- `scope='player'` tags where `profile_id` matches the current profile, plus
-- `scope='team'` tags where `team_id` matches the current team (only when `teamId !== 'all'`).
+### Security & RLS model
 
-When you add a tag-fetching screen, replicate this filter exactly — getting the OR-of-ANDs syntax wrong silently leaks tags across players or teams.
+**RLS is real and granular on every table** — not a placeholder (see the
+correction in "Don't relitigate"). Policies lean on SECURITY DEFINER helpers:
+`is_super_admin()`, `is_team_member(team_id)` (confirmed membership),
+`is_team_coach(team_id)` (confirmed admin/head_coach/coach),
+`is_linked_parent(player_id)` (via `parent_player_links`). A richer
+`has_team_permission(team_id, team_permission)` exists (per-person override →
+team default → code default) but is **not yet referenced by any RLS policy**.
 
-### Bundles (clip-level tags vs bundles)
+- **Sharing = the `shares` table.** `shares_read` grants: own rows, `team` to
+  team members, `coaches` to team coaches, `player` to a linked parent of
+  `target_player_id`. **No public branch — "Public" is retired.**
+- **A kid's wall = player-audience shares** posted by a guardian
+  (`shared_by_user_id = a guardian`, `audience='player'`). Content merely shared
+  *to* a kid sits in the inbox until a guardian posts it to the wall
+  (approval). The guardian's own posts go straight on — they control the account.
+- **Storage: the `Videos` bucket is PRIVATE.** `storage.objects` has three
+  policies (all `authenticated`, bucket-scoped): INSERT, UPDATE, and an
+  **owner-scoped SELECT** (`bucket_id='Videos' AND owner = auth.uid()`). Clients
+  never read storage directly for playback/export: **`sign-media` (Edge
+  Function, service role) is the ONLY client path to a media URL** — it
+  entitlement-checks (`authorize_video_playback` / `_reel_playback` /
+  `_photo_view`) then signs. `getSignedVideoUrl` → `sign-media`. There is **no
+  `getPublicUrl` anywhere**. The **Railway** ffmpeg server reaches the bucket
+  with the **service-role key** (bypasses RLS).
+- **Moderation is live:** report content + block user (`content_reports` /
+  `user_blocks`, filtered in `lib/core/moderation.ts`).
+- **Terms/EULA gate is live** (`user_profiles.accepted_terms_at/version`).
+  **Account deactivate/delete** backend is live (`deactivated_at` +
+  `supabase/functions/delete-account`).
 
-`clip_tags.bundle_number` is the heart of the tagging model:
-- `bundle_number = 0` → **clip-level** tag (applies to the whole play).
-- `bundle_number = 1, 2, 3, …` → tags grouped together in a **bundle** (e.g., one bundle says "Player A + Assist", another says "Player B + Made Shot").
+### Tagging & bundles
 
-This matters in `app/export.tsx` (`clipMatchesGroup`): a filter group of N tags matches a clip iff **all** of those tags are in the clip-level set, OR **all** are in `clip-level ∪ some single bundle`. Tags across two different bundles do NOT combine. If you change how tags are saved or filtered, preserve this semantics — it's how the app supports "show me clips where Player A made a shot" without also matching clips where A defended and B scored.
+The live tagging screen is **`app/tagging-overlay.tsx`** (full-screen landscape
+overlay). **`app/tagging.tsx` is an ORPHAN** (no route to `/tagging`) slated for
+deletion — do not treat it as live.
 
-`app/tagging.tsx` is where bundles get authored — `activeSection` is either `'clip'` (clip-level) or a numeric bundle index. All rows for a clip are inserted in a single batch when the user saves.
+`clip_tags.bundle_number` is the heart of the model:
+- `0` → **clip-level** tag (whole play).
+- `1, 2, 3, …` → tags grouped into a **bundle** ("Player A + Assist" vs "Player
+  B + Made Shot").
 
-### Video upload pipeline
+`app/export.tsx`'s `clipMatchesGroup`: a group of N tags matches a clip iff all N
+are in the clip-level set, OR all N are in `clip-level ∪ some single bundle`.
+Tags across two bundles do NOT combine. Preserve this if you touch tag
+save/filter — it's how "Player A made a shot" avoids matching "A defended, B
+scored." All rows for a clip are inserted in one batch on save.
 
-`app/game.tsx` uploads directly to Supabase Storage's TUS resumable endpoint at `https://wscfpkaltajnrhiusoze.storage.supabase.co/storage/v1/upload/resumable`. There are **two different code paths** and recent commits show this has been thrashed — be careful editing it:
+### Media pipeline (upload / download) — SPEED MATTERS (see rule below)
 
-- **Web** uses `tus-js-client` with a Blob.
-- **Mobile** uses a hand-rolled chunked PATCH loop (`uploadVideoMobile` + `patchChunk`), reading 15 MB chunks via `expo-file-system/legacy`'s `readAsStringAsync({ encoding: Base64, position, length })` and decoding to bytes. `tus-js-client`'s native streaming was abandoned (see commits `c3838b9`, `5f356cc`, `b1fd23f`).
-- Access tokens are refreshed mid-upload via `getFreshToken(forceRefresh)` — refresh when < 5 minutes remain, or on every retry attempt. Long uploads will outlive the original JWT, so always go through this helper rather than caching a token.
+`lib/native/video-upload.ts` is the shared upload module
+(`uploadVideoToBucket` → `uploadVideoWeb` / `uploadVideoMobile` + `patchChunk`),
+called by `app/upload.tsx` and `app/game.tsx` (add-to-existing-game).
 
-After upload, the public URL is grabbed via `supabase.storage.from('Videos').getPublicUrl(...)` and inserted into the `videos` table.
+- **Web** uses `tus-js-client` with a Blob (`chunkSize` 6 MB).
+- **Mobile** uses a hand-rolled chunked PATCH loop against the TUS resumable
+  endpoint, `CHUNK_SIZE` 15 MB, reading each chunk via
+  `readAsStringAsync({ encoding: Base64, position, length })` then decoding to
+  bytes in JS. Chunks upload **sequentially** (one in flight; decode doesn't
+  overlap the network) — a known speed cost, not yet optimized.
+- Tokens refresh mid-upload via `getFreshToken(forceRefresh)` (< 5 min left, or
+  every retry). Never cache a token across an upload.
+- After upload, the caller inserts the **object key** (`fileName`) into
+  `videos.url` (not a URL). Playback later signs via `sign-media`.
+- **`app/upload.tsx` creates a `games` (event) row whenever a team is
+  selected** (title falls back to `"Game · Jul 28"` / `"Practice · …"` when no
+  opponent). Teamless uploads stay loose (see "Events require a team").
 
 ### Highlight export
 
-`app/export.tsx` is a 3-step wizard: **games → tag groups → review**. On submit it `POST`s a JSON array of `{ url, start_time, end_time }` to the Railway server's `/export` endpoint, then polls `/job/{id}` every 5 s for `progress` / `status`. On `status === 'done'`, it downloads the result via `FileSystem.downloadAsync` and saves it to the camera roll with `expo-media-library`. The matching logic that picks which clips to include is the bundle-aware `clipMatchesGroup` described above.
+`app/export.tsx` is a 3-step wizard (games → tag groups → review). It `POST`s
+`{ url, start_time, end_time }` clips (url = bare object key) to Railway
+`/export`, polls `/job/{id}`, then downloads the result via
+`FileSystem.downloadAsync` to the camera roll. Clip selection is the
+bundle-aware `clipMatchesGroup`.
 
 ## Supabase client
 
-`supabase.js` (JS, not TS) hardcodes the project URL and anon key — there is no `.env` wiring. Auth persists via `AsyncStorage` on native and the default web storage on the web. Don't introduce a separate Supabase client; import the singleton: `import { supabase } from '@/supabase'`.
+`supabase.js` (JS) hardcodes the project URL + anon key (no `.env`). Auth
+persists via `AsyncStorage` (native) / default web storage. Import the
+singleton: `import { supabase } from '@/supabase'`. Don't create a second client.
+
+## Data invariants — apply to EVERY create/edit/attach/delete flow
+
+Before building any create/edit flow, state which of these it satisfies and
+which it doesn't. If one genuinely can't be met (e.g. a NOT NULL forbids it), say
+why — don't ship the gap quietly.
+
+1. **Only DB-required fields are required.** A nullable column must never block
+   creation. Never gate creating one thing on an *optional* field of another.
+2. **Anything creatable is editable afterward** — every field, not just the
+   create-form ones.
+3. **Anything attachable is re-attachable** — attach / detach / move must all
+   exist if X can be created attached to Y.
+4. **Anything creatable is deletable by its owner.**
+5. **Never fail silently.** If an action doesn't do what the UI implies, say so
+   at that moment. A swallowed error or silently-skipped step is a bug, always.
+
+## Media transfer speed is a product requirement
+
+Coaches upload full games from phones on tournament wifi; slow transfer = they
+abandon the app. Speed is a requirement, not a later optimization.
+
+Before writing or changing ANY code on an upload, download, or media path, state
+its effect on transfer speed:
+- Does it add work **per chunk or per byte**?
+- Does it add a **network round trip**?
+- Does it **block the transfer on something that could run in parallel**?
+
+If a change trades speed for quality (resolution, bitrate, fidelity), **say so
+explicitly and let Adam decide — never silently.** Never ship a media-path change
+without stating what it costs.
+
+## Events require a team
+
+A `games` row is an **event** container and `games.team_id` is NOT NULL
+(`games_insert` requires `is_team_coach(team_id)`), so an event cannot be
+teamless. Rule: if the user **explicitly marks an upload as a game / practice /
+scrimmage** and has no team selected, upload must **BLOCK with a clear message**
+— never silently land it as loose footage. **Plain personal footage (no event
+designation) stays teamless and loose** — a parent recording in the driveway
+shouldn't need a team. (Current upload gates game-detail fields on a team and
+shows a teamless note, but does not yet hard-block a marked event — align when
+touched.)
 
 ## Conventions worth keeping
 
-- All Supabase errors surface through `Alert.alert('Error', error.message)` — keep that pattern in new screens.
-- Tap = primary action, long-press = delete (consistent across games, videos, clips, tags).
-- `formatTime(seconds)` is reimplemented in several files (`tagging.tsx`, `clips.tsx`, `export.tsx`); if you find yourself touching it in more than one place, consider hoisting — otherwise leave duplicates alone.
-- The `expo-router` `typedRoutes` experiment is on; prefer `router.push({ pathname: '/foo', params: {...} })` over string paths so types stay accurate.
-- New architecture (`newArchEnabled: true`) and React Compiler (`reactCompiler: true`) are both on — don't disable them without a reason.
+- Surface Supabase errors via `Alert.alert('Error', error.message)`.
+- Tap = primary action, long-press = delete (games, videos, clips, tags).
+- `formatTime(seconds)` is duplicated across a few screens; leave duplicates
+  unless you're already editing more than one.
+- Prefer `router.push({ pathname: '/foo', params: {...} })` (typedRoutes is on).
+- New architecture (`newArchEnabled`) and React Compiler (`reactCompiler`) are
+  both on — don't disable without a reason.
+- New business logic goes in `lib/core/` (RN-agnostic) for iOS+Web reuse; UI
+  stays platform-specific.
 
 ## Product context
 
-- Solo-developer project by Adam Masten. Self-described vibe-coder — beginner-to-intermediate React Native, not a professional engineer.
-- Target users: AAU and youth basketball coaches in Adam's personal network. TestFlight beta target ≈ 50 paying users sourced from that network.
-- Pricing post-App-Store launch: $9.99/mo individual subscription (~$5 net after Apple's cut).
-- Long-term goal is side income, not a 40 hr/wk job — **default to shipping over polish**.
-- Subscription/payment work uses **RevenueCat** when it begins, which is **post-App-Store launch, NOT before**. Includes affiliate/referral tracking via per-coach codes.
-
-### Planned: Highlight reel shortcut (post-V2 overlay)
-
-The ★ Highlight button on the tagging screen sets `clips.is_starred = true` on save. After V2 overlay ships, add a "Make Highlight Reel" option that filters clips by `is_starred = true`, skips `app/export.tsx`'s tag-group builder, and goes straight to the Railway `/export` endpoint. **Why:** top-tier user value for parents making highlight tapes — the current 3-step wizard is overkill when the user has already marked their highlights during tagging. Don't lose track of this; it's the most direct conversion from "I tagged a great play" to "I have a shareable video."
-
-### Planned: Save-Alert → toast (post-V2 overlay)
-
-V2 Phase F's "Saved!" Alert (with OK-button-then-reset) in `app/tagging-overlay.tsx` is intentional parity with `app/tagging.tsx`'s portrait save flow — it was the right call for shipping Phase F without diverging from the working portrait pattern. But it's a known UX friction point for high-volume landscape tagging sessions: every save interrupts the user with a modal they have to dismiss before tagging the next clip. **Post-V2 polish:** replace with a toast (brief visual feedback, auto-dismiss ~1.5s, state reset happens automatically). **Don't change before beta** — coaches will surface this in real use and we'll know how strongly to prioritize.
+- Solo project by Adam Masten. Self-described vibe-coder (beginner-intermediate
+  RN). Default to **shipping over polish**; long-term goal is side income.
+- Target users: AAU / youth basketball coaches and parents in Adam's network.
+- **Launch plan:** ship **free** and **unlisted** on the App Store (real app,
+  link-only distribution, full review) — **not** TestFlight (coaches found it a
+  pain). Adults manage youth footage (Hudl model); kids are not users.
+- Pricing post-launch: ~$9.99/mo individual (~$5 net). Subscriptions use
+  **RevenueCat**, which begins **post-App-Store launch, not before** (includes
+  per-coach affiliate codes).
 
 ## Working style
 
-- Adam uses **VS Code exclusively**. Never suggest `nano`, `vim`, TextEdit, or any other editor.
-- When suggesting terminal commands, put **each command in its own code block**, one per block — even in multi-step instructions. Adam copies them one at a time.
-- Development rhythm: tag real games → find worst friction → fix it → repeat. Real-user friction beats theoretical priorities; resist refactor-for-refactor's-sake suggestions.
+- Adam uses **VS Code exclusively** — never suggest nano/vim/TextEdit.
+- Put **each terminal command in its own code block** (Adam copies one at a
+  time).
+- Rhythm: tag real games → find worst friction → fix it → repeat. Real-user
+  friction beats theoretical priorities; resist refactor-for-its-own-sake.
 
 ## Debugging protocol — investigate before proposing
 
-When Adam reports a bug, the DEFAULT is: **investigate read-only and report findings BEFORE proposing or writing any fix.** No code changes until Adam has seen the findings and approved the fix. Specifically:
+When Adam reports a bug, the DEFAULT is **investigate read-only and report
+findings BEFORE proposing or writing any fix.** No code changes until findings
+are seen and the fix is approved.
 
-1. **Trace the actual code — don't guess.** You have the code; read it. Follow the real execution path to where the data actually dies, rather than theorizing about what's "likely" wrong.
-2. **Confirm real schema against the database before writing SQL.** Verify exact table + column names against the live DB. We've hit repeated errors from assumed names (`team_id` that didn't exist; `kid_id` that was really `player_id`).
-3. **Confirm the fix lands in the LIVE file that actually renders — and flag orphans on sight.** We got burned TWICE by the two-file trap: feed work in files the Home tab didn't use, and a suspected orphaned `home.tsx`. Before editing a screen, verify which file is really mounted/registered (check the router: `app/(tabs)/_layout.tsx` registers `index` + `tags`; the Home tab IS `app/(tabs)/index.tsx`). When you touch a screen, always confirm the change is in the rendered file, and **flag any duplicate/orphaned screen file** (e.g. the undeclared `app/(tabs)/explore.tsx`) so we delete it on sight — one file per screen, no coexisting copies.
-4. **Prove which stage the data dies at with on-screen debug output / logs** — not theory. Instrument, observe the real numbers, then conclude.
+1. **Trace the actual code — don't guess.** Follow the real execution path to
+   where the data dies.
+2. **Confirm real schema against the live DB** (use the Supabase MCP) before
+   writing SQL. We've hit repeated errors from assumed names.
+3. **Confirm the fix lands in the LIVE file that renders — flag orphans.** We've
+   been burned by the two-file trap. The Home tab is `app/(tabs)/index.tsx`
+   (team wall); the app-home is `app/select-team.tsx`; the live tagger is
+   `app/tagging-overlay.tsx` (not `tagging.tsx`). One file per screen.
+4. **Prove which stage the data dies at with real numbers / on-screen debug
+   output** — not theory.
 5. **No code changes until findings are seen and the fix is approved.**
 
-### The root pattern: this codebase "fails safe" by swallowing errors
+### Root pattern: this codebase "fails safe" by swallowing errors
 
-Recurring root cause across our bugs: the code hides failures and shows nothing (empty teams → blank feed; missing RPC → dropped items; permission error → assumed-zero-rows) instead of surfacing them. **Before launch, treat error visibility/logging as a priority** so silent failures become visible. This is Adam's scaling concern: he can't debug at 1000+ users if failures are silent. When touching error handling, prefer surfacing the failure over defaulting to empty — a visible "permission denied on player_teams" beats a blank screen.
+Recurring root cause: code hides failures and shows nothing (empty feed, dropped
+items, assumed-zero-rows) instead of surfacing them. Prefer surfacing a failure
+over defaulting to empty — Adam can't debug at 1000+ users if failures are
+silent. (This is why invariant 5 exists.)
 
 ## Cleanup rule — no orphans, no drift (NON-NEGOTIABLE)
 
-Clean up behind yourself, every time — no orphaned files, no dead code, no duplicate tables/functions/policies, no repo↔live drift, no described-but-unwritten migrations left as breadcrumbs. This project has repeatedly lost hours to leftovers (orphaned `home.tsx`, two permission tables, stale migration files). So when you replace or supersede something:
+Clean up behind yourself: no orphaned files, dead code, duplicate
+tables/functions/policies, repo↔live drift, or described-but-unwritten
+migrations. When you supersede something:
 
-1. **Rewire everything to the ONE real thing**, then **search the entire codebase AND live DB** for every remaining reference to the old thing — app code, SQL, functions/RPCs, RLS policies, migration files.
-2. **Zero references = the bar.** If any remain, it's not done — fix them.
-3. **Only then retire/drop the old thing** — and for a destructive drop (table/function/policy), tell Adam before the final drop.
-4. **Give a proof-based cleanup report:** "Searched for X, found N references, all rewired/removed, zero orphans remain" — with the actual search output, not a claim.
-5. Keep repo migration files in sync with live so a future session can't mistake stale schema for truth.
+1. **Rewire everything to the ONE real thing**, then search the whole codebase
+   AND live DB for every remaining reference.
+2. **Zero references = the bar.**
+3. **Only then retire the old thing** — and tell Adam before a destructive drop.
+4. **Give a proof-based cleanup report** with the actual search output.
+5. Keep repo `migration_*.sql` files in sync with live (there's a
+   `migration_*.sql` per applied change; a header pointer marks any superseded
+   one, e.g. `migration_storage_rls_videos.sql`).
 
-## What we're working on now (May 2026)
+## "Don't relitigate" — settled decisions
 
-Active project: **V2 overlay** — a transparent, full-screen landscape tagging UI (Concept B). The current `app/tagging.tsx` is portrait with controls below the video; the overlay rebuild moves everything on top of full-screen landscape video.
+- **CORRECTION — RLS is NOT `allow_all`.** An earlier version of this file
+  claimed "RLS is `allow_all` (expression `true`) on every table." **That was
+  wrong.** Verified this session: every public table has real, granular RLS, and
+  the last blanket `allow_all` policy (on `team_memberships`) was dropped
+  (`migration_close_team_memberships_escalation.sql`). Do **not** treat RLS as a
+  not-yet-real MVP placeholder or "fix" it back to open.
+- **Public is retired** for kid-attached content (child-safety data-leak).
+  `shares` audiences are team/coaches/player only; the storage read-leak is
+  closed (owner-scoped SELECT + `sign-media`). Don't reintroduce a public
+  audience or a broad storage SELECT.
+- **Web uploads use `tus-js-client`; mobile uses the hand-rolled chunked PATCH
+  loop.** The split is intentional — don't unify. (But see the speed rule: the
+  sequential loop + base64 decode are fair game to optimize *without* a quality
+  trade.)
+- **15 MB mobile chunk size is tuned** (smaller = too many requests; larger =
+  memory pressure on old iPhones). Changing it is a media-path change — state
+  the speed effect.
+- **`getFreshToken(forceRefresh)` mid-upload is required** — long uploads
+  outlive the JWT. Never cache the token across an upload.
+- **`followers` is RESERVED — zero app-code references (verified), but it now
+  has full RLS policies.** Don't wire it, build on it, or delete it. Team
+  membership (not followers) handles seeing teammates' content. Confirm with
+  Adam before touching it.
+- **Railway server internals are NOT verifiable from this repo** (separate
+  codebase). Prior sessions established the `fps=30` filter + `-fps_mode cfr`
+  flag as the variable-frame-rate fix for concatenation — treat as
+  don't-remove, but unverified here.
 
-Design intent:
-- Video 100% full-screen in landscape orientation
-- All controls (Mark Start, Mark End, Save Clip, tag bubbles, back button) float transparently over the video
-- Tag bubbles at the bottom, semi-transparent; selected tags glow brighter
-- Tap the video to hide/show controls
-- Save Clip top right, Back top left
-- Gradient darkening at the bottom for tag readability
+## Operational knowledge (carried forward — re-verify before a build)
 
-This is V2 milestone #1. The next two V2 milestones — **tag tree browse view** and **frame-accurate video scrubber with thumbnail previews** — are queued but **do not start them without explicit go-ahead from Adam**.
-
-## Operational knowledge
-
-### Critical IDs
+The Supabase project ID below was used via the MCP this session; the rest are
+carried from prior notes and **not re-verified this session** — confirm against
+`eas.json` / `app.json` / App Store Connect before relying on them.
 
 | Thing | Value |
 |---|---|
 | Bundle ID | `com.masten32.iamsports` |
 | EAS Project ID | `ff1f3af9-f645-4ac5-9411-7ba489daea92` |
 | Apple Team ID | `CAUQR2A8KW` |
-| Supabase Project ID | `wscfpkaltajnrhiusoze` |
+| Supabase Project ID | `wscfpkaltajnrhiusoze` (verified via MCP) |
 | App Store Connect API Key ID | `W2VGU58N39` |
 | ASC Issuer ID | `a5304c77-d367-498e-8478-104da9bc056f` |
 | ASC API Key path (local) | `~/Downloads/AuthKey_W2VGU58N39.p8` |
 
-### EAS builds
+- **EAS builds** require API-key auth (not password); env vars
+  `EXPO_ASC_API_KEY_PATH`, `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID`.
+- **Storage bucket** is **`Videos`** (capital V — wrong case fails silently);
+  exports go to the `exports/` subfolder. Bucket is private (owner-scoped SELECT
+  + `sign-media`); file-size limit raised to 10 GB (Supabase Pro).
+- **Schema cache trap:** after modifying tables, PostgREST may serve stale schema
+  ("column not found"). Fix with `NOTIFY pgrst, 'reload schema';` in the SQL
+  editor before debugging further.
 
-- EAS builds require **API key authentication**. Password-based auth does not work — don't try it.
-- The build invocation depends on three environment variables: `EXPO_ASC_API_KEY_PATH`, `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID`.
-- Currently on Expo Starter plan ($19/mo) for priority build queues.
+## Current work
 
-### Storage bucket
+Storage lockdown and the sharing/child-safety model are **done and verified**
+(Public retired; owner-scoped storage; `sign-media`; membership-escalation
+closed with a regression test `test_rls_escalation.sql`). Recent work is the
+**Film Room** CRUD: team uploads become games (blank opponent allowed), attach /
+move / remove loose footage to games, and game/reel editors (`edit-game.tsx` /
+`edit-reel.tsx`).
 
-- Bucket name is **`Videos`** with a capital V. Get the case wrong and uploads fail silently.
-- Exports are written to the `exports/` subfolder of the same bucket.
-- Supabase Pro plan ($25/mo) is required for files >50 MB. Bucket file-size limit has been raised manually to 10 GB.
-
-### Schema cache trap
-
-After modifying Supabase tables, PostgREST sometimes serves a stale schema and inserts fail with "column not found" even though the column exists. Fix it with this SQL in the Supabase SQL editor:
-
-```sql
-NOTIFY pgrst, 'reload schema';
-```
-
-This bit us when adding `clip_tags.bundle_number`. If a recently-added column appears missing to the client, run this before debugging anything else.
-
-## "Don't relitigate" decisions
-
-These are settled. Don't change them without an explicit conversation with Adam first.
-
-- **RLS is `allow_all` (expression `true`) on every table.** Intentional for the MVP / pre-public-launch phase. Real RLS goes in before public App Store launch, NOT before TestFlight. Don't "fix" it.
-- **Web uploads use `tus-js-client`. Mobile uses the hand-rolled chunked PATCH loop.** Don't unify them — the split is the point.
-- **15 MB chunk size for mobile TUS uploads is tuned.** Smaller chunks generate too many requests; larger chunks cause memory pressure on older iPhones.
-- **`getFreshToken(forceRefresh)` for mid-upload auth refresh is required, not optional.** Long uploads outlive the original JWT. Never cache the token across an upload.
-- **The Railway ffmpeg server's `fps=30` filter + `-fps_mode cfr` flag is the VFR fix.** Variable-frame-rate phone video breaks concatenation without these. Don't remove them from the server's ffmpeg invocations.
-- **The `followers` table is RESERVED / dormant — NOT in use. Do NOT wire it or build on it.** It exists in the schema (`migration_walls_reels_sharing.sql`) but is referenced by zero app code. The follower feature is deferred to **post-launch**. Do NOT delete it either — leave it dormant. Seeing "teammates' public content" is handled by **team membership**, NOT followers. The request/approve onboarding and the viewer/grandparent tier are still **net-new to design later** — they will NOT be built via `followers` for now. If a future session finds this table, treat it as reserved and confirm with Adam before touching it.
-
-## Upload stability is the #1 quality signal
-
-A colleague (Bobby) flagged upload crashes as a professionalism / quality concern before TestFlight go-live. The chunked TUS rebuild largely addressed it, but upload stability remains the highest-stakes area of the codebase for beta-user perception. Any change near `app/game.tsx`'s upload paths or `getFreshToken()` is high-stakes — diff carefully and test with both a small (<100 MB) and a large (>500 MB) video before merging.
+**Known open gap:** a video *inside* a game has no per-video editor (can't rename
+"Q1"→"Q3") — invariant 2, deferred. **Launch prep** remaining: host the privacy
+page / terms URL, App Store listing assets, NCMEC ESP registration. Don't start
+larger queued items (per-video editor, offline tagging, etc.) without Adam's
+go-ahead.
