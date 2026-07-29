@@ -99,31 +99,50 @@ export async function pickVideos(): Promise<PendingFile[]> {
   return result.assets.map(a => ({ isWeb: false as const, uri: a.uri, type: 'video/mp4' }));
 }
 
-// Upload a single chunk via PATCH with retries + token refresh on auth errors.
-async function patchChunk(uploadUrl: string, bytes: Uint8Array, offset: number): Promise<void> {
-  const maxAttempts = 3;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const token = await getFreshToken(attempt > 1);
-    try {
-      const resp = await fetch(uploadUrl, {
-        method: 'PATCH',
-        headers: {
-          authorization: `Bearer ${token}`,
-          'Tus-Resumable': '1.0.0',
-          'Upload-Offset': String(offset),
-          'Content-Type': 'application/offset+octet-stream',
-        },
-        body: bytes,
-      });
-      if (resp.ok || resp.status === 204) return;
-      const body = await resp.text();
-      throw new Error(`PATCH ${resp.status} at offset ${offset}: ${body.slice(0, 200)}`);
-    } catch (e: any) {
-      if (attempt === maxAttempts) throw e;
-      console.log(`[Upload] Chunk retry ${attempt}/${maxAttempts} at offset ${offset}: ${e?.message}`);
-      await new Promise(r => setTimeout(r, 2000 * attempt));
-    }
+// Send ONE chunk via PATCH starting at `offset`. On success returns the server's
+// authoritative Upload-Offset from the response header (or null if the server
+// omitted it — the caller then falls back to offset+length, which is exact for a
+// 2xx). Throws on network error or non-2xx so the caller can HEAD-resync + retry.
+async function patchChunk(uploadUrl: string, bytes: Uint8Array, offset: number, token: string): Promise<number | null> {
+  const resp = await fetch(uploadUrl, {
+    method: 'PATCH',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'Tus-Resumable': '1.0.0',
+      'Upload-Offset': String(offset),
+      'Content-Type': 'application/offset+octet-stream',
+    },
+    body: bytes,
+  });
+  if (!resp.ok && resp.status !== 204) {
+    const body = await resp.text();
+    throw new Error(`PATCH ${resp.status} at offset ${offset}: ${body.slice(0, 200)}`);
   }
+  const raw = resp.headers.get('upload-offset');
+  if (raw == null) return null;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+// HEAD the upload URL to read the server's current Upload-Offset — the TUS way to
+// recover after a failed PATCH (the server may have consumed part of the body
+// before the client saw an error, so its offset has advanced). Throws loudly if
+// the offset can't be read; the caller must not retry blindly.
+async function headUploadOffset(uploadUrl: string, token: string): Promise<number> {
+  const resp = await fetch(uploadUrl, {
+    method: 'HEAD',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'Tus-Resumable': '1.0.0',
+    },
+  });
+  if (!resp.ok && resp.status !== 200 && resp.status !== 204) {
+    throw new Error(`HEAD ${resp.status} on upload URL`);
+  }
+  const raw = resp.headers.get('upload-offset');
+  const n = raw != null ? parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(n)) throw new Error(`HEAD returned no valid Upload-Offset (got "${raw}")`);
+  return n;
 }
 
 async function uploadVideoWeb(
@@ -198,50 +217,71 @@ async function uploadVideoMobile(
   if (!uploadUrl) throw new Error('No upload URL returned from Supabase');
   console.log('[Upload] Got upload URL, starting chunked upload');
 
+  // Server-truth offset tracking. We NEVER advance `offset` by local arithmetic;
+  // we adopt the server's Upload-Offset from each PATCH response (falling back to
+  // offset+length only if a 2xx omits the header, which is exact for a success).
+  // On any PATCH failure we HEAD the upload URL to learn the server's real offset
+  // (it can consume part of the body before the client sees an error), reconcile
+  // it against the chunk we tried, then re-read from there — the fix for the
+  // "409 Upload-Offset conflict on retry" bug.
+  const MAX_ATTEMPTS = 3;
   let offset = 0;
-  let chunkNum = 0;
-  const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+  let attempt = 0;
 
   while (offset < fileSize) {
-    const remaining = fileSize - offset;
-    const currentChunkSize = Math.min(CHUNK_SIZE, remaining);
-    chunkNum++;
-
-    console.log(`[Upload] Chunk ${chunkNum}/${totalChunks} (offset ${offset}, size ${currentChunkSize})`);
+    const chunkStart = offset;
+    const currentChunkSize = Math.min(CHUNK_SIZE, fileSize - offset);
+    console.log(`[Upload] Chunk at offset ${chunkStart} (size ${currentChunkSize}) of ${fileSize}`);
 
     const base64 = await FileSystem.readAsStringAsync(fileUri, {
       encoding: FileSystem.EncodingType.Base64,
-      position: offset,
+      position: chunkStart,
       length: currentChunkSize,
     });
     const bytes = base64ToBytes(base64);
+    const token = await getFreshToken(attempt > 0);
 
-    await patchChunk(uploadUrl, bytes, offset);
+    try {
+      const serverOffset = await patchChunk(uploadUrl, bytes, chunkStart, token);
+      const next = serverOffset ?? chunkStart + currentChunkSize;
+      if (next < chunkStart || next > fileSize) {
+        throw new Error(`PATCH returned impossible Upload-Offset ${next} (chunk started ${chunkStart}, fileSize ${fileSize})`);
+      }
+      offset = next;      // server truth, not arithmetic
+      attempt = 0;
+      onProgress(Math.round((offset / fileSize) * 100));
+    } catch (e: any) {
+      attempt++;
+      if (attempt >= MAX_ATTEMPTS) throw e;
+      console.log(`[Upload] Chunk retry ${attempt}/${MAX_ATTEMPTS} near offset ${chunkStart}: ${e?.message}`);
+      await new Promise(r => setTimeout(r, 2000 * attempt));
 
-    offset += currentChunkSize;
-    onProgress(Math.round((offset / fileSize) * 100));
+      // Recover the server's real offset before retrying, then re-read from there.
+      const recoveryToken = await getFreshToken(true);
+      let serverOffset: number;
+      try {
+        serverOffset = await headUploadOffset(uploadUrl, recoveryToken);
+      } catch (headErr: any) {
+        throw new Error(
+          `Upload recovery failed: HEAD could not read the server offset after a chunk error near ${chunkStart} ` +
+          `(${headErr?.message}); original error: ${e?.message}`,
+        );
+      }
+      const chunkEnd = chunkStart + currentChunkSize;
+      if (serverOffset < chunkStart || serverOffset > chunkEnd) {
+        throw new Error(
+          `Upload offset unreconcilable: server=${serverOffset}, client chunk=[${chunkStart}, ${chunkEnd}], ` +
+          `fileSize=${fileSize}. Aborting rather than corrupt the upload.`,
+        );
+      }
+      offset = serverOffset;   // loop re-reads a fresh chunk from the server's truth
+      onProgress(Math.round((offset / fileSize) * 100));
+    }
   }
 
   console.log('[Upload] All chunks uploaded successfully');
 }
 
-// Upload a picked file to the 'Videos' bucket at <fileName>. Reports 0-100 via
-// onProgress. Throws on failure. Bucket/path semantics are the caller's concern
-// (the caller writes the videos row with whatever team_id/game_id/player_id).
-export async function uploadVideoToBucket(
-  fileName: string,
-  pending: PendingFile,
-  onProgress: (pct: number) => void,
-  knownBytes?: number
-): Promise<void> {
-  if (pending.isWeb) {
-    const token = await getFreshToken();
-    await uploadVideoWeb(fileName, pending.file, token, onProgress);
-  } else {
-    const fileSize = knownBytes ?? (await pendingFileSize(pending));
-    await uploadVideoMobile(fileName, pending.uri, fileSize, onProgress);
-  }
-}
 // Byte size of a picked file, captured BEFORE upload so the caller can store it
 // on the pending videos row (upload_bytes). Reconciliation later verifies the
 // finalized object's content-length matches this exactly, so a partial/truncated
@@ -256,4 +296,21 @@ export async function pendingFileSize(pending: PendingFile): Promise<number> {
   return (info as any).size as number;
 }
 
+// Upload a picked file to the 'Videos' bucket at <fileName>. Reports 0-100 via
+// onProgress. Throws on failure. Bucket/path semantics are the caller's concern
+// (the caller writes the videos row with whatever team_id/game_id/player_id).
 // Pass knownBytes (from pendingFileSize) to skip the mobile re-stat.
+export async function uploadVideoToBucket(
+  fileName: string,
+  pending: PendingFile,
+  onProgress: (pct: number) => void,
+  knownBytes?: number
+): Promise<void> {
+  if (pending.isWeb) {
+    const token = await getFreshToken();
+    await uploadVideoWeb(fileName, pending.file, token, onProgress);
+  } else {
+    const fileSize = knownBytes ?? (await pendingFileSize(pending));
+    await uploadVideoMobile(fileName, pending.uri, fileSize, onProgress);
+  }
+}
