@@ -1,6 +1,6 @@
 import { useTeamContext } from '@/context';
 import {
-  dateToYMD, deriveResult, EVENT_TYPES, NEW_TOURNAMENT, SEASON_TERMS, SPORTS,
+  dateToYMD, deriveResult, EVENT_TYPES, gameTitle, NEW_TOURNAMENT, SEASON_TERMS, SPORTS,
   type EventTypeKey,
 } from '@/lib/core/upload-meta';
 import { supabase } from '@/supabase';
@@ -178,7 +178,7 @@ export default function EditGameScreen() {
         }
       }
 
-      const title = opponent.trim() ? `${vsAt} ${opponent.trim()}` : 'Game';
+      const title = gameTitle(opponent, vsAt, eventType, gameDate);
       const { error: gErr } = await supabase.from('games').update({
         title,
         opponent: opponent.trim() || null,

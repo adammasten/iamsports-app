@@ -2,7 +2,7 @@ import { useTeamContext } from '@/context';
 import { pickVideos, uploadVideoToBucket, type PendingFile } from '@/lib/native/video-upload';
 import { requirePermission } from './permissionGuard';
 import {
-  defaultUploadTitle, dateToYMD, deriveResult, EVENT_TYPES, makeVideoLabel, NEW_TOURNAMENT, SEASON_TERMS, SPORTS,
+  defaultUploadTitle, dateToYMD, deriveResult, EVENT_TYPES, gameTitle, makeVideoLabel, NEW_TOURNAMENT, SEASON_TERMS, SPORTS,
   type EventTypeKey,
 } from '@/lib/core/upload-meta';
 import { supabase } from '@/supabase';
@@ -158,13 +158,17 @@ export default function UploadScreen() {
         }
       }
 
-      // 3. Create the game ONCE (team + game details). Every picked video attaches to it.
+      // 3. Create the event/game row ONCE whenever there's a TEAM — an opponent is
+      //    NOT required (blank opponent → title falls back to "Game · Jul 28" etc.).
+      //    A games row is an event container; event_type distinguishes game vs
+      //    practice/scrimmage. Teamless personal uploads stay loose — games.team_id
+      //    is NOT NULL and games_insert requires is_team_coach(team_id), so a
+      //    no-team upload genuinely can't be a game (handled by the `if (teamId)`).
       let gameId: string | null = null;
-      if (teamId && (opponent.trim() !== '' || tournamentResolved !== null)) {
-        const gameTitle = opponent.trim() ? `${vsAt} ${opponent.trim()}` : 'Game';
+      if (teamId) {
         const { data: g, error } = await supabase.from('games').insert({
           team_id: teamId,
-          title: gameTitle,
+          title: gameTitle(opponent, vsAt, eventType, eventDate),
           opponent: opponent.trim() || null,
           game_date: dateToYMD(eventDate),
           tournament_id: tournamentResolved,
@@ -379,6 +383,12 @@ export default function UploadScreen() {
             {/* Attach to team (optional) */}
             <Text style={styles.label}>Attach to team</Text>
             <Dropdown value={teamId} options={teamOptions} onSelect={setTeamId} placeholder="None / personal" />
+            {/* Invariant 5: don't imply a game will be created when it can't. */}
+            {!teamId ? (
+              <Text style={styles.personalNote}>
+                Personal uploads go to your footage — not a game. Pick a team to create a game.
+              </Text>
+            ) : null}
 
             {/* More details expander */}
             <TouchableOpacity style={styles.moreToggle} onPress={() => setShowMore(!showMore)}>
@@ -515,6 +525,7 @@ const styles = StyleSheet.create({
   pickText: { color: '#534AB7', fontSize: 16, fontWeight: '600' },
 
   label: { color: '#aaa', fontSize: 13, fontWeight: '600', marginTop: 18, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  personalNote: { color: '#888', fontSize: 12, lineHeight: 17, marginTop: 8 },
   sublabel: { color: '#888', fontSize: 12, fontWeight: '600', marginTop: 14, marginBottom: 6 },
   input: { backgroundColor: '#1a1a1a', borderRadius: 8, padding: 14, fontSize: 16, borderWidth: 1, borderColor: '#333', color: '#fff', marginTop: 6 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },

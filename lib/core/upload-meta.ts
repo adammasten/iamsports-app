@@ -57,3 +57,16 @@ export function makeVideoLabel(base: string, sortOrder: number, withIndex: boole
   const b = base.trim() || defaultUploadTitle(new Date());
   return withIndex ? `${b} ${sortOrder + 1}` : b;
 }
+
+// Title for a games (event) row. With an opponent it reads "vs Duke" / "at Duke".
+// With NO opponent it falls back to the event type + short date — "Game · Jul 28",
+// "Practice · Jul 28" — so team uploads without an opponent aren't all titled the
+// same "Game". Shared by upload.tsx (create) and edit-game.tsx (save) so the
+// format stays identical. A games row is an EVENT container; event_type lives on
+// its videos, so this fallback reflects whatever kind of event it is.
+export function gameTitle(opponent: string, vsAt: 'vs' | 'at', eventType: EventTypeKey, date: Date): string {
+  const opp = opponent.trim();
+  if (opp) return `${vsAt} ${opp}`;
+  const label = EVENT_TYPES.find(e => e.value === eventType)?.label ?? 'Event';
+  return `${label} · ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+}

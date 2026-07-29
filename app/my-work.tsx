@@ -139,6 +139,9 @@ export default function MyWorkScreen() {
   // "+" uploads. Kept as its OWN list, never forced through the game grouping.
   const [looseVideos, setLooseVideos] = useState<GameVideo[]>([]);
   const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
+  // Video being attached/moved to a game — non-null opens the game picker.
+  // fromGameId = the video's current game (null = loose); excluded from the picker.
+  const [attachTarget, setAttachTarget] = useState<{ video: GameVideo; fromGameId: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   // Filtered+sorted items, produced by FilterBar (a FilterableItem subset; the
   // full Reel/Game is recovered via reelsById/gamesById for the card render).
@@ -381,6 +384,72 @@ export default function MyWorkScreen() {
         },
       ],
     );
+  }
+
+  // Open the game picker to attach a LOOSE video (fromGameId null) or MOVE an
+  // in-game video to a different game (fromGameId = its current game, excluded).
+  function openAttachPicker(video: GameVideo, fromGameId: string | null = null) {
+    const targets = games.filter(g => g.id !== fromGameId);
+    if (targets.length === 0) {
+      Alert.alert(
+        fromGameId ? 'No other games' : 'No games yet',
+        fromGameId
+          ? 'There are no other games to move this into.'
+          : 'Upload with a team selected to create a game, then you can add this footage to it.',
+      );
+      return;
+    }
+    setAttachTarget({ video, fromGameId });
+  }
+
+  // "Remove from game" → make the video loose again (game_id = null). team_id and
+  // visibility are DELIBERATELY preserved: removing from a game changes only game
+  // membership, not team ownership or who can see it. It lands back in "Unsorted
+  // footage", re-fileable via "Add to a game" / "Move to another game".
+  async function detachFromGame(video: GameVideo) {
+    const { error } = await supabase.from('videos').update({ game_id: null }).eq('id', video.id);
+    if (error) { Alert.alert('Could not remove from game', error.message); return; }
+    loadGames();
+  }
+
+  // Attach loose footage to an existing game. Mirrors edit-game.tsx's cascade:
+  //  • adopt the game's team (anti-misfile) + team visibility,
+  //  • INHERIT the game's shared attributes (event_type / event_date / sport /
+  //    player_id / season_id) read from the game's FIRST video — the same source
+  //    edit-game prefills from — so the footage matches the rest and can't shift
+  //    the game's displayed type,
+  //  • APPEND (sort_order = the game's current max + 1) so it can't collide with
+  //    an existing sort_order (there's no unique constraint) or land as "first".
+  // videos_update RLS already permits the uploader — no policy change. Reload so
+  // the video leaves "Unsorted footage".
+  async function attachToGame(video: GameVideo, game: Game) {
+    setAttachTarget(null);
+    const { data: gv } = await supabase.from('videos')
+      .select('sort_order, event_type, event_date, sport, player_id, season_id')
+      .eq('game_id', game.id)
+      .order('sort_order', { ascending: true });
+    const first = gv?.[0] as any;                                   // lowest sort_order = attr source
+    const maxSort = Math.max(-1, ...(gv ?? []).map((r: any) => r.sort_order ?? -1));
+
+    const patch: Record<string, any> = {
+      game_id: game.id,
+      team_id: game.teamId,
+      visibility: 'team',
+      sort_order: maxSort + 1,           // append after the game's last video (no collision)
+    };
+    // Inherit shared attrs only when the game already has a video to match; an
+    // empty game has none, so the footage keeps its own attributes.
+    if (first) {
+      patch.event_type = first.event_type;
+      patch.event_date = first.event_date;
+      patch.sport = first.sport;
+      patch.player_id = first.player_id;
+      patch.season_id = first.season_id;
+    }
+
+    const { error } = await supabase.from('videos').update(patch).eq('id', video.id);
+    if (error) { Alert.alert('Could not add to game', error.message); return; }
+    loadGames();
   }
 
   // Reload on focus (and when the user changes) so returning from edit-game /
@@ -1015,6 +1084,7 @@ export default function MyWorkScreen() {
                     style={styles.looseCard}
                     onLongPress={() => confirmDeleteVideo(v)}
                     onPress={() => Alert.alert(v.label, undefined, [
+                      { text: 'Add to a game', onPress: () => openAttachPicker(v) },
                       { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, personal: '1' } }) },
                       { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
                       { text: 'Cancel', style: 'cancel' },
@@ -1209,6 +1279,8 @@ export default function MyWorkScreen() {
                                   // chrome in tagging-overlay — no new player, no divergent playback.
                                   { text: 'Watch game', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, watch: '1' } }) },
                                   { text: 'View clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
+                                  { text: 'Move to another game', onPress: () => openAttachPicker(v, game.id) },
+                                  { text: 'Remove from game', style: 'destructive', onPress: () => detachFromGame(v) },
                                   { text: 'Cancel', style: 'cancel' },
                                 ])}
                               >
@@ -1239,6 +1311,27 @@ export default function MyWorkScreen() {
           </ScrollView>
         )}
       </View>
+
+      {/* Attach a loose video to a game, or move an in-game video to another. */}
+      {attachTarget && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setAttachTarget(null)}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setAttachTarget(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>{attachTarget.fromGameId ? 'Move to another game' : 'Add to a game'}</Text>
+              <ScrollView style={styles.sheetScroll}>
+                {games.filter(g => g.id !== attachTarget.fromGameId).map(g => (
+                  <TouchableOpacity key={g.id} style={styles.sheetRow} onPress={() => attachToGame(attachTarget.video, g)}>
+                    <Text style={styles.sheetRowText} numberOfLines={1}>{g.title}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity style={styles.sheetCancel} onPress={() => setAttachTarget(null)}>
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
 
       {pickerReel && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setPickerReel(null)}>
