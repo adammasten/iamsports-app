@@ -337,6 +337,16 @@ migrations. When you supersede something:
   the speed effect.
 - **`getFreshToken(forceRefresh)` mid-upload is required** — long uploads
   outlive the JWT. Never cache the token across an upload.
+- **BACKGROUND UPLOAD IS A LAUNCH PREREQUISITE (requirement, NOT yet
+  implemented).** Switching to another app mid-upload must not stop the
+  transfer. This existed once (commit `5f356cc`, `FileSystem.uploadAsync`
+  `sessionType: BACKGROUND`) and was removed **53 minutes later** by `b1fd23f`
+  in favour of the current chunked base64 TUS loop — which does **not** survive
+  backgrounding (a suspended JS runtime stalls the fetch loop). **Today's upload
+  does NOT background; this line is a requirement to restore, not a description
+  of current behavior.** Do not trade backgrounding away again. If a change to
+  the upload path would break (or keep broken) app-switch survival, say so before
+  making it.
 - **`followers` is RESERVED — zero app-code references (verified), but it now
   has full RLS policies.** Don't wire it, build on it, or delete it. Team
   membership (not followers) handles seeing teammates' content. Confirm with
