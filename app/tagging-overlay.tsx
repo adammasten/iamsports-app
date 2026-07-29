@@ -9,7 +9,8 @@ import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { useEvent } from 'expo';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { goBackOrHome } from '@/lib/nav';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -645,7 +646,7 @@ export default function TaggingOverlayScreen() {
             style={[styles.topBar, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
             pointerEvents="box-none"
           >
-            <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
+            <TouchableOpacity style={styles.backBtn} onPress={goBackOrHome} hitSlop={8}>
               <Text style={styles.backBtnText}>←</Text>
             </TouchableOpacity>
             {!isWatch && (

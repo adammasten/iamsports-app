@@ -1,6 +1,6 @@
 import { colors } from '@/constants/theme';
 import { SUPPORT_EMAIL, TERMS, TERMS_EFFECTIVE } from '@/constants/legal';
-import { router } from 'expo-router';
+import { goBackOrHome } from '@/lib/nav';
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -10,7 +10,7 @@ export default function TermsScreen() {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
-      <TouchableOpacity onPress={() => router.back()} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
+      <TouchableOpacity onPress={goBackOrHome} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
       <Text style={styles.title}>Terms of Use</Text>
       <Text style={styles.effective}>Effective {TERMS_EFFECTIVE}</Text>
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>

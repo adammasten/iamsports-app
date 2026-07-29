@@ -2,6 +2,7 @@ import { COACH_ROLES, useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
+import { goBackOrHome } from '@/lib/nav';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1043,7 +1044,7 @@ export default function MyWorkScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.topRow}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.back}>
+        <TouchableOpacity onPress={goBackOrHome} style={styles.back}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => router.push('/export')} style={styles.makeReelBtn}>

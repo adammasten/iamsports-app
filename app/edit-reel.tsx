@@ -1,6 +1,7 @@
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -50,7 +51,7 @@ export default function EditReelScreen() {
     (async () => {
       if (!reelId) { setLoading(false); return; }
       const { data: r, error } = await supabase.from('highlight_reels').select('id, name, team_id').eq('id', reelId).single();
-      if (error || !r) { Alert.alert('Error', error?.message ?? 'Reel not found'); router.back(); return; }
+      if (error || !r) { Alert.alert('Error', error?.message ?? 'Reel not found'); goBackOrHome(); return; }
       setName(r.name ?? '');
       setTeamId(r.team_id ?? '');
       const { data: rt } = await supabase.from('reel_tags').select('tag_id').eq('reel_id', reelId);
@@ -106,7 +107,7 @@ export default function EditReelScreen() {
       if (error) { Alert.alert('Error', error.message); setSaving(false); return; }
     }
     setSaving(false);
-    router.back();
+    goBackOrHome();
   }
 
   if (loading) {
@@ -119,7 +120,7 @@ export default function EditReelScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
-      <TouchableOpacity onPress={() => router.back()} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
+      <TouchableOpacity onPress={goBackOrHome} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
       <Text style={styles.title}>Edit reel</Text>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">

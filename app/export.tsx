@@ -5,6 +5,7 @@ import { clipMatchesGroup } from '@/lib/core/clip-filtering';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
+import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, FlatList, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
@@ -635,7 +636,7 @@ export default function ExportScreen() {
   if (step === 'games') {
     return (
       <View style={styles.container}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.back}>
+        <TouchableOpacity onPress={goBackOrHome} style={styles.back}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Export Highlights</Text>

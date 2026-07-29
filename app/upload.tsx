@@ -8,6 +8,7 @@ import {
 import { supabase } from '@/supabase';
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { router, useLocalSearchParams } from 'expo-router';
+import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -324,7 +325,7 @@ export default function UploadScreen() {
           {done.count === 1 && done.first ? (
             <TouchableOpacity
               style={[styles.saveBtn, styles.doneBtn]}
-              onPress={() => router.replace({ pathname: '/tagging-overlay', params: { videoId: done.first!.videoId, url: done.first!.url, label: done.first!.label, personal: '1' } })}
+              onPress={() => router.push({ pathname: '/tagging-overlay', params: { videoId: done.first!.videoId, url: done.first!.url, label: done.first!.label, personal: '1' } })}
             >
               <Text style={styles.saveBtnText}>Tag it now</Text>
             </TouchableOpacity>
@@ -338,7 +339,7 @@ export default function UploadScreen() {
           <TouchableOpacity style={[styles.doneOutlineBtn, styles.doneBtn]} onPress={() => router.replace('/my-work')}>
             <Text style={styles.doneOutlineText}>Go to Film Room</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.doneSecondary} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.doneSecondary} onPress={goBackOrHome}>
             <Text style={styles.doneSecondaryText}>Done</Text>
           </TouchableOpacity>
         </View>
@@ -361,7 +362,7 @@ export default function UploadScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
-      <TouchableOpacity onPress={() => router.back()} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
+      <TouchableOpacity onPress={goBackOrHome} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
       <Text style={styles.title}>Upload video</Text>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">

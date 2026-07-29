@@ -5,6 +5,7 @@ import { pendingFileSize, pickVideo, uploadVideoToBucket } from '@/lib/native/vi
 import { requirePermission } from './permissionGuard';
 import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
+import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
@@ -171,7 +172,7 @@ export default function GameScreen() {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={() => router.back()} style={styles.back}>
+      <TouchableOpacity onPress={goBackOrHome} style={styles.back}>
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
       <Text style={styles.title}>{title}</Text>

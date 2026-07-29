@@ -1,5 +1,6 @@
 import { supabase } from '@/supabase';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -87,7 +88,7 @@ export default function ClipsScreen() {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={() => router.back()} style={styles.back}>
+      <TouchableOpacity onPress={goBackOrHome} style={styles.back}>
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
       <Text style={styles.title}>{videoLabel} — Clips</Text>

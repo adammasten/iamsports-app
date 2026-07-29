@@ -1,7 +1,8 @@
 import { COACH_ROLES, useTeamContext } from '@/context';
 import { PERMISSIONS, resolvePermission, type PermissionKey, type PermissionMeta } from '@/lib/core/permissions';
 import { supabase } from '@/supabase';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -233,7 +234,7 @@ export default function TeamPermissionsScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}><Text style={styles.back}>← Back</Text></TouchableOpacity>
+        <TouchableOpacity onPress={goBackOrHome}><Text style={styles.back}>← Back</Text></TouchableOpacity>
         <View />
       </View>
       <Text style={styles.heading}>Team permissions</Text>

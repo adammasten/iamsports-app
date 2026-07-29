@@ -5,7 +5,8 @@ import {
 } from '@/lib/core/upload-meta';
 import { supabase } from '@/supabase';
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -95,7 +96,7 @@ export default function EditGameScreen() {
       const { data: g, error } = await supabase.from('games')
         .select('id, title, opponent, game_date, team_id, team_score, opponent_score, season_id, tournament_id')
         .eq('id', gameId).single();
-      if (error || !g) { Alert.alert('Error', error?.message ?? 'Game not found'); router.back(); return; }
+      if (error || !g) { Alert.alert('Error', error?.message ?? 'Game not found'); goBackOrHome(); return; }
 
       setOpponent(g.opponent ?? '');
       setVsAt(typeof g.title === 'string' && g.title.startsWith('at ') ? 'at' : 'vs');
@@ -205,7 +206,7 @@ export default function EditGameScreen() {
       if (vErr) { Alert.alert('Saved game, but its videos didn’t update', vErr.message); setSaving(false); return; }
 
       setSaving(false);
-      router.back();
+      goBackOrHome();
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Unknown');
       setSaving(false);
@@ -236,7 +237,7 @@ export default function EditGameScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
-      <TouchableOpacity onPress={() => router.back()} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
+      <TouchableOpacity onPress={goBackOrHome} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
       <Text style={styles.title}>Edit game</Text>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
