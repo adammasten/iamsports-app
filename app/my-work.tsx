@@ -52,7 +52,8 @@ type Postable = { contentType: 'reel' | 'clip' | 'video' | 'game'; contentId: st
 // A "game" in Film Room is derived from videos the user uploaded — there's no
 // owner column on games. Each Game carries its videos pre-grouped so the inline
 // expand can render without a second query.
-type GameVideo = { id: string; label: string; url: string; sortOrder: number; taggingComplete: boolean };
+type UploadStatus = 'uploading' | 'ready' | 'failed';
+type GameVideo = { id: string; label: string; url: string; sortOrder: number; taggingComplete: boolean; uploadStatus: UploadStatus };
 
 // A "Saved to My Film" bookmark, resolved for display via resolve_shared_content.
 type SavedEntry = {
@@ -242,7 +243,7 @@ export default function MyWorkScreen() {
     if (!userId) { setGames([]); setLooseVideos([]); return; }
     const { data, error } = await supabase
       .from('videos')
-      .select('id, label, url, sort_order, game_id, created_at, tagging_complete, event_type, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))')
+      .select('id, label, url, sort_order, game_id, created_at, tagging_complete, event_type, upload_status, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))')
       .eq('uploaded_by_user_id', userId);
     if (error) { Alert.alert('Error', error.message); return; }
 
@@ -251,7 +252,7 @@ export default function MyWorkScreen() {
     (data || []).forEach((row: any) => {
       // Loose footage: no game at all. Distinct bucket — never touches the map.
       if (row.game_id == null) {
-        loose.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true, createdAt: row.created_at });
+        loose.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true, uploadStatus: row.upload_status, createdAt: row.created_at });
         return;
       }
       const g = row.games;
@@ -276,7 +277,7 @@ export default function MyWorkScreen() {
         };
         byId.set(row.game_id, game);
       }
-      game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true });
+      game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true, uploadStatus: row.upload_status });
       // clips(count) embeds as [{ count: N }] on the video row; accumulate per game.
       game.clipCount += row.clips?.[0]?.count ?? 0;
       // First video that carries an event type sets the game's (game.tsx uploads
@@ -801,8 +802,8 @@ export default function MyWorkScreen() {
   }
 
   async function downloadGame(game: Game) {
-    const items = game.videos.filter(v => v.url).map(v => ({ key: v.url, filename: `${game.title} - ${v.label}` }));
-    if (items.length === 0) { Alert.alert('Download', 'This game has no videos yet.'); return; }
+    const items = game.videos.filter(v => v.url && v.uploadStatus === 'ready').map(v => ({ key: v.url, filename: `${game.title} - ${v.label}` }));
+    if (items.length === 0) { Alert.alert('Download', 'This game has no finished videos yet.'); return; }
     setDownloadingId(game.id);
     try {
       const { saved, failed } = await downloadMedia(items);
@@ -1083,17 +1084,24 @@ export default function MyWorkScreen() {
                     key={v.id}
                     style={styles.looseCard}
                     onLongPress={() => confirmDeleteVideo(v)}
-                    onPress={() => Alert.alert(v.label, undefined, [
-                      { text: 'Add to a game', onPress: () => openAttachPicker(v) },
-                      { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, personal: '1' } }) },
-                      { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
-                      { text: 'Cancel', style: 'cancel' },
-                    ])}
+                    onPress={() => v.uploadStatus !== 'ready'
+                      ? Alert.alert(v.label, v.uploadStatus === 'uploading' ? 'Still uploading — check back in a moment.' : 'This upload didn’t finish.', [
+                          { text: 'Delete', style: 'destructive', onPress: () => confirmDeleteVideo(v) },
+                          { text: 'Cancel', style: 'cancel' },
+                        ])
+                      : Alert.alert(v.label, undefined, [
+                          { text: 'Add to a game', onPress: () => openAttachPicker(v) },
+                          { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, personal: '1' } }) },
+                          { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
+                          { text: 'Cancel', style: 'cancel' },
+                        ])}
                   >
                     <View style={styles.looseThumb}><Ionicons name="videocam-outline" size={22} color="#888" /></View>
                     <View style={styles.cardBody}>
                       <Text style={styles.cardTitle} numberOfLines={1}>{v.label}</Text>
-                      <Text style={styles.cardMeta}>Not on a game yet</Text>
+                      <Text style={styles.cardMeta}>
+                        {v.uploadStatus === 'uploading' ? 'Uploading…' : v.uploadStatus === 'failed' ? 'Upload didn’t finish' : 'Not on a game yet'}
+                      </Text>
                     </View>
                     <Ionicons name="pricetag-outline" size={18} color="#534AB7" />
                   </TouchableOpacity>
@@ -1239,6 +1247,9 @@ export default function MyWorkScreen() {
                       <TouchableOpacity
                         style={[styles.gamePostBtn, { flex: 1 }]}
                         onPress={() => {
+                          // A shared game plays only its finalized videos (resolve_shared_game
+                          // filters to ready). Nothing ready yet → nothing to share.
+                          if (!game.videos.some(v => v.uploadStatus === 'ready')) { Alert.alert('Share', 'No finished videos to share yet.'); return; }
                           const item: Postable = { contentType: 'game', contentId: game.id, title: game.title };
                           game.destinations.length ? manageSharing(item, game.destinations) : confirmPostToWall(item);
                         }}
@@ -1261,11 +1272,11 @@ export default function MyWorkScreen() {
                               {/* Tap the circle or "Tagged" to toggle this video's
                                   tagging-complete. When every video is checked, the
                                   game card face turns green. */}
-                              <TouchableOpacity style={styles.videoCheck} onPress={() => toggleVideoComplete(v)} hitSlop={8}>
+                              <TouchableOpacity style={styles.videoCheck} onPress={() => v.uploadStatus === 'ready' && toggleVideoComplete(v)} disabled={v.uploadStatus !== 'ready'} hitSlop={8}>
                                 <Ionicons
                                   name={v.taggingComplete ? 'checkmark-circle' : 'ellipse-outline'}
                                   size={22}
-                                  color={v.taggingComplete ? TAG_STATUS.done : '#666'}
+                                  color={v.uploadStatus !== 'ready' ? '#bbb' : v.taggingComplete ? TAG_STATUS.done : '#666'}
                                 />
                                 <Text style={[styles.videoCheckLabel, v.taggingComplete && styles.videoCheckLabelDone]}>Tagged</Text>
                               </TouchableOpacity>
@@ -1273,21 +1284,28 @@ export default function MyWorkScreen() {
                                 style={styles.videoOptionsCell}
                                 activeOpacity={0.7}
                                 onLongPress={() => confirmDeleteVideo(v)}
-                                onPress={() => Alert.alert(v.label, undefined, [
-                                  { text: 'Tag video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } }) },
-                                  // Watch game: same player, view-only. `watch: '1'` suppresses all tag
-                                  // chrome in tagging-overlay — no new player, no divergent playback.
-                                  { text: 'Watch game', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, watch: '1' } }) },
-                                  { text: 'View clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
-                                  { text: 'Move to another game', onPress: () => openAttachPicker(v, game.id) },
-                                  { text: 'Remove from game', style: 'destructive', onPress: () => detachFromGame(v) },
-                                  { text: 'Cancel', style: 'cancel' },
-                                ])}
+                                onPress={() => v.uploadStatus !== 'ready'
+                                  ? Alert.alert(v.label, v.uploadStatus === 'uploading' ? 'Still uploading — check back in a moment.' : 'This upload didn’t finish.', [
+                                      { text: 'Delete video', style: 'destructive', onPress: () => confirmDeleteVideo(v) },
+                                      { text: 'Cancel', style: 'cancel' },
+                                    ])
+                                  : Alert.alert(v.label, undefined, [
+                                      { text: 'Tag video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } }) },
+                                      // Watch game: same player, view-only. `watch: '1'` suppresses all tag
+                                      // chrome in tagging-overlay — no new player, no divergent playback.
+                                      { text: 'Watch game', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, watch: '1' } }) },
+                                      { text: 'View clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
+                                      { text: 'Move to another game', onPress: () => openAttachPicker(v, game.id) },
+                                      { text: 'Remove from game', style: 'destructive', onPress: () => detachFromGame(v) },
+                                      { text: 'Cancel', style: 'cancel' },
+                                    ])}
                               >
                                 <Ionicons name="film-outline" size={18} color="#888" />
                                 <View style={styles.videoOptBody}>
                                   <Text style={styles.videoOptTitle} numberOfLines={1}>{v.label}</Text>
-                                  <Text style={styles.videoOptHint}>Tap for options • Hold to delete</Text>
+                                  <Text style={styles.videoOptHint}>
+                                    {v.uploadStatus === 'uploading' ? 'Uploading…' : v.uploadStatus === 'failed' ? 'Upload didn’t finish · tap to delete' : 'Tap for options • Hold to delete'}
+                                  </Text>
                                 </View>
                                 <Ionicons name="ellipsis-horizontal" size={18} color="#888" />
                               </TouchableOpacity>

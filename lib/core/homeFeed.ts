@@ -212,12 +212,16 @@ export async function loadContentFeed(
   if (vParts.length) {
     const { data, error } = await supabase
       .from('videos')
-      .select('id, label, url, created_at, event_type, team_id, player_id, game_id, games ( title, team_id, season_id, tournament_id, seasons ( name ), tournaments ( name ) )')
+      .select('id, label, url, created_at, event_type, team_id, player_id, game_id, upload_status, games ( title, team_id, season_id, tournament_id, seasons ( name ), tournaments ( name ) )')
       .or(vParts.join(','))
       .order('created_at', { ascending: false })
       .limit(FEED_FETCH_LIMIT);
     videoErr = error?.message ?? null;
     for (const v of (data || []) as any[]) {
+      // Only finalized videos belong in the feed — an 'uploading'/'failed' row has
+      // no playable object (would 404 at sign-media). Rows are newest-first, so a
+      // game item takes its newest READY quarter; a game with no ready video drops out.
+      if (v.upload_status !== 'ready') continue;
       const teamId = (v.team_id as string) ?? (v.games?.team_id as string) ?? '';
       if (v.game_id) {
         const key = `game:${v.game_id}`;

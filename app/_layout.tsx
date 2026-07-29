@@ -1,5 +1,6 @@
 import { TeamProvider, useTeamContext } from '@/context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { reconcilePendingUploads } from '@/lib/native/upload-reconcile';
 import { reconcile as reconcileVideoCache } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
@@ -176,6 +177,9 @@ export default function RootLayout() {
   // Independent of auth — runs once per app launch regardless of session state.
   useEffect(() => {
     reconcileVideoCache().catch(e => console.warn('[video-cache] reconcile failed:', e));
+    // Resolve videos left 'uploading' by a killed/backgrounded upload: size-verify
+    // and flip to 'ready', or mark stale stragglers 'failed'. Self-guards on session.
+    reconcilePendingUploads().catch(e => console.warn('[upload-reconcile] failed:', e));
   }, []);
 
   return (

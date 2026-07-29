@@ -450,10 +450,12 @@ export default function ExportScreen() {
 
     const { data: videos } = await supabase
       .from('videos')
-      .select('id, url, label, game_id')
+      .select('id, url, label, game_id, upload_status')
       .in('game_id', selectedGames);
     const videoMap: Record<string, any> = {};
-    (videos || []).forEach((v: any) => { videoMap[v.id] = v; });
+    // Only finalized videos can be exported — skip 'uploading'/'failed' (no complete
+    // object to cut from). Their clips are excluded downstream via videoIds.
+    (videos || []).forEach((v: any) => { if (v.upload_status === 'ready') videoMap[v.id] = v; });
     const videoIds = Object.keys(videoMap);
 
     if (videoIds.length === 0) {

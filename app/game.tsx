@@ -1,7 +1,7 @@
 import { useTeamContext } from '@/context';
 import { CacheStatus, getManifest, prefetch, remove as removeFromCache, subscribe } from '@/lib/native/video-cache';
 import { makeVideoLabel } from '@/lib/core/upload-meta';
-import { pickVideo, uploadVideoToBucket } from '@/lib/native/video-upload';
+import { pendingFileSize, pickVideo, uploadVideoToBucket } from '@/lib/native/video-upload';
 import { requirePermission } from './permissionGuard';
 import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -101,33 +101,50 @@ export default function GameScreen() {
     setUploading(true);
     setUploadProgress(0);
 
+    let newVideoId: string | null = null;
     try {
       const fileName = `game-${id}-${Date.now()}.mp4`;
       console.log('[Upload] Starting upload for', fileName);
 
-      await uploadVideoToBucket(fileName, pendingFile, setUploadProgress);
-
-      // Store the bare storage path (object key), not a public URL. The bucket
-      // is private; consumers mint a signed URL from this path via
-      // getSignedVideoUrl(). Matches the format existing rows were migrated to.
-      const { error } = await supabase.from('videos').insert({
+      // Row-first lifecycle: insert as 'uploading' with the expected byte size,
+      // upload, then flip to 'ready'. A killed upload leaves an 'uploading' row
+      // that reconciliation resolves — never a silent orphan. Store the bare
+      // storage object key in url (bucket is private; consumers sign via
+      // getSignedVideoUrl()).
+      const bytes = await pendingFileSize(pendingFile);
+      const { data: v, error } = await supabase.from('videos').insert({
         game_id: id,
         team_id: gameTeamId,
         uploaded_by_user_id: userId,
         url: fileName,
         label: finalLabel,
         sort_order: videos.length,
-      });
+        upload_status: 'uploading',
+        upload_bytes: bytes,
+      }).select('id').single();
+      if (error || !v) throw new Error(error?.message ?? 'Failed to save video');
+      newVideoId = v.id;
 
-      if (error) Alert.alert('Error', error.message);
-      else {
-        setJustUploaded(finalLabel);
-        fetchVideos();
-        setVideoLabel('');
-        setPendingFile(null);
-      }
+      await uploadVideoToBucket(fileName, pendingFile, setUploadProgress, bytes);
+
+      const { error: flipErr } = await supabase.from('videos')
+        .update({ upload_status: 'ready' }).eq('id', newVideoId);
+      // Non-fatal: the object is up, so reconciliation size-verifies and flips it.
+      if (flipErr) console.warn('[Upload] ready-flip failed, leaving for reconcile:', flipErr.message);
+
+      setJustUploaded(finalLabel);
+      fetchVideos();
+      setVideoLabel('');
+      setPendingFile(null);
     } catch (e: any) {
       console.error('[Upload] Catch error:', e);
+      // Surface the failure AND mark the row 'failed' (visible + deletable) so a
+      // half-upload never hides as a silent orphan. Invariant 5.
+      if (newVideoId) {
+        await supabase.from('videos').update({ upload_status: 'failed' }).eq('id', newVideoId)
+          .then(undefined, () => {});
+        fetchVideos();
+      }
       Alert.alert(
         'Upload Error',
         `${e?.message || 'Unknown'}\n${String(e?.stack || '').slice(0, 300)}`
@@ -219,19 +236,28 @@ export default function GameScreen() {
               <View style={styles.videoCard}>
                 <TouchableOpacity
                   style={styles.videoCardMain}
-                  onPress={() => Alert.alert(item.label, 'What would you like to do?', [
-                    { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: item.id, url: item.url, label: item.label } }) },
-                    { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: item.id, label: item.label } }) },
-                    { text: 'Cancel', style: 'cancel' }
-                  ])}
+                  onPress={() => item.upload_status && item.upload_status !== 'ready'
+                    ? Alert.alert(item.label, item.upload_status === 'uploading' ? 'Still uploading — check back in a moment.' : 'This upload didn’t finish.', [
+                        { text: 'Delete', style: 'destructive', onPress: () => deleteVideo(item.id) },
+                        { text: 'Cancel', style: 'cancel' },
+                      ])
+                    : Alert.alert(item.label, 'What would you like to do?', [
+                        { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: item.id, url: item.url, label: item.label } }) },
+                        { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: item.id, label: item.label } }) },
+                        { text: 'Cancel', style: 'cancel' }
+                      ])}
                   onLongPress={() => deleteVideo(item.id)}
                 >
                   <Text style={styles.videoLabel}>{item.label}</Text>
-                  <Text style={styles.videoHint}>Tap for options • Hold to delete</Text>
+                  <Text style={styles.videoHint}>
+                    {item.upload_status === 'uploading' ? 'Uploading…' : item.upload_status === 'failed' ? 'Upload didn’t finish · tap to delete' : 'Tap for options • Hold to delete'}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.cacheBadge, { backgroundColor: badge.bg }]}
                   onPress={() => {
+                    // A not-yet-finalized video has no object to cache — skip prefetch.
+                    if (item.upload_status && item.upload_status !== 'ready') return;
                     if (status === 'idle' || status === 'error') {
                       prefetch(item.id, item.url);
                     } else if (status === 'cached') {

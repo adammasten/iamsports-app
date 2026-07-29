@@ -231,15 +231,29 @@ async function uploadVideoMobile(
 export async function uploadVideoToBucket(
   fileName: string,
   pending: PendingFile,
-  onProgress: (pct: number) => void
+  onProgress: (pct: number) => void,
+  knownBytes?: number
 ): Promise<void> {
   if (pending.isWeb) {
     const token = await getFreshToken();
     await uploadVideoWeb(fileName, pending.file, token, onProgress);
   } else {
-    const info = await FileSystem.getInfoAsync(pending.uri, { size: true });
-    if (!info.exists) throw new Error('Could not access the selected video.');
-    const fileSize = (info as any).size as number;
+    const fileSize = knownBytes ?? (await pendingFileSize(pending));
     await uploadVideoMobile(fileName, pending.uri, fileSize, onProgress);
   }
 }
+// Byte size of a picked file, captured BEFORE upload so the caller can store it
+// on the pending videos row (upload_bytes). Reconciliation later verifies the
+// finalized object's content-length matches this exactly, so a partial/truncated
+// object can never be marked 'ready'. Cost: a single metadata stat on mobile (no
+// bytes read, no network round trip); instant on web (in-memory Blob.size).
+export async function pendingFileSize(pending: PendingFile): Promise<number> {
+  if (pending.isWeb) return pending.file.size;
+  // legacy getInfoAsync returns size by default; { size: true } isn't in its
+  // typed InfoOptions but is accepted at runtime (mirrors the prior call site).
+  const info = await FileSystem.getInfoAsync(pending.uri, { size: true } as any);
+  if (!info.exists) throw new Error('Could not access the selected video.');
+  return (info as any).size as number;
+}
+
+// Pass knownBytes (from pendingFileSize) to skip the mobile re-stat.

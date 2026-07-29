@@ -1,5 +1,5 @@
 import { useTeamContext } from '@/context';
-import { pickVideos, uploadVideoToBucket, type PendingFile } from '@/lib/native/video-upload';
+import { pendingFileSize, pickVideos, uploadVideoToBucket, type PendingFile } from '@/lib/native/video-upload';
 import { requirePermission } from './permissionGuard';
 import {
   defaultUploadTitle, dateToYMD, deriveResult, EVENT_TYPES, gameTitle, makeVideoLabel, NEW_TOURNAMENT, SEASON_TERMS, SPORTS,
@@ -225,9 +225,13 @@ export default function UploadScreen() {
       const vidLabel = makeVideoLabel(ctx.base, sort, files.length > 1 || startSortOrder > 0);
       setProgressText(`Video ${i + 1} of ${files.length}`);
       setProgress(0);
+      // Row-first lifecycle: insert as 'uploading' (with the expected byte size),
+      // upload, then flip to 'ready'. If the app dies mid-upload the row survives
+      // as 'uploading' and reconciliation resolves it — never a silent orphan.
+      let vid: string | null = null;
+      const fileName = `${ctx.teamId ? 'team' : 'personal'}-${userId}-${Date.now()}-${sort}.mp4`;
       try {
-        const fileName = `${ctx.teamId ? 'team' : 'personal'}-${userId}-${Date.now()}-${sort}.mp4`;
-        await uploadVideoToBucket(fileName, files[i], setProgress);
+        const bytes = await pendingFileSize(files[i]);
         const { data: v, error } = await supabase.from('videos').insert({
           game_id: ctx.gameId,
           team_id: ctx.teamId,
@@ -241,11 +245,26 @@ export default function UploadScreen() {
           event_date: ctx.eventDate,
           sport: ctx.sport,
           season_id: ctx.seasonId,
+          upload_status: 'uploading',
+          upload_bytes: bytes,
         }).select('id').single();
         if (error || !v) throw new Error(error?.message ?? 'Failed to save video');
+        vid = v.id;
+        await uploadVideoToBucket(fileName, files[i], setProgress, bytes);
+        const { error: flipErr } = await supabase.from('videos')
+          .update({ upload_status: 'ready' }).eq('id', vid);
+        // A failed flip is non-fatal: the object is up, so reconciliation will
+        // size-verify and mark it 'ready' on next app open.
+        if (flipErr) console.warn('[upload] ready-flip failed, leaving for reconcile:', flipErr.message);
         succeeded.push(vidLabel);
         if (!first) first = { videoId: v.id, url: fileName, label: vidLabel };
       } catch {
+        // Mark a created-but-unfinished row 'failed' (visible + deletable in Film
+        // Room). Invariant 5: surface, don't silently drop.
+        if (vid) {
+          await supabase.from('videos').update({ upload_status: 'failed' }).eq('id', vid)
+            .then(undefined, () => {});
+        }
         failed.push(vidLabel);
       }
     }
