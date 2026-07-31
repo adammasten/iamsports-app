@@ -120,10 +120,14 @@ export default function RosterScreen() {
   }
 
   function removePlaceholder(p: RosterPlayer) {
-    Alert.alert('Remove spot', `Remove “${p.name}” from the roster? This can’t be undone.`, [
+    if (!activeTeam) return;
+    Alert.alert('Remove from roster', `Remove “${p.name}” from this team’s roster?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
-        const { error } = await supabase.from('players').delete().eq('id', p.playerId);
+        // Guarded RPC: detaches from the team; only hard-deletes a truly blank
+        // placeholder. A kid with guardians/footage keeps everything — history
+        // is never destroyed here.
+        const { error } = await supabase.rpc('remove_roster_placeholder', { p_player_id: p.playerId, p_team_id: activeTeam.id });
         if (error) { Alert.alert('Error', error.message); return; }
         load();
       } },
