@@ -8,10 +8,13 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
 import { TeamLogo } from '@/components/team-logo';
+import { LoadError } from '@/components/load-error';
+import { withTimeout } from '@/lib/withTimeout';
 import ContentTypeBadge from './components/ContentTypeBadge';
 import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
 import { showContentActions } from './moderationActions';
@@ -56,6 +59,7 @@ export default function KidWallScreen() {
     storagePath: string | null; startTime: number | null; endTime: number | null;
   }[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxError, setInboxError] = useState<string | null>(null);
   // Wall — shares I posted for this kid (audience public/team).
   const [wall, setWall] = useState<{
     shareId: string; contentType: string; audience: string; teamName: string | null;
@@ -63,6 +67,7 @@ export default function KidWallScreen() {
     startTime: number | null; endTime: number | null;
   }[]>([]);
   const [wallLoading, setWallLoading] = useState(false);
+  const [wallError, setWallError] = useState<string | null>(null);
   // Save-to-wall tier picker.
   // The inbox item awaiting a visibility choice. Non-null = VisibilityPicker open.
   const [pendingItem, setPendingItem] = useState<typeof inbox[number] | null>(null);
@@ -215,14 +220,19 @@ export default function KidWallScreen() {
   async function loadInbox() {
     if (!playerId) return;
     setInboxLoading(true);
-    const { data: rows } = await supabase
-      .from('shares')
-      .select('id, content_type, content_id, shared_by_user_id, created_at')
-      .eq('target_player_id', playerId)
-      .eq('audience', 'player')
-      .eq('visible', true)
-      .eq('hidden_by_family', false)  // family-hidden posts drop off the kid's wall
-      .order('created_at', { ascending: false });
+    setInboxError(null);
+    let rows: any[] | null; let error: any;
+    try {
+      ({ data: rows, error } = await withTimeout(supabase
+        .from('shares')
+        .select('id, content_type, content_id, shared_by_user_id, created_at')
+        .eq('target_player_id', playerId)
+        .eq('audience', 'player')
+        .eq('visible', true)
+        .eq('hidden_by_family', false)  // family-hidden posts drop off the kid's wall
+        .order('created_at', { ascending: false })));
+    } catch (e: any) { setInboxError(e?.message || 'Couldn’t load shared items.'); setInboxLoading(false); return; }
+    if (error) { setInboxError(error.message); setInboxLoading(false); return; }
     const items = await Promise.all((rows || []).map(async (r: any) => {
       const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
       const c = Array.isArray(resolved) ? resolved[0] : null;
@@ -284,13 +294,18 @@ export default function KidWallScreen() {
   async function loadWall() {
     if (!playerId || !userId) return;
     setWallLoading(true);
-    const { data: rows } = await supabase
-      .from('shares')
-      .select('id, content_type, audience, team_id, created_at, teams ( name )')
-      .eq('target_player_id', playerId)
-      .eq('shared_by_user_id', userId)
-      .in('audience', ['player'])
-      .order('created_at', { ascending: false });
+    setWallError(null);
+    let rows: any[] | null; let error: any;
+    try {
+      ({ data: rows, error } = await withTimeout(supabase
+        .from('shares')
+        .select('id, content_type, audience, team_id, created_at, teams ( name )')
+        .eq('target_player_id', playerId)
+        .eq('shared_by_user_id', userId)
+        .in('audience', ['player'])
+        .order('created_at', { ascending: false })));
+    } catch (e: any) { setWallError(e?.message || 'Couldn’t load the wall.'); setWallLoading(false); return; }
+    if (error) { setWallError(error.message); setWallLoading(false); return; }
     const items = await Promise.all((rows || []).map(async (r: any) => {
       const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
       const c = Array.isArray(resolved) ? resolved[0] : null;
@@ -592,7 +607,7 @@ export default function KidWallScreen() {
           style={styles.avatarWrap}
         >
           {photoUri ? (
-            <Image source={{ uri: photoUri }} style={styles.avatarImage} />
+            <Image source={{ uri: photoUri }} style={styles.avatarImage} contentFit="cover" cachePolicy="memory-disk" transition={120} />
           ) : (
             <View style={[styles.avatar, { backgroundColor: teamColor(playerId || name) }]}>
               <Text style={styles.avatarText}>{initials(name)}</Text>
@@ -720,6 +735,8 @@ export default function KidWallScreen() {
         {selectedTab === 'shared' ? (
           inboxLoading ? (
             <ActivityIndicator size="large" color="#534AB7" />
+          ) : inboxError ? (
+            <LoadError message={inboxError} onRetry={loadInbox} />
           ) : inbox.length === 0 ? (
             <Text style={styles.empty}>Nothing shared yet</Text>
           ) : (
@@ -752,6 +769,8 @@ export default function KidWallScreen() {
         ) : selectedTab === 'wall' ? (
           wallLoading ? (
             <ActivityIndicator size="large" color="#534AB7" />
+          ) : wallError ? (
+            <LoadError message={wallError} onRetry={loadWall} />
           ) : wall.length === 0 ? (
             <Text style={styles.empty}>Nothing on the wall yet</Text>
           ) : (

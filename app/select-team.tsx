@@ -6,7 +6,8 @@ import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentTypeBadge from './components/ContentTypeBadge';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
@@ -339,7 +340,7 @@ export default function SelectTeamScreen() {
               onPress={() => router.push({ pathname: '/kid', params: { playerId: kid.player_id } })}
             >
               {kidPhotoUris[kid.player_id] ? (
-                <Image source={{ uri: kidPhotoUris[kid.player_id] }} style={styles.avatarImage} />
+                <Image source={{ uri: kidPhotoUris[kid.player_id] }} style={styles.avatarImage} contentFit="cover" cachePolicy="memory-disk" transition={120} />
               ) : (
                 <View style={[styles.avatar, { backgroundColor: teamColor(kid.player_id) }]}>
                   <Text style={styles.avatarText}>

@@ -217,7 +217,7 @@ async function runPrefetch(
   // bucket is private, so the bare path isn't directly fetchable. Cached-file
   // naming and the manifest are keyed by videoId and are unaffected; only the
   // fetch source changes.
-  const signedUrl = await getSignedVideoUrl(path);
+  const signedUrl = await getSignedVideoUrl(path, { forceRefresh: true });
   if (!signedUrl) {
     // Couldn't mint — abort without caching. Not fatal for the caller: the
     // players fall back to a freshly-minted URL for playback.

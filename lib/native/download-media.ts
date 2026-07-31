@@ -26,7 +26,7 @@ function safeName(name: string): string {
 }
 
 async function downloadOne(item: DownloadItem): Promise<void> {
-  const signed = await getSignedVideoUrl(item.key);
+  const signed = await getSignedVideoUrl(item.key, { forceRefresh: true });
   if (!signed) throw new Error(`No download link for ${item.filename}`);
   const filename = safeName(item.filename);
 

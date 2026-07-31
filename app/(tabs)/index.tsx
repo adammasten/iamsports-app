@@ -1,5 +1,7 @@
 import { COACH_ROLES, useTeamContext } from '@/context';
 import { TeamLogo } from '@/components/team-logo';
+import { LoadError } from '@/components/load-error';
+import { withTimeout } from '@/lib/withTimeout';
 import { pickAndUploadTeamLogo } from '@/lib/native/team-logo-upload';
 import { supabase } from '@/supabase';
 import { router } from 'expo-router';
@@ -52,6 +54,7 @@ export default function HomeScreen() {
   // app-home screen (select-team.tsx). Both use @/lib/core/homeFeed.
   const [posts, setPosts] = useState<WallPost[]>([]);
   const [wallLoading, setWallLoading] = useState(true);
+  const [wallError, setWallError] = useState<string | null>(null);
   const [visiblePosts, setVisiblePosts] = useState<FilterableItem[]>([]);
 
   // TEMP diagnostic panel (verify-on-device, remove after). Surfaces per-stage
@@ -116,14 +119,22 @@ export default function HomeScreen() {
   }, [posts]);
 
   async function loadHome() {
-    if (!activeTeam) { setPosts([]); setDebug(null); setWallLoading(false); return; }
+    if (!activeTeam) { setPosts([]); setDebug(null); setWallError(null); setWallLoading(false); return; }
     setWallLoading(true);
+    setWallError(null);
     // ONLY this team's own wall — scoped in @/lib/core/homeFeed (single source of
     // truth). No merge; the merged cross-team feed is the app-home screen's job.
-    const { posts: wall, debug: dbg } = await loadTeamWall(activeTeam.id);
-    setDebug(dbg);
-    setPosts(wall);
-    setWallLoading(false);
+    try {
+      const { posts: wall, debug: dbg } = await withTimeout(loadTeamWall(activeTeam.id));
+      setDebug(dbg);
+      if (dbg?.q1Err) { setWallError('Couldn’t load the wall. ' + dbg.q1Err); setPosts([]); }
+      else setPosts(wall);
+    } catch (e: any) {
+      setWallError(e?.message || 'Couldn’t load the wall.');
+      setPosts([]);
+    } finally {
+      setWallLoading(false);
+    }
   }
 
   const items = useMemo<FilterableItem[]>(
@@ -229,7 +240,7 @@ export default function HomeScreen() {
 
       {debugPanel}
 
-      <Text style={styles.subtitle}>This team’s wall.</Text>
+      <Text style={styles.subtitle}>The published team feed — watch-only. Make &amp; post from the Film Room.</Text>
 
       {/* Watch-only wall. Create a game via + (upload); manage games & make
           reels in the Film Room. */}
@@ -248,6 +259,8 @@ export default function HomeScreen() {
           <View style={[styles.content, visiblePosts.length > 0 && styles.contentTop]}>
             {wallLoading ? (
               <ActivityIndicator size="large" color="#534AB7" />
+            ) : wallError ? (
+              <LoadError message={wallError} onRetry={loadHome} />
             ) : posts.length === 0 ? (
               <Text style={styles.empty}>Nothing on this team’s wall yet.{'\n'}Post games or reels from Film Room.</Text>
             ) : visiblePosts.length === 0 ? (

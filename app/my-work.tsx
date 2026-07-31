@@ -8,6 +8,8 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Tex
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
 import { downloadMedia } from '@/lib/native/download-media';
+import { LoadError } from '@/components/load-error';
+import { withTimeout } from '@/lib/withTimeout';
 import { requirePermission } from './permissionGuard';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
@@ -145,6 +147,7 @@ export default function MyWorkScreen() {
   // fromGameId = the video's current game (null = loose); excluded from the picker.
   const [attachTarget, setAttachTarget] = useState<{ video: GameVideo; fromGameId: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Filtered+sorted items, produced by FilterBar (a FilterableItem subset; the
   // full Reel/Game is recovered via reelsById/gamesById for the card render).
   const [visibleReels, setVisibleReels] = useState<FilterableItem[]>([]);
@@ -180,17 +183,30 @@ export default function MyWorkScreen() {
   const [coachesReel, setCoachesReel] = useState<Postable | null>(null);
   const [teamWallChoice, setTeamWallChoice] = useState<{ item: Postable; teamId: string; teamName: string } | null>(null);
 
-  async function loadReels() {
-    if (!userId) { setReels([]); setLoading(false); return; }
-    setLoading(true);
+  // Reruns all three loaders; used by the error-state Retry button.
+  function reloadFilmRoom() { loadReels(); loadGames(); loadSaved(); }
 
-    // 1. My reels, newest first (creator-read RLS branch covers this).
-    const { data: reelRows, error } = await supabase
-      .from('highlight_reels')
-      .select('id, name, storage_path, duration_seconds, created_at')
-      .eq('created_by_user_id', userId)
-      .order('created_at', { ascending: false });
-    if (error) { Alert.alert('Error', error.message); setLoading(false); return; }
+  async function loadReels() {
+    if (!userId) { setReels([]); setLoadError(null); setLoading(false); return; }
+    setLoading(true);
+    setLoadError(null);
+
+    // 1. My reels, newest first (creator-read RLS branch covers this). loadReels
+    //    is the primary probe — a timeout/error here drives the screen's error
+    //    state (loadGames/loadSaved are secondary and still Alert on failure).
+    let reelRows: any[] | null; let error: any;
+    try {
+      ({ data: reelRows, error } = await withTimeout(
+        supabase
+          .from('highlight_reels')
+          .select('id, name, storage_path, duration_seconds, created_at')
+          .eq('created_by_user_id', userId)
+          .order('created_at', { ascending: false }),
+      ));
+    } catch (e: any) {
+      setLoadError(e?.message || 'Couldn’t load your Film Room.'); setLoading(false); return;
+    }
+    if (error) { setLoadError(error.message); setLoading(false); return; }
 
     const rows = reelRows || [];
     const reelIds = rows.map((r: any) => r.id);
@@ -1102,6 +1118,8 @@ export default function MyWorkScreen() {
       <View style={[styles.content, (visibleReels.length > 0 || looseVideos.length > 0) && styles.contentTop]}>
         {loading ? (
           <ActivityIndicator size="large" color="#534AB7" />
+        ) : loadError ? (
+          <LoadError message={loadError} onRetry={reloadFilmRoom} />
         ) : reels.length === 0 && games.length === 0 && looseVideos.length === 0 && savedItems.length === 0 ? (
           <Text style={styles.empty}>Nothing here yet. Export a reel or upload game film to see it.</Text>
         ) : (

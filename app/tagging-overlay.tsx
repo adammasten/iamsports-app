@@ -225,7 +225,7 @@ export default function TaggingOverlayScreen() {
   const loadSignedSource = useCallback(async () => {
     if (!remoteUrl) return;
     setSignFailed(false);
-    const signed = await getSignedVideoUrl(remoteUrl);
+    const signed = await getSignedVideoUrl(remoteUrl, { forceRefresh: true });
     // Bail if the component unmounted during the mint round-trip — calling into
     // a released player throws NativeSharedObjectNotFoundException.
     if (!isMountedRef.current) return;

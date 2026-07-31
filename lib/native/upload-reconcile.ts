@@ -59,7 +59,7 @@ export async function reconcilePendingUploads(): Promise<{ ready: number; failed
     // so fall through to the age check rather than guessing 'ready'.
     let complete = false;
     if (r.upload_bytes != null && r.url) {
-      const signed = await getSignedVideoUrl(r.url);
+      const signed = await getSignedVideoUrl(r.url, { forceRefresh: true });
       if (signed) {
         const size = await headContentLength(signed);
         complete = size != null && size === Number(r.upload_bytes);

@@ -80,7 +80,7 @@ export default function SharedViewerScreen() {
   useEffect(() => {
     (async () => {
       if (!storagePath) { setFailed(true); return; }
-      const url = await getSignedVideoUrl(storagePath);
+      const url = await getSignedVideoUrl(storagePath, { forceRefresh: true });
       if (!isMountedRef.current) return;
       if (!url) { setFailed(true); return; }
       try { player.replace(url); } catch (e) { console.warn('[shared-viewer] replace skipped:', e); }
