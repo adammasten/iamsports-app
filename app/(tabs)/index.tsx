@@ -1,4 +1,6 @@
 import { COACH_ROLES, useTeamContext } from '@/context';
+import { TeamLogo } from '@/components/team-logo';
+import { pickAndUploadTeamLogo } from '@/lib/native/team-logo-upload';
 import { supabase } from '@/supabase';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -28,8 +30,22 @@ const SORT_OPTIONS: DropdownOption[] = [
 // screen (select-team.tsx). This screen only renders + filters the result.
 
 export default function HomeScreen() {
-  const { activeTeam, activeRole, userId } = useTeamContext();
+  const { activeTeam, activeRole, userId, refreshTeams } = useTeamContext();
   const isCoach = !!activeRole && COACH_ROLES.includes(activeRole);
+  const [logoBusy, setLogoBusy] = useState(false);
+
+  async function changeLogo() {
+    if (!activeTeam) return;
+    try {
+      setLogoBusy(true);
+      const dest = await pickAndUploadTeamLogo(activeTeam.id);
+      if (dest) await refreshTeams();
+    } catch (e: any) {
+      Alert.alert('Logo error', e?.message ?? 'Could not set logo');
+    } finally {
+      setLogoBusy(false);
+    }
+  }
 
   // This is a TEAM page: the feed shows ONLY the active team's own wall (its
   // team-audience shares). The merged cross-team/cross-kid feed lives on the
@@ -198,7 +214,18 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <Text style={styles.heading} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{activeTeam.name}</Text>
+      <View style={styles.teamHeadingRow}>
+        {isCoach ? (
+          <TouchableOpacity onPress={changeLogo} disabled={logoBusy} activeOpacity={0.7} hitSlop={8}>
+            {logoBusy
+              ? <ActivityIndicator color="#b9b1e8" style={{ width: 40, height: 40 }} />
+              : <TeamLogo logoPath={activeTeam.logo_path} name={activeTeam.name} size={40} />}
+          </TouchableOpacity>
+        ) : (
+          <TeamLogo logoPath={activeTeam.logo_path} name={activeTeam.name} size={40} />
+        )}
+        <Text style={[styles.heading, { flexShrink: 1, marginBottom: 0 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{activeTeam.name}</Text>
+      </View>
 
       {debugPanel}
 
@@ -267,6 +294,7 @@ const styles = StyleSheet.create({
   signOut: { color: '#888', fontSize: 14 },
 
   heading: { color: '#fff', fontSize: 28, fontWeight: '700', letterSpacing: -0.3 },
+  teamHeadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 
   // TEMP diagnostic panel — remove after on-device verify.
   debugBox: { backgroundColor: '#3a2f00', borderColor: '#c8a400', borderWidth: 1, borderRadius: 8, padding: 10, marginVertical: 10, gap: 2 },

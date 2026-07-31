@@ -1,4 +1,5 @@
 import { useTeamContext } from '@/context';
+import { TeamLogo } from '@/components/team-logo';
 import { loadContentFeed, type ContentFeedDebug, type FeedItem } from '@/lib/core/homeFeed';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
@@ -370,11 +371,17 @@ export default function SelectTeamScreen() {
               style={styles.teamItem}
               onPress={() => selectTeam(team.team_id)}
             >
-              <View style={[styles.avatar, { backgroundColor: teamColor(team.team_id) }]}>
-                <Text style={styles.avatarText}>
-                  {team.name.trim().charAt(0).toUpperCase() || '🏀'}
-                </Text>
-              </View>
+              {team.logo_path ? (
+                <View style={{ marginBottom: 6 }}>
+                  <TeamLogo logoPath={team.logo_path} name={team.name} size={60} />
+                </View>
+              ) : (
+                <View style={[styles.avatar, { backgroundColor: teamColor(team.team_id) }]}>
+                  <Text style={styles.avatarText}>
+                    {team.name.trim().charAt(0).toUpperCase() || '🏀'}
+                  </Text>
+                </View>
+              )}
               <Text style={styles.teamName} numberOfLines={2}>{team.name}</Text>
               <Text style={styles.teamRole}>{team.role}</Text>
             </TouchableOpacity>

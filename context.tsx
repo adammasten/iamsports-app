@@ -25,6 +25,7 @@ export type UserTeamRow = {
   name: string;
   sport: string;
   role: Role;
+  logo_path: string | null;
 };
 
 export type UserKidRow = {
@@ -41,7 +42,7 @@ type TeamContext = {
   sessionResolved: boolean;
   membershipsLoaded: boolean;
   kidsLoaded: boolean;
-  activeTeam: { id: string; name: string; sport: string } | null;
+  activeTeam: { id: string; name: string; sport: string; logo_path: string | null } | null;
   activeRole: Role | null;
   userTeams: UserTeamRow[];
   userKids: UserKidRow[];
@@ -104,7 +105,7 @@ export function TeamProvider({ children }: { children: any }) {
     }
     const { data, error } = await supabase
       .from('team_memberships')
-      .select('role, teams ( id, name, sport )')
+      .select('role, teams ( id, name, sport, logo_path )')
       .eq('user_id', userId)
       .eq('status', 'confirmed');
     if (error || !data) {
@@ -119,6 +120,7 @@ export function TeamProvider({ children }: { children: any }) {
         name: r.teams.name,
         sport: r.teams.sport,
         role: r.role as Role,
+        logo_path: r.teams.logo_path ?? null,
       }));
     setUserTeams(flattened);
     setLoadedForUserId(userId);
@@ -174,7 +176,7 @@ export function TeamProvider({ children }: { children: any }) {
     ? userTeams.find(r => r.team_id === activeTeamId) ?? null
     : null;
   const activeTeam = teamRow
-    ? { id: teamRow.team_id, name: teamRow.name, sport: teamRow.sport }
+    ? { id: teamRow.team_id, name: teamRow.name, sport: teamRow.sport, logo_path: teamRow.logo_path }
     : null;
 
   // Highest-ranked role across all membership rows for the active team.

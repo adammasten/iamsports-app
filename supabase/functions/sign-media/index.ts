@@ -66,6 +66,12 @@ Deno.serve(async (req) => {
       const { data, error } = await asUser.rpc('authorize_photo_view', { p_player_id: playerId });
       if (error) return json({ error: 'Not allowed' }, 403);
       authedKey = data as string;
+    } else if (key.startsWith('team-logos/')) {
+      const teamId = key.split('/')[1];                 // team-logos/<teamId>/<file>
+      if (!teamId) return json({ error: 'Bad logo key' }, 400);
+      const { data, error } = await asUser.rpc('authorize_team_logo_view', { p_team_id: teamId });
+      if (error) return json({ error: 'Not allowed' }, 403);
+      authedKey = data as string;
     } else {
       const { data: vid } = await admin.from('videos').select('id').eq('url', key).maybeSingle();
       if (vid?.id) {
