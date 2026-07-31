@@ -8,7 +8,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
 import ContentTypeBadge from './components/ContentTypeBadge';
@@ -45,6 +45,8 @@ export default function KidWallScreen() {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [jerseyInput, setJerseyInput] = useState('');
   const [attaching, setAttaching] = useState(false);
+  const [guardians, setGuardians] = useState<{ user_id: string; name: string; relationship: string; is_you: boolean }[]>([]);
+  const [guardianCode, setGuardianCode] = useState<string | null>(null);
   // Inbox ("Shared with you") — player-audience shares targeting this kid.
   const [inbox, setInbox] = useState<{
     shareId: string; contentType: string; contentId: string;
@@ -114,6 +116,41 @@ export default function KidWallScreen() {
       .map((r: any) => ({ team_id: r.team_id, name: r.teams.name, jersey_number: r.jersey_number ?? null }));
     setKidTeams(rows);
   }
+
+  // Guardians of this kid + the invite code (guardians-only read via RLS/RPC).
+  async function loadGuardians() {
+    if (!playerId) return;
+    const [{ data: g }, { data: c }] = await Promise.all([
+      supabase.rpc('kid_guardians', { p_player_id: playerId }),
+      supabase.from('player_guardian_codes').select('code').eq('player_id', playerId).maybeSingle(),
+    ]);
+    setGuardians((g as any[]) ?? []);
+    setGuardianCode(c?.code ?? null);
+  }
+
+  function shareGuardianCode() {
+    if (!guardianCode) return;
+    Share.share({ message: `Add me as ${name || 'my kid'}’s guardian on IamSports — code: ${guardianCode}` });
+  }
+
+  function removeGuardian(targetUserId: string, targetName: string, isSelf: boolean) {
+    Alert.alert(
+      isSelf ? 'Leave' : 'Remove guardian',
+      isSelf ? `Remove yourself as ${name}’s guardian?` : `Remove ${targetName} from ${name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: isSelf ? 'Leave' : 'Remove', style: 'destructive', onPress: async () => {
+          const { error } = await supabase.rpc('remove_guardian', { p_player_id: playerId, p_guardian_user_id: targetUserId });
+          if (error) { Alert.alert('Error', error.message); return; }
+          if (isSelf) { await refreshKids(); goBackOrHome(); } else loadGuardians();
+        } },
+      ],
+    );
+  }
+
+  const amPrimary = guardians.some(g => g.is_you && g.relationship === 'parent');
+
+  useEffect(() => { loadGuardians(); }, [playerId]);
 
   useEffect(() => {
     loadTeams();
@@ -569,6 +606,48 @@ export default function KidWallScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Guardians — who manages this kid; share the code to add family. */}
+      {guardians.length > 0 && (
+        <View style={styles.guardiansBlock}>
+          <Text style={styles.guardiansTitle}>Guardians · {guardians.length} of 4</Text>
+          {guardians.map(g => (
+            <View key={g.user_id} style={styles.guardianRow}>
+              <Text style={styles.guardianName} numberOfLines={1}>
+                {g.name}{g.is_you ? ' (you)' : ''}{g.relationship === 'parent' ? ' · primary' : ''}
+              </Text>
+              {g.is_you
+                ? (g.relationship !== 'parent' && (
+                    <TouchableOpacity onPress={() => removeGuardian(g.user_id, g.name, true)} hitSlop={8}>
+                      <Text style={styles.gLeave}>Leave</Text>
+                    </TouchableOpacity>
+                  ))
+                : (amPrimary && (
+                    <TouchableOpacity onPress={() => removeGuardian(g.user_id, g.name, false)} hitSlop={8}>
+                      <Text style={styles.gRemove}>Remove</Text>
+                    </TouchableOpacity>
+                  ))}
+            </View>
+          ))}
+          {guardianCode && guardians.length < 4 ? (
+            <View style={styles.gCodeCard}>
+              <View style={styles.gCodeRow}>
+                <View>
+                  <Text style={styles.gCodeLabel}>Invite code</Text>
+                  <Text style={styles.gCodeBig}>{guardianCode}</Text>
+                </View>
+                <TouchableOpacity style={styles.gShareBtn} onPress={shareGuardianCode}>
+                  <Ionicons name="share-outline" size={15} color="#fff" />
+                  <Text style={styles.gShareText}>Share</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.gHint}>Share with a co-parent or grandparents so they can see {name || 'your kid'}’s film. Up to 4 guardians.</Text>
+            </View>
+          ) : guardians.length >= 4 ? (
+            <Text style={styles.gHint}>Guardian limit reached (4).</Text>
+          ) : null}
+        </View>
+      )}
+
       {/* Filter bar */}
       <ScrollView
         horizontal
@@ -736,4 +815,18 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#1a1a1a', borderRadius: 8, padding: 14, marginBottom: 18, fontSize: 16, borderWidth: 1, borderColor: '#333', color: '#fff' },
   saveBtn: { backgroundColor: '#534AB7', borderRadius: 8, padding: 16, alignItems: 'center', marginTop: 8 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+
+  guardiansBlock: { marginTop: 16, marginBottom: 8 },
+  guardiansTitle: { color: '#aaa', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  guardianRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#222' },
+  guardianName: { color: '#fff', fontSize: 15, fontWeight: '600', flex: 1 },
+  gLeave: { color: '#c0392b', fontWeight: '700', fontSize: 13 },
+  gRemove: { color: '#c0392b', fontWeight: '700', fontSize: 13 },
+  gCodeCard: { backgroundColor: '#141019', borderRadius: 12, padding: 14, marginTop: 12 },
+  gCodeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  gCodeLabel: { color: '#8b83e6', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  gCodeBig: { color: '#fff', fontSize: 26, fontWeight: '800', letterSpacing: 4, marginTop: 2 },
+  gShareBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#534AB7', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8 },
+  gShareText: { color: '#fff', fontWeight: '700' },
+  gHint: { color: '#888', fontSize: 12, lineHeight: 16, marginTop: 8 },
 });

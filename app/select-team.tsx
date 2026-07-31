@@ -348,6 +348,12 @@ export default function SelectTeamScreen() {
             </View>
             <Text style={styles.teamName}>Add kid</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.teamItem} onPress={() => router.push('/claim-kid')}>
+            <View style={[styles.avatar, styles.avatarAdd]}>
+              <Ionicons name="key-outline" size={24} color="#534AB7" />
+            </View>
+            <Text style={styles.teamName}>Have a code?</Text>
+          </TouchableOpacity>
         </ScrollView>
 
         <Text style={styles.sectionLabel}>Your teams</Text>
