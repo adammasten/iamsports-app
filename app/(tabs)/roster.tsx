@@ -14,7 +14,6 @@ type RosterPlayer = {
   name: string;
   jersey: string | null;
   guardianCount: number;
-  code: string | null;   // only present for a coach (all) or the user's own kid
   isMine: boolean;
 };
 
@@ -48,18 +47,13 @@ export default function RosterScreen() {
     const rows = (pt || []) as any[];
     const ids = rows.map(r => r.player_id);
 
-    const codeById = new Map<string, string>();
     const countById = new Map<string, number>();
     const mine = new Set<string>();
     if (ids.length) {
-      // guardian codes: RLS returns only rows we may read (coach → all team
-      // players; parent → own kid). Links: same shape (coach sees all; parent
-      // sees own), so counts are accurate for a coach and for the user's own kid.
-      const [{ data: codes }, { data: links }] = await Promise.all([
-        supabase.from('player_guardian_codes').select('player_id, code').in('player_id', ids),
-        supabase.from('parent_player_links').select('player_id, parent_user_id').in('player_id', ids),
-      ]);
-      (codes || []).forEach((c: any) => codeById.set(c.player_id, c.code));
+      // Guardian counts: RLS returns rows the user may read (coach → all team
+      // players; parent → own kid), so counts are accurate where we show them.
+      const { data: links } = await supabase
+        .from('parent_player_links').select('player_id, parent_user_id').in('player_id', ids);
       (links || []).forEach((l: any) => {
         countById.set(l.player_id, (countById.get(l.player_id) ?? 0) + 1);
         if (l.parent_user_id === userId) mine.add(l.player_id);
@@ -72,7 +66,6 @@ export default function RosterScreen() {
         name: r.players?.name ?? 'Unnamed',
         jersey: r.jersey_number ?? null,
         guardianCount: countById.get(r.player_id) ?? 0,
-        code: codeById.get(r.player_id) ?? null,
         isMine: mine.has(r.player_id),
       }))
       .sort((a, b) => a.name.localeCompare(b.name)));
@@ -174,12 +167,6 @@ export default function RosterScreen() {
                     {p.guardianCount === 0 ? 'Unclaimed' : `${p.guardianCount} guardian${p.guardianCount === 1 ? '' : 's'}`}
                     {p.isMine ? ' · yours' : ''}
                   </Text>
-                )}
-
-                {isCoach && p.code && (
-                  <TouchableOpacity onPress={() => shareCode(`${p.name}'s IamSports code`, p.code!)}>
-                    <Text style={styles.codeSmall}>Code {p.code} · Share</Text>
-                  </TouchableOpacity>
                 )}
               </View>
 
