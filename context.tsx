@@ -130,9 +130,9 @@ export function TeamProvider({ children }: { children: any }) {
 
   // Read parent_player_links joined to players for the current user — the kids
   // this user is a guardian of. Mirrors refreshTeams exactly.
-  // NOTE: the nested players select is subject to players_read RLS, so a kid
-  // whose team this user is NOT a confirmed member of will be filtered out
-  // (players_read has no linked-parent branch).
+  // NOTE: the nested players select is subject to players_read RLS, which has an
+  // `OR is_linked_parent(id)` branch, so a guardian reads their kid's row even
+  // on a team they are NOT a member of (the parent-only, no-team case works).
   const refreshKids = useCallback(async () => {
     if (!userId) {
       setUserKids([]);
