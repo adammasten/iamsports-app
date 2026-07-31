@@ -132,6 +132,22 @@ export default function RosterScreen() {
 
   const shareCode = (label: string, code: string) => Share.share({ message: `${label}: ${code}` });
 
+  function resetTeamCode() {
+    if (!activeTeam) return;
+    Alert.alert(
+      'Reset team code?',
+      'The current code stops working immediately. Anyone who has the old one can’t join until you share the new code.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reset', style: 'destructive', onPress: async () => {
+          const { data, error } = await supabase.rpc('regenerate_team_code', { p_team_id: activeTeam.id });
+          if (error) { Alert.alert('Reset', error.message); return; }
+          setTeamCode(data as string);
+        } },
+      ],
+    );
+  }
+
   if (!activeTeam) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
@@ -150,9 +166,14 @@ export default function RosterScreen() {
           <Text style={styles.codeCardLabel}>Team join code</Text>
           <View style={styles.codeRow}>
             <Text style={styles.codeBig}>{teamCode}</Text>
-            <TouchableOpacity style={styles.shareBtn} onPress={() => shareCode(`Join ${activeTeam.name} on IamSports`, teamCode)}>
-              <Text style={styles.shareBtnText}>Share</Text>
-            </TouchableOpacity>
+            <View style={styles.codeBtns}>
+              <TouchableOpacity style={styles.shareBtn} onPress={() => shareCode(`Join ${activeTeam.name} on IamSports`, teamCode)}>
+                <Text style={styles.shareBtnText}>Share</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.resetBtn} onPress={resetTeamCode}>
+                <Text style={styles.resetBtnText}>Reset</Text>
+              </TouchableOpacity>
+            </View>
           </View>
           <Text style={styles.hint}>A parent enters this on their kid’s profile to join the team.</Text>
         </View>
@@ -253,8 +274,11 @@ const styles = StyleSheet.create({
   codeCardLabel: { fontSize: 13, fontWeight: '700', color: '#534AB7', textTransform: 'uppercase', letterSpacing: 0.5 },
   codeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
   codeBig: { fontSize: 30, fontWeight: '800', letterSpacing: 4, color: '#1a1a1a' },
+  codeBtns: { flexDirection: 'row', gap: 8 },
   shareBtn: { backgroundColor: '#534AB7', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   shareBtnText: { color: '#fff', fontWeight: '700' },
+  resetBtn: { backgroundColor: '#eee', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  resetBtnText: { color: '#555', fontWeight: '700' },
   hint: { fontSize: 12, color: '#888', marginTop: 8, lineHeight: 16 },
 
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e5e5', gap: 12 },

@@ -133,6 +133,21 @@ export default function KidWallScreen() {
     Share.share({ message: `Add me as ${name || 'my kid'}’s guardian on IamSports — code: ${guardianCode}` });
   }
 
+  function resetGuardianCode() {
+    Alert.alert(
+      'Reset invite code?',
+      'The current code stops working immediately. Anyone you shared it with can’t be added until you share the new one.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reset', style: 'destructive', onPress: async () => {
+          const { data, error } = await supabase.rpc('regenerate_guardian_code', { p_player_id: playerId });
+          if (error) { Alert.alert('Reset', error.message); return; }
+          setGuardianCode(data as string);
+        } },
+      ],
+    );
+  }
+
   function removeGuardian(targetUserId: string, targetName: string, isSelf: boolean) {
     Alert.alert(
       isSelf ? 'Leave' : 'Remove guardian',
@@ -641,6 +656,9 @@ export default function KidWallScreen() {
                 </TouchableOpacity>
               </View>
               <Text style={styles.gHint}>Share with a co-parent or grandparents so they can see {name || 'your kid'}’s film. Up to 4 guardians.</Text>
+              <TouchableOpacity onPress={resetGuardianCode} hitSlop={6}>
+                <Text style={styles.gReset}>Reset code</Text>
+              </TouchableOpacity>
             </View>
           ) : guardians.length >= 4 ? (
             <Text style={styles.gHint}>Guardian limit reached (4).</Text>
@@ -829,4 +847,5 @@ const styles = StyleSheet.create({
   gShareBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#534AB7', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8 },
   gShareText: { color: '#fff', fontWeight: '700' },
   gHint: { color: '#888', fontSize: 12, lineHeight: 16, marginTop: 8 },
+  gReset: { color: '#8b83e6', fontWeight: '700', fontSize: 13, marginTop: 10 },
 });
