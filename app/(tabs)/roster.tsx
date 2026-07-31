@@ -24,6 +24,7 @@ export default function RosterScreen() {
 
   const [players, setPlayers] = useState<RosterPlayer[]>([]);
   const [teamCode, setTeamCode] = useState<string | null>(null);
+  const [dupes, setDupes] = useState<{ keep_id: string; keep_name: string; dup_id: string; dup_name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
@@ -69,8 +70,30 @@ export default function RosterScreen() {
         isMine: mine.has(r.player_id),
       }))
       .sort((a, b) => a.name.localeCompare(b.name)));
+
+    // Coach-only: possible-duplicate suggestions (RPC is coach-gated; a non-coach
+    // just gets an error → empty list).
+    const { data: d } = await supabase.rpc('suggest_duplicate_players', { p_team_id: teamId });
+    setDupes((d as any[]) ?? []);
     setLoading(false);
   }, [activeTeam, userId]);
+
+  function mergeDupe(d: { keep_id: string; keep_name: string; dup_id: string; dup_name: string }) {
+    Alert.alert(
+      'Merge players',
+      `“${d.keep_name}” and “${d.dup_name}” might be the same player. Which name should stay?`,
+      [
+        { text: `Keep ${d.keep_name}`, onPress: () => doMerge(d.keep_id, d.dup_id) },
+        { text: `Keep ${d.dup_name}`, onPress: () => doMerge(d.dup_id, d.keep_id) },
+        { text: 'Not duplicates', style: 'cancel' },
+      ],
+    );
+  }
+  async function doMerge(keep: string, dup: string) {
+    const { error } = await supabase.rpc('merge_players', { p_keep: keep, p_dup: dup });
+    if (error) { Alert.alert('Merge', error.message); return; }
+    load();
+  }
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -132,6 +155,18 @@ export default function RosterScreen() {
             </TouchableOpacity>
           </View>
           <Text style={styles.hint}>A parent enters this on their kid’s profile to join the team.</Text>
+        </View>
+      )}
+
+      {isCoach && dupes.length > 0 && (
+        <View style={styles.dupeCard}>
+          <Text style={styles.dupeTitle}>Possible duplicates</Text>
+          {dupes.map((d, i) => (
+            <TouchableOpacity key={i} style={styles.dupeRow} onPress={() => mergeDupe(d)}>
+              <Text style={styles.dupeText} numberOfLines={1}>{d.keep_name} · {d.dup_name}</Text>
+              <Text style={styles.dupeMerge}>Merge</Text>
+            </TouchableOpacity>
+          ))}
         </View>
       )}
 
@@ -241,4 +276,10 @@ const styles = StyleSheet.create({
   btnPrimaryText: { fontWeight: '700', color: '#fff' },
   addRow: { marginTop: 16, paddingVertical: 14, borderRadius: 10, borderWidth: 1, borderColor: '#534AB7', borderStyle: 'dashed', alignItems: 'center' },
   addRowText: { color: '#534AB7', fontWeight: '700', fontSize: 15 },
+
+  dupeCard: { backgroundColor: '#fff7ed', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#f5c890' },
+  dupeTitle: { color: '#b06a1a', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  dupeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+  dupeText: { color: '#333', fontSize: 15, fontWeight: '600', flex: 1 },
+  dupeMerge: { color: '#534AB7', fontWeight: '800', fontSize: 14 },
 });
