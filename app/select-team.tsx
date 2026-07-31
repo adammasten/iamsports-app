@@ -116,6 +116,13 @@ export default function SelectTeamScreen() {
   // player-scoped items (Event & Season need 2+ to partition; Tournament with 1).
   const extraFilters = useMemo(() => {
     const out: { key: string; label: string; options: DropdownOption[] }[] = [];
+    // Year — the load-bearing axis for a multi-year archive. Derived from each
+    // item's date so it spans games, reels, and loose footage alike. Only shown
+    // once content spans 2+ years.
+    const years = new Set(scopedItems.map(it => new Date(it.createdAt).getFullYear().toString()));
+    if (years.size >= 2) {
+      out.push({ key: 'year', label: 'Year', options: [{ value: 'all', label: 'All years' }, ...[...years].sort().reverse().map(y => ({ value: y, label: y }))] });
+    }
     const events = new Set(scopedItems.map(it => it.eventType).filter(Boolean) as string[]);
     if (events.size >= 2) {
       out.push({ key: 'eventType', label: 'Event', options: [{ value: 'all', label: 'All events' }, ...[...events].map(v => ({ value: v, label: v }))] });
@@ -140,7 +147,7 @@ export default function SelectTeamScreen() {
       id: it.key, teamId: it.teamId, teamName: teamNameById.get(it.teamId) ?? '',
       contentType: it.kind === 'reel' ? 'reel' : 'video',
       title: it.title, createdAt: it.createdAt, durationSeconds: it.durationSeconds,
-      extra: { eventType: it.eventType ?? '', seasonId: it.seasonId ?? '', tournamentId: it.tournamentId ?? '' },
+      extra: { year: new Date(it.createdAt).getFullYear().toString(), eventType: it.eventType ?? '', seasonId: it.seasonId ?? '', tournamentId: it.tournamentId ?? '' },
     })),
     [scopedItems, teamNameById],
   );
