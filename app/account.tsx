@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { toggleDebug } from '@/lib/debug-flag';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Account controls. Two very different "leaving" paths, deliberately ranked:
@@ -65,7 +66,11 @@ export default function AccountScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
       <TouchableOpacity onPress={goBackOrHome} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
-      <Text style={styles.title}>Account</Text>
+      {/* Hidden long-press toggles the diagnostic overlays (works in preview
+          builds, where __DEV__ is compiled out). */}
+      <TouchableOpacity onLongPress={() => Alert.alert('Debug overlays', toggleDebug() ? 'On' : 'Off')} delayLongPress={800} activeOpacity={1}>
+        <Text style={styles.title}>Account</Text>
+      </TouchableOpacity>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
         {/* Friendly, reversible — the one we want people to reach for. */}

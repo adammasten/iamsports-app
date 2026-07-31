@@ -25,6 +25,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const BUCKET = 'Videos';
 const TTL_SECONDS = 60 * 60 * 3; // 3h — matches the old client helper (covers a session)
+// Avatars/logos render at 40-84px; a 256px square (cover) covers ~3x retina and
+// is a fraction of the full upload's bytes. Applied ONLY to image keys.
+const IMAGE_TRANSFORM = { width: 256, height: 256, resize: 'cover' };
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -59,6 +62,7 @@ Deno.serve(async (req) => {
     // Resolve the key → content family, then authorize AS THE CALLER. The gate
     // returns the authoritative key to sign, or errors (→ 403 fail-closed).
     let authedKey: string | null = null;
+    let isImage = false; // image keys get a resize transform; videos/reels don't
 
     if (key.startsWith('kid-photos/')) {
       const playerId = key.split('/')[1];               // kid-photos/<playerId>/<file>
@@ -66,12 +70,14 @@ Deno.serve(async (req) => {
       const { data, error } = await asUser.rpc('authorize_photo_view', { p_player_id: playerId });
       if (error) return json({ error: 'Not allowed' }, 403);
       authedKey = data as string;
+      isImage = true;
     } else if (key.startsWith('team-logos/')) {
       const teamId = key.split('/')[1];                 // team-logos/<teamId>/<file>
       if (!teamId) return json({ error: 'Bad logo key' }, 400);
       const { data, error } = await asUser.rpc('authorize_team_logo_view', { p_team_id: teamId });
       if (error) return json({ error: 'Not allowed' }, 403);
       authedKey = data as string;
+      isImage = true;
     } else {
       const { data: vid } = await admin.from('videos').select('id').eq('url', key).maybeSingle();
       if (vid?.id) {
@@ -90,9 +96,11 @@ Deno.serve(async (req) => {
 
     if (!authedKey) return json({ error: 'Unknown media key' }, 404);
 
-    // Sign ONLY what the gate returned.
+    // Sign ONLY what the gate returned. Image keys get a resize transform so
+    // avatars/logos ship ~256px instead of the full-res upload.
+    const signOpts = isImage ? { transform: IMAGE_TRANSFORM } : undefined;
     const { data: signed, error: signErr } =
-      await admin.storage.from(BUCKET).createSignedUrl(authedKey, TTL_SECONDS);
+      await admin.storage.from(BUCKET).createSignedUrl(authedKey, TTL_SECONDS, signOpts);
     if (signErr || !signed) return json({ error: 'Could not sign' }, 500);
 
     return json({ url: signed.signedUrl });

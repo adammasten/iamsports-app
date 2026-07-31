@@ -1,6 +1,8 @@
 import { COACH_ROLES, useTeamContext } from '@/context';
 import { TeamLogo } from '@/components/team-logo';
 import { LoadError } from '@/components/load-error';
+import { SkeletonCards } from '@/components/skeleton-cards';
+import { DebugPanel } from '@/components/debug-panel';
 import { withTimeout } from '@/lib/withTimeout';
 import { pickAndUploadTeamLogo } from '@/lib/native/team-logo-upload';
 import { supabase } from '@/supabase';
@@ -185,12 +187,14 @@ export default function HomeScreen() {
 
   // TEMP diagnostic — rendered in BOTH the no-team gate and the feed so the
   // numbers show regardless of whether activeTeam resolved. Remove after verify.
-  const debugPanel = __DEV__ && debug ? (
-    <View style={styles.debugBox}>
-      <Text style={styles.debugTitle}>▶ SCREEN: (tabs)/index.tsx — TEAM page ({activeTeam?.name ?? '—'})</Text>
-      <Text style={styles.debugText}>team wall rows: {debug.q1Rows}{debug.q1Err ? `  ⛔ ${debug.q1Err}` : ''}</Text>
-      <Text style={styles.debugText}>final after dedup: {debug.final}</Text>
-    </View>
+  const debugPanel = debug ? (
+    <DebugPanel
+      title={`SCREEN: (tabs)/index.tsx — TEAM page (${activeTeam?.name ?? '—'})`}
+      lines={[
+        `team wall rows: ${debug.q1Rows}${debug.q1Err ? `  ⛔ ${debug.q1Err}` : ''}`,
+        `final after dedup: ${debug.final}`,
+      ]}
+    />
   ) : null;
 
   if (!activeTeam) {
@@ -258,7 +262,7 @@ export default function HomeScreen() {
 
           <View style={[styles.content, visiblePosts.length > 0 && styles.contentTop]}>
             {wallLoading ? (
-              <ActivityIndicator size="large" color="#534AB7" />
+              <SkeletonCards />
             ) : wallError ? (
               <LoadError message={wallError} onRetry={loadHome} />
             ) : posts.length === 0 ? (

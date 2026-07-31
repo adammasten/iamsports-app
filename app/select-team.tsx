@@ -1,12 +1,14 @@
 import { useTeamContext } from '@/context';
 import { TeamLogo } from '@/components/team-logo';
+import { SkeletonCards } from '@/components/skeleton-cards';
+import { DebugPanel } from '@/components/debug-panel';
 import { loadContentFeed, type ContentFeedDebug, type FeedItem } from '@/lib/core/homeFeed';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentTypeBadge from './components/ContentTypeBadge';
@@ -436,19 +438,21 @@ export default function SelectTeamScreen() {
           <Text style={styles.feedError}>Couldn’t load everything: {feedDebug.videoErr || feedDebug.reelErr || feedDebug.kidShareErr}</Text>
         ) : null}
 
-        {__DEV__ && feedDebug ? (
-          <View style={styles.debugBox}>
-            <Text style={styles.debugTitle}>▶ SCREEN: select-team.tsx (app-home)</Text>
-            <Text style={styles.debugText}>userTeams {userTeams.length} · userKids {userKids.length}</Text>
-            <Text style={styles.debugText}>games+loose: {feedDebug.videoRows}{feedDebug.videoErr ? `  ⛔ ${feedDebug.videoErr}` : ''}</Text>
-            <Text style={styles.debugText}>reels: {feedDebug.reelRows}{feedDebug.reelErr ? `  ⛔ ${feedDebug.reelErr}` : ''}</Text>
-            <Text style={styles.debugText}>kid-wall shares: {feedDebug.kidShareRows}{feedDebug.kidShareErr ? `  ⛔ ${feedDebug.kidShareErr}` : ''}</Text>
-            <Text style={styles.debugText}>player {selectedPlayer === 'all' ? 'All' : (playerOptions.find(o => o.value === selectedPlayer)?.label ?? '?')} · visible {visible.length}</Text>
-          </View>
+        {feedDebug ? (
+          <DebugPanel
+            title="SCREEN: select-team.tsx (app-home)"
+            lines={[
+              `userTeams ${userTeams.length} · userKids ${userKids.length}`,
+              `games+loose: ${feedDebug.videoRows}${feedDebug.videoErr ? `  ⛔ ${feedDebug.videoErr}` : ''}`,
+              `reels: ${feedDebug.reelRows}${feedDebug.reelErr ? `  ⛔ ${feedDebug.reelErr}` : ''}`,
+              `kid-wall shares: ${feedDebug.kidShareRows}${feedDebug.kidShareErr ? `  ⛔ ${feedDebug.kidShareErr}` : ''}`,
+              `player ${selectedPlayer === 'all' ? 'All' : (playerOptions.find(o => o.value === selectedPlayer)?.label ?? '?')} · visible ${visible.length}`,
+            ]}
+          />
         ) : null}
 
         {feedLoading ? (
-          <ActivityIndicator size="large" color="#534AB7" style={{ marginTop: 30 }} />
+          <SkeletonCards />
         ) : visible.length === 0 ? (
           <View style={styles.feedPlaceholder}>
             <Text style={styles.feedPlaceholderText}>

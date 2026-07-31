@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
 import { downloadMedia } from '@/lib/native/download-media';
 import { LoadError } from '@/components/load-error';
+import { SkeletonCards } from '@/components/skeleton-cards';
 import { withTimeout } from '@/lib/withTimeout';
 import { requirePermission } from './permissionGuard';
 import { type DropdownOption } from './components/Dropdown';
@@ -1101,7 +1102,7 @@ export default function MyWorkScreen() {
       </View>
 
       <Text style={styles.title}>Film Room</Text>
-      <Text style={styles.subtitle}>Your workbench. Everything you’ve made — games and reels. Tap “Share” to post to your kid’s wall or share with a team, “Manage sharing” to change where it lives.</Text>
+      <Text style={styles.subtitle}>Your workbench — tag film, build reels, and share them out.</Text>
 
       <FilterBar
         items={items}
@@ -1117,7 +1118,7 @@ export default function MyWorkScreen() {
 
       <View style={[styles.content, (visibleReels.length > 0 || looseVideos.length > 0) && styles.contentTop]}>
         {loading ? (
-          <ActivityIndicator size="large" color="#534AB7" />
+          <SkeletonCards />
         ) : loadError ? (
           <LoadError message={loadError} onRetry={reloadFilmRoom} />
         ) : reels.length === 0 && games.length === 0 && looseVideos.length === 0 && savedItems.length === 0 ? (
