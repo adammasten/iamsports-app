@@ -186,7 +186,7 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.replace('/select-team')}>
-          <Text style={styles.switchBtn}>← Switch team</Text>
+          <Text style={styles.switchBtn}>← Back</Text>
         </TouchableOpacity>
         <View style={styles.headerRight}>
           {isCoach ? (

@@ -19,7 +19,7 @@ import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-g
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// Mirrors app/tagging.tsx, app/(tabs)/tags.tsx, app/export.tsx — per CLAUDE.md,
+// Mirrors app/(tabs)/tags.tsx, app/export.tsx, app/edit-reel.tsx — per CLAUDE.md,
 // the category list is a hardcoded literal across multiple files. Keep in sync.
 const CATEGORIES = [
   { key: 'offense', label: 'Offense', color: '#1a6fd4', bg: '#e8f0fe' },
@@ -287,7 +287,7 @@ export default function TaggingOverlayScreen() {
 
   // V3 tag scope is global | team only. Global tags are visible to every team;
   // team tags are visible only to memberships of activeTeam. The .or(...)
-  // expression must match app/tagging.tsx exactly — per CLAUDE.md, getting it
+  // expression must stay exactly this — per CLAUDE.md, getting it
   // wrong silently leaks tags across teams.
   useEffect(() => {
     let cancelled = false;
@@ -492,7 +492,7 @@ export default function TaggingOverlayScreen() {
   const TOOLTIP_WIDTH = 50;
   const tooltipLeft = Math.max(0, Math.min(barWidth - TOOLTIP_WIDTH, thumbX - TOOLTIP_WIDTH / 2));
 
-  // Mirrors app/tagging.tsx:123-190 verbatim. The bundle_number contract
+  // The bundle_number contract
   // (clip-level = 0, bundles[idx] = idx + 1) is what app/export.tsx's
   // clipMatchesGroup relies on — off-by-one here silently breaks bundle
   // attribution in exports. Reset only on the success path (Alert OK).
