@@ -6,7 +6,8 @@
 //
 // Deletion scope:
 //   • Truly-personal uploads (no game AND no team) → deleted (clips cascade).
-//   • The user's reels → deleted.
+//   • Truly-personal reels (no team) → deleted. Team reels are team-owned and
+//     STAY (created_by_user_id nulled via ON DELETE SET NULL), like team film.
 //   • Teams the user CREATED (created_by is NOT NULL / ON DELETE RESTRICT):
 //       - if another confirmed member exists → transfer ownership to them
 //         (keeps the team + its film alive for everyone else);
@@ -52,8 +53,9 @@ Deno.serve(async (req) => {
     await admin.from('videos').delete()
       .eq('uploaded_by_user_id', userId).is('game_id', null).is('team_id', null);
 
-    // 2. The user's reels.
-    await admin.from('highlight_reels').delete().eq('created_by_user_id', userId);
+    // 2. Truly-personal reels (no team). Team reels are team-owned: LEFT IN PLACE;
+    //    deleting the auth user nulls created_by_user_id (ON DELETE SET NULL).
+    await admin.from('highlight_reels').delete().eq('created_by_user_id', userId).is('team_id', null);
 
     // 3. Teams the user created — transfer to a co-member, else delete solo team.
     const { data: ownedTeams } = await admin.from('teams').select('id').eq('created_by_user_id', userId);
