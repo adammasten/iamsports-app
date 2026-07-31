@@ -5,23 +5,29 @@
 -- the shared team code (co-guardians use the per-kid code), so a stranger holding
 -- the team code can't attach themselves to someone else's child.
 
+-- Returns { team_id, team_name, players: [{player_id, first_name, jersey, claimed}] }
+-- as one JSON object, so a brand-new team with an empty roster still returns the
+-- team (parent can "add my player").
 create or replace function public.preview_roster_by_code(p_code text)
-returns table (team_id uuid, team_name text, player_id uuid, first_name text, jersey_number text, claimed boolean)
-language plpgsql security definer set search_path to 'public' as $$
-declare uid uuid := auth.uid(); t_id uuid; t_name text;
+returns jsonb language plpgsql security definer set search_path to 'public' as $$
+declare uid uuid := auth.uid(); t_id uuid; t_name text; players jsonb;
 begin
   if uid is null then raise exception 'Not authenticated'; end if;
   select id, name into t_id, t_name from teams where join_code = upper(trim(p_code));
   if t_id is null then raise exception 'Invalid team code'; end if;
-  return query
-    select t_id, t_name, p.id,
-           split_part(p.name, ' ', 1) as first_name,
-           pt.jersey_number,
-           exists (select 1 from parent_player_links l where l.player_id = p.id) as claimed
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'player_id', p.id,
+           'first_name', split_part(p.name, ' ', 1),
+           'jersey', pt.jersey_number,
+           'claimed', exists (select 1 from parent_player_links l where l.player_id = p.id)
+         ) order by p.name), '[]'::jsonb)
+    into players
     from player_teams pt
     join players p on p.id = pt.player_id
-    where pt.team_id = t_id
-    order by p.name;
+    where pt.team_id = t_id;
+
+  return jsonb_build_object('team_id', t_id, 'team_name', t_name, 'players', players);
 end $$;
 grant execute on function public.preview_roster_by_code(text) to authenticated;
 

@@ -379,6 +379,12 @@ export default function SelectTeamScreen() {
             </View>
             <Text style={styles.teamName}>New team</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.teamItem} onPress={() => router.push('/join-team')}>
+            <View style={[styles.avatar, styles.avatarAdd]}>
+              <Ionicons name="enter-outline" size={26} color="#534AB7" />
+            </View>
+            <Text style={styles.teamName}>Join team</Text>
+          </TouchableOpacity>
         </ScrollView>
 
         {/* Player lens (multi-value) sits above the single-select FilterBar. */}
