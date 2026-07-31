@@ -145,6 +145,39 @@ export default function TaggingOverlayScreen() {
   const [dragging, setDragging] = useState(false);
   const [barWidth, setBarWidth] = useState(0);
 
+  // Existing clips already tagged on this video — drives the scrub-bar marker
+  // strip + the "now tagged" readout in WATCH mode, so a reviewer can SEE what's
+  // tagged at the current playhead (the core review primitive). Read-only here;
+  // editing lands in a later slice.
+  const [existingClips, setExistingClips] = useState<
+    { id: string; start: number; end: number; starred: boolean; poe: boolean; tags: { name: string; category: string }[] }[]
+  >([]);
+
+  const loadExistingClips = useCallback(async () => {
+    if (!videoId) return;
+    const { data, error } = await supabase
+      .from('clips')
+      .select('id, start_time, end_time, is_starred, is_point_of_emphasis, clip_tags ( tags ( name, category ) )')
+      .eq('video_id', videoId)
+      .order('start_time');
+    if (error || !data) return;
+    setExistingClips(
+      data.map((c: any) => ({
+        id: c.id,
+        start: c.start_time,
+        end: c.end_time,
+        starred: !!c.is_starred,
+        poe: !!c.is_point_of_emphasis,
+        tags: (c.clip_tags || [])
+          .map((ct: any) => ct.tags)
+          .filter(Boolean)
+          .map((t: any) => ({ name: t.name, category: t.category })),
+      })),
+    );
+  }, [videoId]);
+
+  useEffect(() => { loadExistingClips(); }, [loadExistingClips]);
+
   // F.4 tag mode. 'compact' (default) = tag region above bottom controls.
   // 'fullscreen' = tag region also covers the video area between top bar and
   // bottom controls (more rows of chips visible without scrolling). All other
@@ -428,6 +461,31 @@ export default function TaggingOverlayScreen() {
     player.seekBy(delta);
   }
 
+  // Frame-accurate jump to a specific time — used by tap-a-marker-to-jump. Uses
+  // currentTime= (not seekBy) so tapping a marker lands on the clip's real start.
+  function seekToTime(t: number) {
+    if (duration <= 0) return;
+    try {
+      player.currentTime = Math.max(0, Math.min(duration, t));
+    } catch (e) {
+      console.warn('[seek] seekToTime skipped (released):', e);
+    }
+  }
+
+  // Step to the previous/next tagged clip's start so a reviewer can walk through
+  // every tag and check it. existingClips is ordered by start_time. EPS avoids
+  // re-landing on the clip you're already sitting at the start of.
+  function jumpToTag(dir: 1 | -1) {
+    if (!existingClips.length || duration <= 0) return;
+    const t = player.currentTime;
+    const EPS = 0.35;
+    const target =
+      dir === 1
+        ? existingClips.find(c => c.start > t + EPS)?.start
+        : [...existingClips].reverse().find(c => c.start < t - EPS)?.start;
+    if (target !== undefined) seekToTime(target);
+  }
+
   // Skip buttons use frame-accurate currentTime= so ±1s actually moves 1.0s
   // and ±5s moves 5.0s. seekBy here was rounding to the nearest keyframe,
   // which made ±5s overshoot (~8s) and ±1s often no-op when already near a
@@ -491,6 +549,10 @@ export default function TaggingOverlayScreen() {
   const thumbX = duration > 0 ? Math.max(0, Math.min(barWidth, (currentTime / duration) * barWidth)) : 0;
   const TOOLTIP_WIDTH = 50;
   const tooltipLeft = Math.max(0, Math.min(barWidth - TOOLTIP_WIDTH, thumbX - TOOLTIP_WIDTH / 2));
+
+  // Which tagged clips contain the current playhead → the "now tagged" readout.
+  const activeClips = existingClips.filter(c => currentTime >= c.start && currentTime <= c.end);
+  const activeTagNames = Array.from(new Set(activeClips.flatMap(c => c.tags.map(t => t.name))));
 
   // The bundle_number contract
   // (clip-level = 0, bundles[idx] = idx + 1) is what app/export.tsx's
@@ -576,6 +638,7 @@ export default function TaggingOverlayScreen() {
     setClipLevelTags([]);
     setBundles([]);
     setActiveSection('clip');
+    loadExistingClips(); // refresh the marker strip with the just-saved clip
 
     Alert.alert('Saved!', message);
     setSaving(false);
@@ -657,6 +720,15 @@ export default function TaggingOverlayScreen() {
               >
                 <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Clip'}</Text>
               </TouchableOpacity>
+            )}
+            {/* "Now tagged" readout — what's tagged at the current playhead, so a
+                tagger reviewing an already-tagged game sees the tags in context.
+                Centered, between Back and Save; tagging mode only. */}
+            {!isWatch && activeTagNames.length > 0 && (
+              <View style={styles.topReadout} pointerEvents="none">
+                <View style={styles.topReadoutDot} />
+                <Text style={styles.topReadoutText} numberOfLines={1}>{activeTagNames.join('  ·  ')}</Text>
+              </View>
             )}
           </View>
         </LinearGradient>
@@ -772,6 +844,24 @@ export default function TaggingOverlayScreen() {
                 onLayout={e => setBarWidth(e.nativeEvent.layout.width)}
                 style={styles.scrubBarHitTarget}
               >
+                {/* Tag markers overlaid ON the scrub bar (tagging mode only) — one
+                    segment per existing clip, aligned to the track's barWidth
+                    coordinate space, so you SEE where tags already are while
+                    tagging. Visual only (pointerEvents none) so the pan gesture
+                    still owns the bar; navigation is via the ◄Tag/Tag► buttons. */}
+                {!isWatch && barWidth > 0 && duration > 0 && existingClips.map(c => {
+                  const left = (c.start / duration) * barWidth;
+                  const w = Math.max(3, ((c.end - c.start) / duration) * barWidth);
+                  const active = currentTime >= c.start && currentTime <= c.end;
+                  const color = c.starred || c.poe ? '#EF9F27' : '#8B7CF6';
+                  return (
+                    <View
+                      key={c.id}
+                      pointerEvents="none"
+                      style={[styles.marker, { left: Math.min(left, barWidth - w), width: w, backgroundColor: color, opacity: active ? 1 : 0.6 }]}
+                    />
+                  );
+                })}
                 <View style={[styles.scrubBarTrack, dragging && styles.scrubBarTrackDragging]}>
                   <View style={[styles.scrubBarFill, { width: thumbX }]} />
                 </View>
@@ -838,6 +928,16 @@ export default function TaggingOverlayScreen() {
               >
                 <Text style={styles.skipBtnText}>+5s</Text>
               </TouchableOpacity>
+              {!isWatch && existingClips.length > 0 && (
+                <>
+                  <TouchableOpacity style={styles.tagNavBtn} onPress={() => jumpToTag(-1)} hitSlop={6}>
+                    <Text style={styles.tagNavBtnText}>◄ Tag</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.tagNavBtn} onPress={() => jumpToTag(1)} hitSlop={6}>
+                    <Text style={styles.tagNavBtnText}>Tag ►</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
 
             {!isWatch && (
@@ -1146,6 +1246,26 @@ const styles = StyleSheet.create({
     height: 24,
     justifyContent: 'center',
   },
+  // Marker overlaid ON the scrub bar — one segment per existing clip, aligned to
+  // the track. top:3 sits just above the 4pt track centered in the 24pt target.
+  marker: { position: 'absolute', top: 3, height: 5, borderRadius: 2.5, minWidth: 3 },
+  // "Now tagged" readout in the top bar — centered between Back (left 40) and
+  // Save (right 120), so it never collides with either.
+  topReadout: {
+    position: 'absolute', left: 56, right: 132, top: 0, bottom: 0,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  topReadoutDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#EF9F27' },
+  topReadoutText: {
+    color: '#fff', fontSize: 13, fontWeight: '700', flexShrink: 1,
+    textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2,
+  },
+  // ◄Tag / Tag► step-through buttons in the controls row (tagging mode).
+  tagNavBtn: {
+    paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6,
+    backgroundColor: 'rgba(139,124,246,0.28)', borderWidth: 1, borderColor: 'rgba(139,124,246,0.7)',
+  },
+  tagNavBtnText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   scrubBarTrack: {
     height: 4,
     borderRadius: 2,
