@@ -37,6 +37,9 @@ export default function GameScreen() {
   const [cacheState, setCacheState] = useState<Record<string, CacheStatus>>({});
   // Persistent "it worked / here's where it is" confirmation after an upload.
   const [justUploaded, setJustUploaded] = useState<string | null>(null);
+  // Inline per-video label rename (Q1 → Q3): which video + working draft.
+  const [renamingVideoId, setRenamingVideoId] = useState<string | null>(null);
+  const [videoDraft, setVideoDraft] = useState('');
 
   useEffect(() => {
     if (id) { fetchGame(); fetchVideos(); }
@@ -66,6 +69,25 @@ export default function GameScreen() {
     const { data, error } = await supabase.from('videos').select('*').eq('game_id', id).order('sort_order');
     if (error) Alert.alert('Error', error.message);
     else setVideos(data || []);
+  }
+
+  // Inline rename of a single video's LABEL (per-video, e.g. Q1 → Q3) — distinct
+  // from the game's title. Owner/coach only (videos_update RLS). Optimistic.
+  function startVideoRename(video: any) {
+    setRenamingVideoId(video.id);
+    setVideoDraft(video.label);
+  }
+
+  async function commitVideoRename(video: any) {
+    const next = videoDraft.trim();
+    setRenamingVideoId(null);
+    if (!next || next === video.label) return;
+    setVideos(prev => prev.map(v => (v.id === video.id ? { ...v, label: next } : v)));
+    const { error } = await supabase.from('videos').update({ label: next }).eq('id', video.id);
+    if (error) {
+      setVideos(prev => prev.map(v => (v.id === video.id ? { ...v, label: video.label } : v)));
+      Alert.alert('Error', error.message);
+    }
   }
 
   async function fetchGame() {
@@ -235,6 +257,20 @@ export default function GameScreen() {
             const badge = badgeProps(status);
             return (
               <View style={styles.videoCard}>
+                {renamingVideoId === item.id ? (
+                  <View style={styles.videoCardMain}>
+                    <TextInput
+                      style={styles.videoRenameInput}
+                      value={videoDraft}
+                      onChangeText={setVideoDraft}
+                      autoFocus
+                      selectTextOnFocus
+                      returnKeyType="done"
+                      onSubmitEditing={() => commitVideoRename(item)}
+                      onBlur={() => commitVideoRename(item)}
+                    />
+                  </View>
+                ) : (
                 <TouchableOpacity
                   style={styles.videoCardMain}
                   onPress={() => item.upload_status && item.upload_status !== 'ready'
@@ -245,6 +281,7 @@ export default function GameScreen() {
                     : Alert.alert(item.label, 'What would you like to do?', [
                         { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: item.id, url: item.url, label: item.label } }) },
                         { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: item.id, label: item.label } }) },
+                        { text: 'Rename', onPress: () => startVideoRename(item) },
                         { text: 'Cancel', style: 'cancel' }
                       ])}
                   onLongPress={() => deleteVideo(item.id)}
@@ -254,6 +291,7 @@ export default function GameScreen() {
                     {item.upload_status === 'uploading' ? 'Uploading…' : item.upload_status === 'failed' ? 'Upload didn’t finish · tap to delete' : 'Tap for options • Hold to delete'}
                   </Text>
                 </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   style={[styles.cacheBadge, { backgroundColor: badge.bg }]}
                   onPress={() => {
@@ -307,6 +345,10 @@ const styles = StyleSheet.create({
   videoCard: { flexDirection: 'row', alignItems: 'stretch', backgroundColor: '#f5f5f5', borderRadius: 12, marginBottom: 12, overflow: 'hidden' },
   videoCardMain: { flex: 1, padding: 16 },
   videoLabel: { fontSize: 18, fontWeight: '600', marginBottom: 4 },
+  videoRenameInput: {
+    fontSize: 18, fontWeight: '600', color: '#000', padding: 0,
+    borderBottomWidth: 1, borderBottomColor: '#534AB7',
+  },
   videoHint: { fontSize: 12, color: '#aaa' },
   cacheBadge: { width: 96, paddingHorizontal: 8, paddingVertical: 8, justifyContent: 'center', alignItems: 'center' },
   cacheBadgeText: { fontSize: 11, fontWeight: '600', textAlign: 'center' },

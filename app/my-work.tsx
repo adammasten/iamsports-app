@@ -157,6 +157,9 @@ export default function MyWorkScreen() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [savedItems, setSavedItems] = useState<SavedEntry[]>([]);
   const [draftName, setDraftName] = useState('');
+  // Inline video-label rename (per-video, e.g. Q1 → Q3): which video + draft.
+  const [renamingVideoId, setRenamingVideoId] = useState<string | null>(null);
+  const [videoDraft, setVideoDraft] = useState('');
 
   // Post-to-wall picker state: which reel + kid the user chose in the Alert,
   // held while VisibilityPicker collects the tier. null = picker hidden.
@@ -711,6 +714,33 @@ export default function MyWorkScreen() {
     }
   }
 
+  // Inline rename of a single video's LABEL (per-video, e.g. Q1 → Q3) — distinct
+  // from a game's title. Owner/coach only (videos_update RLS). Optimistic across
+  // both in-game footage (games[].videos) and loose footage (looseVideos).
+  function startVideoRename(video: GameVideo) {
+    setRenamingVideoId(video.id);
+    setVideoDraft(video.label);
+  }
+
+  async function commitVideoRename(video: GameVideo) {
+    const next = videoDraft.trim();
+    setRenamingVideoId(null);
+    if (!next || next === video.label) return;
+    const applyLocal = (label: string) => {
+      setGames(prev => prev.map(g => ({
+        ...g,
+        videos: g.videos.map(v => (v.id === video.id ? { ...v, label } : v)),
+      })));
+      setLooseVideos(prev => prev.map(v => (v.id === video.id ? { ...v, label } : v)));
+    };
+    applyLocal(next);
+    const { error } = await supabase.from('videos').update({ label: next }).eq('id', video.id);
+    if (error) {
+      applyLocal(video.label); // revert
+      Alert.alert('Error', error.message);
+    }
+  }
+
   // Open the destination tier chooser (Your Kids / Your Teams / Coaches' Corner).
   // Your Kids routes to the existing player sheet + VisibilityPicker flow; the
   // two team tiers post player-less, coach-gated shares. Empty-state stands when
@@ -1081,6 +1111,23 @@ export default function MyWorkScreen() {
                 <Text style={styles.sectionHeader}>Unsorted footage</Text>
                 <Text style={styles.sectionHint}>Uploaded, not on a game yet — tap to tag.</Text>
                 {looseVideos.map(v => (
+                  renamingVideoId === v.id ? (
+                    <View key={v.id} style={styles.looseCard}>
+                      <View style={styles.looseThumb}><Ionicons name="videocam-outline" size={22} color="#888" /></View>
+                      <View style={styles.cardBody}>
+                        <TextInput
+                          style={styles.cardTitleInput}
+                          value={videoDraft}
+                          onChangeText={setVideoDraft}
+                          autoFocus
+                          selectTextOnFocus
+                          returnKeyType="done"
+                          onSubmitEditing={() => commitVideoRename(v)}
+                          onBlur={() => commitVideoRename(v)}
+                        />
+                      </View>
+                    </View>
+                  ) : (
                   <TouchableOpacity
                     key={v.id}
                     style={styles.looseCard}
@@ -1094,6 +1141,7 @@ export default function MyWorkScreen() {
                           { text: 'Add to a game', onPress: () => openAttachPicker(v) },
                           { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, personal: '1' } }) },
                           { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
+                          { text: 'Rename', onPress: () => startVideoRename(v) },
                           { text: 'Cancel', style: 'cancel' },
                         ])}
                   >
@@ -1106,6 +1154,7 @@ export default function MyWorkScreen() {
                     </View>
                     <Ionicons name="pricetag-outline" size={18} color="#534AB7" />
                   </TouchableOpacity>
+                  )
                 ))}
               </View>
             )}
@@ -1281,6 +1330,21 @@ export default function MyWorkScreen() {
                                 />
                                 <Text style={[styles.videoCheckLabel, v.taggingComplete && styles.videoCheckLabelDone]}>Tagged</Text>
                               </TouchableOpacity>
+                              {renamingVideoId === v.id ? (
+                                <View style={styles.videoOptionsCell}>
+                                  <Ionicons name="film-outline" size={18} color="#888" />
+                                  <TextInput
+                                    style={styles.videoRenameInput}
+                                    value={videoDraft}
+                                    onChangeText={setVideoDraft}
+                                    autoFocus
+                                    selectTextOnFocus
+                                    returnKeyType="done"
+                                    onSubmitEditing={() => commitVideoRename(v)}
+                                    onBlur={() => commitVideoRename(v)}
+                                  />
+                                </View>
+                              ) : (
                               <TouchableOpacity
                                 style={styles.videoOptionsCell}
                                 activeOpacity={0.7}
@@ -1296,6 +1360,7 @@ export default function MyWorkScreen() {
                                       // chrome in tagging-overlay — no new player, no divergent playback.
                                       { text: 'Watch game', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, watch: '1' } }) },
                                       { text: 'View clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
+                                      { text: 'Rename', onPress: () => startVideoRename(v) },
                                       { text: 'Move to another game', onPress: () => openAttachPicker(v, game.id) },
                                       { text: 'Remove from game', style: 'destructive', onPress: () => detachFromGame(v) },
                                       { text: 'Cancel', style: 'cancel' },
@@ -1310,6 +1375,7 @@ export default function MyWorkScreen() {
                                 </View>
                                 <Ionicons name="ellipsis-horizontal" size={18} color="#888" />
                               </TouchableOpacity>
+                              )}
                             </View>
                           ))
                         )}
@@ -1542,6 +1608,10 @@ const styles = StyleSheet.create({
   },
   videoOptBody: { flex: 1 },
   videoOptTitle: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  videoRenameInput: {
+    flex: 1, color: '#fff', fontSize: 14, fontWeight: '600', padding: 0,
+    borderBottomWidth: 1, borderBottomColor: '#534AB7',
+  },
   videoOptHint: { color: '#888', fontSize: 11, marginTop: 1 },
   gamePostBtn: { alignSelf: 'flex-start', backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 10 },
   gameAddBtn: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 8 },
