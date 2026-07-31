@@ -1275,6 +1275,7 @@ export default function MyWorkScreen() {
                       onPress={() => setExpandedGameId(expanded ? null : game.id)}
                       onLongPress={() => Alert.alert(game.title, undefined, [
                         { text: 'Edit game', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
+                        { text: 'Edit lineup (who played)', onPress: () => router.push({ pathname: '/edit-lineup', params: { gameId: game.id, gameTitle: game.title } }) },
                         { text: 'Delete game', style: 'destructive', onPress: () => confirmDeleteGame(game) },
                         { text: 'Cancel', style: 'cancel' },
                       ])}
