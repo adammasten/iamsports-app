@@ -191,6 +191,7 @@ export default function RootLayout() {
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
           <Stack.Screen name="game" options={{ headerShown: false }} />
           <Stack.Screen name="tagging-overlay" options={{ headerShown: false }} />
+          <Stack.Screen name="team-archive" options={{ headerShown: false }} />
           <Stack.Screen name="clips" options={{ headerShown: false }} />
           <Stack.Screen name="export" options={{ headerShown: false }} />
           <Stack.Screen name="select-team" options={{ headerShown: false }} />

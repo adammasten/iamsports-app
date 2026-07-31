@@ -44,7 +44,8 @@ export default function RosterScreen() {
     const { data: pt } = await supabase
       .from('player_teams')
       .select('player_id, jersey_number, players ( id, name )')
-      .eq('team_id', teamId);
+      .eq('team_id', teamId)
+      .is('left_at', null); // active roster only; soft-left kids drop off
     const rows = (pt || []) as any[];
     const ids = rows.map(r => r.player_id);
 

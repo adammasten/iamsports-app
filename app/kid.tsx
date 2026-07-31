@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
+import { TeamLogo } from '@/components/team-logo';
 import ContentTypeBadge from './components/ContentTypeBadge';
 import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
 import { showContentActions } from './moderationActions';
@@ -40,7 +41,8 @@ export default function KidWallScreen() {
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [kidTeams, setKidTeams] = useState<{ team_id: string; name: string; jersey_number: string | null }[]>([]);
+  const [kidTeams, setKidTeams] = useState<{ team_id: string; name: string; jersey_number: string | null; left_at: string | null; logo_path: string | null }[]>([]);
+  const [pastTeams, setPastTeams] = useState<{ team_id: string; name: string; jersey_number: string | null; left_at: string | null; logo_path: string | null }[]>([]);
   const [showAddTeam, setShowAddTeam] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [jerseyInput, setJerseyInput] = useState('');
@@ -109,12 +111,26 @@ export default function KidWallScreen() {
     if (!playerId) return;
     const { data } = await supabase
       .from('player_teams')
-      .select('team_id, jersey_number, teams ( name )')
+      .select('team_id, jersey_number, left_at, teams ( name, logo_path )')
       .eq('player_id', playerId);
     const rows = (data || [])
       .filter((r: any) => r.teams)
-      .map((r: any) => ({ team_id: r.team_id, name: r.teams.name, jersey_number: r.jersey_number ?? null }));
-    setKidTeams(rows);
+      .map((r: any) => ({ team_id: r.team_id, name: r.teams.name, jersey_number: r.jersey_number ?? null, left_at: r.left_at ?? null, logo_path: r.teams.logo_path ?? null }));
+    setKidTeams(rows.filter((r: any) => !r.left_at));   // current roster
+    setPastTeams(rows.filter((r: any) => r.left_at));   // teams left → frozen archive
+  }
+
+  // Soft-leave: mark the roster link left (never deletes). Games the kid played
+  // stay in the family's archive forever (game_lineups + parent link RLS).
+  function leaveTeam(t: { team_id: string; name: string }) {
+    Alert.alert('Leave team', `Remove ${name || 'your kid'} from ${t.name}? Their games from this team stay in your archive.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Leave', style: 'destructive', onPress: async () => {
+        const { error } = await supabase.rpc('leave_team', { p_player_id: playerId, p_team_id: t.team_id });
+        if (error) { Alert.alert('Error', error.message); return; }
+        loadTeams();
+      } },
+    ]);
   }
 
   // Guardians of this kid + the invite code (guardians-only read via RLS/RPC).
@@ -598,11 +614,11 @@ export default function KidWallScreen() {
         {kidTeams.length > 0 ? (
           <View style={styles.teamChips}>
             {kidTeams.map(t => (
-              <View key={t.team_id} style={styles.teamChip}>
+              <TouchableOpacity key={t.team_id} style={styles.teamChip} onLongPress={() => leaveTeam(t)}>
                 <Text style={styles.teamChipText}>
                   {t.name}{t.jersey_number ? ` · #${t.jersey_number}` : ''}
                 </Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         ) : (
@@ -612,13 +628,27 @@ export default function KidWallScreen() {
           <Ionicons name="add" size={16} color="#534AB7" />
           <Text style={styles.addTeamText}>Add to team</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.addTeamBtn}
-          onPress={() => router.push({ pathname: '/upload', params: { playerId } })}
-        >
-          <Ionicons name="cloud-upload-outline" size={16} color="#534AB7" />
-          <Text style={styles.addTeamText}>Upload to {name || 'this kid'}</Text>
-        </TouchableOpacity>
+
+        {/* Past teams — frozen keepsake cards. Tap to browse the kid's games from
+            that team (access survives leaving via game_lineups + parent link). */}
+        {pastTeams.length > 0 && (
+          <View style={styles.pastBlock}>
+            <Text style={styles.pastTitle}>Past teams</Text>
+            <View style={styles.pastRow}>
+              {pastTeams.map(t => (
+                <TouchableOpacity
+                  key={t.team_id}
+                  style={styles.pastCard}
+                  onPress={() => router.push({ pathname: '/team-archive', params: { playerId: playerId!, teamId: t.team_id, teamName: t.name } })}
+                >
+                  <TeamLogo logoPath={t.logo_path} name={t.name} size={48} />
+                  <Text style={styles.pastCardName} numberOfLines={2}>{t.name}</Text>
+                  <Text style={styles.pastCardMeta}>View games ›</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
       </View>
 
       {/* Guardians — who manages this kid; share the code to add family. */}
@@ -848,4 +878,10 @@ const styles = StyleSheet.create({
   gShareText: { color: '#fff', fontWeight: '700' },
   gHint: { color: '#888', fontSize: 12, lineHeight: 16, marginTop: 8 },
   gReset: { color: '#8b83e6', fontWeight: '700', fontSize: 13, marginTop: 10 },
+  pastBlock: { marginTop: 20, alignSelf: 'stretch' },
+  pastTitle: { color: '#888', fontSize: 13, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 10 },
+  pastRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  pastCard: { width: 92, alignItems: 'center', gap: 6 },
+  pastCardName: { color: '#ddd', fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  pastCardMeta: { color: '#8b83e6', fontSize: 11, fontWeight: '700' },
 });
