@@ -361,7 +361,9 @@ export default function MyWorkScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            const { error } = await supabase.from('games').delete().eq('id', game.id);
+            // delete_game clears the game_lineups guard, then deletes (cascades
+            // videos/clips). A raw games.delete() would error once a lineup exists.
+            const { error } = await supabase.rpc('delete_game', { p_game_id: game.id });
             if (error) { Alert.alert('Error', error.message); return; }
             if (expandedGameId === game.id) setExpandedGameId(null);
             loadGames();
