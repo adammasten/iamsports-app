@@ -877,7 +877,7 @@ export default function MyWorkScreen() {
   // with an edit-note + remove action, plus "Share…" (the existing add flow).
   function manageSharing(item: Postable, destinations: Destination[]) {
     const label = (d: Destination) =>
-      d.kind === 'public' ? 'Public' : d.kind === 'team' ? d.teamName : d.kind === 'coaches' ? `${d.teamName} coaches` : `${d.kidName}’s wall`;
+      d.kind === 'public' ? 'Public' : d.kind === 'team' ? d.teamName : d.kind === 'coaches' ? `${d.teamName} coaches` : `${d.kidName} (shared)`;
     Alert.alert('Sharing', item.title, [
       ...destinations.map(d => ({
         text: `${d.note ? 'Edit' : 'Add'} note · ${label(d)}`,
@@ -1153,7 +1153,7 @@ export default function MyWorkScreen() {
         return (
           <View key={`player-${i}`} style={[styles.badge, styles.badgePlayer]}>
             <Ionicons name="lock-closed" size={11} color="#fff" />
-            <Text style={styles.badgeText} numberOfLines={1}>On {d.kidName}’s wall</Text>
+            <Text style={styles.badgeText} numberOfLines={1}>Shared with {d.kidName}</Text>
           </View>
         );
       }

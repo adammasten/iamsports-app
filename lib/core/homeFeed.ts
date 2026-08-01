@@ -178,9 +178,10 @@ export async function loadContentFeed(
   const myKidIds  = [...new Set(userKids.map(k => k.player_id))];
 
   // 1) Which of MY kids' WALLS each piece of content is ON — i.e. player-audience
-  //    shares a guardian POSTED to the wall (the approval step). Content merely
-  //    shared *with* the kid by someone else sits in the inbox and is NOT on the
-  //    wall, so it's excluded here (shared_by_user_id = me). Mirrors kid.tsx's
+  //    shares a guardian has PUT on the wall (on_wall=true, the approval step).
+  //    Content merely shared *with* the kid still sitting in "Shared with you"
+  //    (on_wall=false) is NOT on the wall, so it's excluded. Family-wide: any
+  //    guardian's wall placement counts (no shared_by filter). Mirrors kid.tsx's
   //    loadWall. Keyed 'game:<id>' / 'reel:<id>' / 'video:<id>' → set of kid ids.
   const kidWalls = new Map<string, Set<string>>();
   let kidShareRows = 0;
@@ -191,8 +192,7 @@ export async function loadContentFeed(
       .select('content_type, content_id, target_player_id')
       .eq('audience', 'player')
       .eq('visible', true)
-      .eq('hidden_by_family', false)
-      .eq('shared_by_user_id', userId)
+      .eq('on_wall', true)
       .in('target_player_id', myKidIds);
     kidShareErr = error?.message ?? null;
     kidShareRows = (data || []).length;

@@ -14,11 +14,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
 import { TeamLogo } from '@/components/team-logo';
 import { LoadError } from '@/components/load-error';
-import { ShareNoteSheet, type NoteAudience } from '@/components/share-note-sheet';
 import { ShareNote } from '@/components/share-note';
 import { withTimeout } from '@/lib/withTimeout';
 import ContentTypeBadge from './components/ContentTypeBadge';
-import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
 import { showContentActions } from './moderationActions';
 import { initials, teamColor } from './select-team';
 
@@ -55,16 +53,8 @@ export default function KidWallScreen() {
   const [guardians, setGuardians] = useState<{ user_id: string; name: string; relationship: string; is_you: boolean }[]>([]);
   const [guardianCode, setGuardianCode] = useState<string | null>(null);
   const [guardiansOpen, setGuardiansOpen] = useState(false); // collapsed by default so the wall gets the room
-  const [noteSheet, setNoteSheet] = useState<{ audience: NoteAudience; run: (note: string) => Promise<void> } | null>(null);
-  const [noteBusy, setNoteBusy] = useState(false);
-
-  async function submitNote(note: string) {
-    if (!noteSheet) return;
-    setNoteBusy(true);
-    try { await noteSheet.run(note); }
-    finally { setNoteBusy(false); setNoteSheet(null); }
-  }
-  // Inbox ("Shared with you") — player-audience shares targeting this kid.
+  // "Shared with you" — player-audience shares to this kid that a guardian
+  // hasn't put on the wall yet (on_wall=false). Family-wide (any guardian sees).
   const [inbox, setInbox] = useState<{
     shareId: string; contentType: string; contentId: string;
     sharedBy: string | null; sharedByName: string | null; createdAt: string; title: string;
@@ -72,7 +62,8 @@ export default function KidWallScreen() {
   }[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
   const [inboxError, setInboxError] = useState<string | null>(null);
-  // Wall — shares I posted for this kid (audience public/team).
+  // Wall — player-audience shares a guardian has put on this kid's wall
+  // (on_wall=true). Family-wide: every linked guardian sees the same wall.
   const [wall, setWall] = useState<{
     shareId: string; contentType: string; audience: string; teamName: string | null;
     createdAt: string; title: string; storagePath: string | null;
@@ -80,9 +71,6 @@ export default function KidWallScreen() {
   }[]>([]);
   const [wallLoading, setWallLoading] = useState(false);
   const [wallError, setWallError] = useState<string | null>(null);
-  // Save-to-wall tier picker.
-  // The inbox item awaiting a visibility choice. Non-null = VisibilityPicker open.
-  const [pendingItem, setPendingItem] = useState<typeof inbox[number] | null>(null);
 
   // Viewer's teams where they can attach players (coaching roles), deduped.
   const coachingTeams = Array.from(
@@ -240,8 +228,9 @@ export default function KidWallScreen() {
         .select('id, content_type, content_id, shared_by_user_id, created_at, note')
         .eq('target_player_id', playerId)
         .eq('audience', 'player')
+        .eq('on_wall', false)           // not yet put on the wall = "Shared with you"
         .eq('visible', true)
-        .eq('hidden_by_family', false)  // family-hidden posts drop off the kid's wall
+        .eq('hidden_by_family', false)  // family-hidden posts drop off entirely
         .order('created_at', { ascending: false })));
     } catch (e: any) { setInboxError(e?.message || 'Couldn’t load shared items.'); setInboxLoading(false); return; }
     if (error) { setInboxError(error.message); setInboxLoading(false); return; }
@@ -314,8 +303,9 @@ export default function KidWallScreen() {
         .from('shares')
         .select('id, content_type, audience, team_id, created_at, note, teams ( name )')
         .eq('target_player_id', playerId)
-        .eq('shared_by_user_id', userId)
-        .in('audience', ['player'])
+        .eq('audience', 'player')
+        .eq('on_wall', true)            // family-wide: any guardian's wall placement
+        .eq('visible', true)
         .order('created_at', { ascending: false })));
     } catch (e: any) { setWallError(e?.message || 'Couldn’t load the wall.'); setWallLoading(false); return; }
     if (error) { setWallError(error.message); setWallLoading(false); return; }
@@ -344,15 +334,16 @@ export default function KidWallScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTab, playerId]);
 
-  // Take a post off the wall — delete the share row (RLS allows deleting own).
-  function removeFromWall(shareId: string, title: string) {
-    Alert.alert('Take off wall', `Remove “${title}” from ${name || 'the'} wall?`, [
+  // Take a post off the wall — flip on_wall=false so it drops back into
+  // "Shared with you" (the item stays shared with the family, just off the wall).
+  function takeOffWall(shareId: string, title: string) {
+    Alert.alert('Take off wall', `Take “${title}” off ${name || 'the'} wall? It stays in "Shared with you".`, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Remove', style: 'destructive', onPress: async () => {
-          const { error } = await supabase.from('shares').delete().eq('id', shareId);
+        text: 'Take off', style: 'destructive', onPress: async () => {
+          const { error } = await supabase.rpc('set_share_on_wall', { p_share_id: shareId, p_on_wall: false });
           if (error) Alert.alert('Error', error.message);
-          else loadWall();
+          else { loadWall(); loadInbox(); }
         },
       },
     ]);
@@ -379,68 +370,15 @@ export default function KidWallScreen() {
     });
   }
 
-  // Open the multi-select VisibilityPicker for this inbox item.
-  function openSaveToWall(item: typeof inbox[number]) {
-    setPendingItem(item);
-  }
-
-  // Picker resolved a SET of audiences. "Only me" writes nothing; each other
-  // selection is one post_to_wall call. Friends & Family maps to the 'player'
-  // audience (family-only — NEVER 'public'). content_type is threaded from the
-  // inbox item (reel/video/clip), not hardcoded. One failure doesn't abort the rest.
-  async function handleSaveToWall(sel: VisibilitySelection) {
-    const item = pendingItem;
-    setPendingItem(null);
-    if (!item || !playerId) return;
-
-    const targets: { audience: 'player' | 'public' | 'team'; teamId?: string; label: string }[] = [];
-    if (sel.friendsFamily) targets.push({ audience: 'player', label: 'Friends & Family' });
-    if (sel.public) targets.push({ audience: 'public', label: 'Public' });
-    if (sel.teamWall && sel.teamId) {
-      targets.push({ audience: 'team', teamId: sel.teamId, label: `${sel.teamName ?? 'Team'} wall` });
-    }
-
-    // Only-me (or an empty set) means no wall placement at all.
-    if (targets.length === 0) {
-      Alert.alert('Kept private', 'Not saved to any wall.');
-      return;
-    }
-
-    const audLabels = targets.map(t => t.audience === 'player' ? `${name || 'your kid'}’s family`
-      : t.audience === 'team' ? `everyone on ${sel.teamName ?? 'the team'}` : 'public');
-    const hasBroad = targets.some(t => t.audience === 'team' || t.audience === 'public');
-    setNoteSheet({
-      audience: {
-        label: audLabels.length === 1 ? `Only ${audLabels[0]} will see this` : `${audLabels.join(' + ')} will see this`,
-        icon: hasBroad ? 'people-circle' : 'people',
-        color: hasBroad ? '#EF9F27' : '#8B7CF6',
-      },
-      run: async (note) => {
-        const posted: string[] = [];
-        const failed: string[] = [];
-        for (const t of targets) {
-          const params: Record<string, any> = {
-            p_content_type: item.contentType,
-            p_content_id: item.contentId,
-            p_audience: t.audience,
-            p_target_player_id: playerId,
-          };
-          if (t.audience === 'team' && t.teamId) params.p_team_id = t.teamId;
-          const { data: shareId, error } = await supabase.rpc('post_to_wall', params);
-          if (error) { failed.push(`${t.label}: ${error.message}`); continue; }
-          if (note && shareId) await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: note });
-          posted.push(t.label);
-        }
-        if (failed.length === 0) {
-          Alert.alert('Saved to wall', `Posted: ${posted.join(', ')}.` + (note ? ' With your note.' : ''));
-        } else if (posted.length === 0) {
-          Alert.alert('Error', `Nothing posted.\n${failed.join('\n')}`);
-        } else {
-          Alert.alert('Partly posted', `Posted: ${posted.join(', ')}.\nFailed:\n${failed.join('\n')}`);
-        }
-        loadWall();
-      },
-    });
+  // Put a "Shared with you" item on the kid's wall — flip on_wall=true on the
+  // SAME share row (no new row). Family-wide by construction: every linked
+  // guardian's wall reads on_wall=true, and the sharer's note rides the row.
+  // Any note from the coach/sharer travels as-is; the guardian doesn't retype it.
+  async function putOnWall(shareId: string) {
+    const { error } = await supabase.rpc('set_share_on_wall', { p_share_id: shareId, p_on_wall: true });
+    if (error) { Alert.alert('Error', error.message); return; }
+    loadInbox();
+    loadWall();
   }
 
   // Pick → one-shot upload to the private Videos bucket (kid-photos/<id>/<ts>.jpg)
@@ -796,8 +734,8 @@ export default function KidWallScreen() {
                     </Text>
                     {item.note ? <ShareNote note={item.note} /> : null}
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.saveWallBtn} onPress={() => openSaveToWall(item)}>
-                    <Text style={styles.saveWallText}>Save to wall</Text>
+                  <TouchableOpacity style={styles.saveWallBtn} onPress={() => putOnWall(item.shareId)}>
+                    <Text style={styles.saveWallText}>Put on wall</Text>
                   </TouchableOpacity>
                 </View>
               ))}
@@ -817,17 +755,10 @@ export default function KidWallScreen() {
                   <TouchableOpacity style={styles.inboxMain} onPress={() => openShared(item)}>
                     <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
                     <Text style={styles.inboxTitle} numberOfLines={1}>{item.title}</Text>
-                    <View style={styles.wallMetaRow}>
-                      <View style={styles.audienceBadge}>
-                        <Text style={styles.audienceBadgeText}>
-                          {item.audience === 'public' ? 'Public' : (item.teamName || 'Team')}
-                        </Text>
-                      </View>
-                      <Text style={styles.inboxMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
-                    </View>
+                    <Text style={styles.inboxMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
                     {item.note ? <ShareNote note={item.note} /> : null}
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.removeBtn} onPress={() => removeFromWall(item.shareId, item.title)}>
+                  <TouchableOpacity style={styles.removeBtn} onPress={() => takeOffWall(item.shareId, item.title)}>
                     <Ionicons name="trash-outline" size={18} color="#c0392b" />
                   </TouchableOpacity>
                 </View>
@@ -839,23 +770,6 @@ export default function KidWallScreen() {
         )}
       </View>
       </ScrollView>
-
-      {pendingItem && (
-        <VisibilityPicker
-          teams={kidTeams.map(t => ({ id: t.team_id, name: t.name }))}
-          onSelect={handleSaveToWall}
-          onCancel={() => setPendingItem(null)}
-        />
-      )}
-
-      {noteSheet && (
-        <ShareNoteSheet
-          audience={noteSheet.audience}
-          busy={noteBusy}
-          onSend={submitNote}
-          onCancel={() => setNoteSheet(null)}
-        />
-      )}
     </View>
   );
 }
@@ -915,9 +829,6 @@ const styles = StyleSheet.create({
   typeBadgeWrap: { marginBottom: 6 },
   inboxTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   inboxMeta: { color: '#888', fontSize: 12, marginTop: 4 },
-  wallMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
-  audienceBadge: { backgroundColor: '#2a2350', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
-  audienceBadgeText: { color: '#a99cf0', fontSize: 11, fontWeight: '600' },
   wallDate: { color: '#888', fontSize: 12 },
   removeBtn: { padding: 8, marginLeft: 6 },
   saveWallBtn: { backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12 },
