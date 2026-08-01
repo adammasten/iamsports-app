@@ -2,11 +2,16 @@
 // score. Games are split into "Upcoming" (future date or undated) and
 // "Completed" (past date or scored) purely for display; the DB doesn't have a
 // status column.
-import { useTeamContext } from '@/context';
+//
+// Coaches see a "+ Add Game" inline form (matches the Roster tab pattern) —
+// creates a games row directly, no video required. Useful for entering past
+// games from memory, or scheduling upcoming games for stat entry later.
+import { COACH_ROLES, useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
+import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Game = {
@@ -27,13 +32,15 @@ function formatDate(ymd: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
-function todayYMD(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
+// Extract local YYYY-MM-DD from a Date. Never .toISOString() (UTC-shifts).
+function dateToLocalYMD(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
+
+function todayYMD(): string { return dateToLocalYMD(new Date()); }
 
 function scoreLabel(g: Game): string | null {
   if (g.team_score == null || g.opponent_score == null) return null;
@@ -43,9 +50,19 @@ function scoreLabel(g: Game): string | null {
 
 export default function ScheduleScreen() {
   const insets = useSafeAreaInsets();
-  const { activeTeam } = useTeamContext();
+  const { activeTeam, activeRole } = useTeamContext();
+  const isCoach = !!activeRole && COACH_ROLES.includes(activeRole);
+
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Add-game form
+  const [showAdd, setShowAdd] = useState(false);
+  const [opponent, setOpponent] = useState('');
+  const [gameDate, setGameDate] = useState<Date>(new Date());
+  const [teamScore, setTeamScore] = useState('');
+  const [oppScore, setOppScore] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!activeTeam) { setGames([]); setLoading(false); return; }
@@ -62,6 +79,47 @@ export default function ScheduleScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  function openAddForm() {
+    setGameDate(new Date());              // reset picker default to today on each open
+    setOpponent('');
+    setTeamScore('');
+    setOppScore('');
+    setShowAdd(true);
+  }
+
+  function onDateChange(_: DateTimePickerEvent, selected?: Date) {
+    if (selected) setGameDate(selected);
+  }
+
+  function openAndroidPicker() {
+    DateTimePickerAndroid.open({ value: gameDate, mode: 'date', onChange: onDateChange });
+  }
+
+  async function saveGame() {
+    if (!activeTeam) return;
+    const opp = opponent.trim();
+    if (!opp) { Alert.alert('Add game', 'Enter an opponent name.'); return; }
+    setSaving(true);
+    // Coerce optional scores; empty string → null.
+    const ts = teamScore.trim() === '' ? null : parseInt(teamScore.trim(), 10);
+    const os = oppScore.trim() === '' ? null : parseInt(oppScore.trim(), 10);
+    if ((ts != null && Number.isNaN(ts)) || (os != null && Number.isNaN(os))) {
+      Alert.alert('Add game', 'Scores must be numbers.'); setSaving(false); return;
+    }
+    const { error } = await supabase.from('games').insert({
+      team_id: activeTeam.id,
+      title: `vs ${opp}`,
+      opponent: opp,
+      game_date: dateToLocalYMD(gameDate),
+      team_score: ts,
+      opponent_score: os,
+    });
+    setSaving(false);
+    if (error) { Alert.alert('Add game', error.message); return; }
+    setShowAdd(false);
+    await load();
+  }
+
   if (!activeTeam) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + 24, paddingHorizontal: 16 }]}>
@@ -71,8 +129,6 @@ export default function ScheduleScreen() {
   }
 
   const today = todayYMD();
-  // "Completed" if it has a final score, or its date is before today. Everything
-  // else is "Upcoming" — including games with no date set at all.
   const isPast = (g: Game) => scoreLabel(g) != null || (g.game_date != null && g.game_date < today);
   const past = games.filter(isPast);
   const upcoming = games.filter(g => !isPast(g));
@@ -81,14 +137,73 @@ export default function ScheduleScreen() {
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ paddingTop: insets.top + 12, paddingHorizontal: 16, paddingBottom: 40 }}
+      keyboardShouldPersistTaps="handled"
     >
       <Text style={styles.title}>{activeTeam.name}</Text>
       <Text style={styles.subtitle}>Schedule</Text>
 
+      {isCoach && (showAdd ? (
+        <View style={styles.addBox}>
+          <TextInput
+            style={styles.input}
+            placeholder="Opponent name"
+            placeholderTextColor="#999"
+            value={opponent}
+            onChangeText={setOpponent}
+            autoFocus
+            editable={!saving}
+          />
+          <View style={styles.dateRow}>
+            <Text style={styles.dateLabel}>Game date:</Text>
+            {Platform.OS === 'ios' ? (
+              <DateTimePicker value={gameDate} mode="date" display="compact" onChange={onDateChange} />
+            ) : (
+              <TouchableOpacity style={styles.dateBtn} onPress={openAndroidPicker} disabled={saving}>
+                <Text style={styles.dateBtnText}>{formatDate(dateToLocalYMD(gameDate))}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <View style={styles.scoreRow}>
+            <TextInput
+              style={[styles.input, styles.scoreInput]}
+              placeholder="Us"
+              placeholderTextColor="#999"
+              value={teamScore}
+              onChangeText={setTeamScore}
+              keyboardType="number-pad"
+              editable={!saving}
+            />
+            <Text style={styles.scoreDash}>–</Text>
+            <TextInput
+              style={[styles.input, styles.scoreInput]}
+              placeholder="Them"
+              placeholderTextColor="#999"
+              value={oppScore}
+              onChangeText={setOppScore}
+              keyboardType="number-pad"
+              editable={!saving}
+            />
+          </View>
+          <View style={styles.addBtns}>
+            <TouchableOpacity style={[styles.btn, styles.btnPrimary]} disabled={saving} onPress={saveGame}>
+              <Text style={styles.btnPrimaryText}>{saving ? 'Saving…' : 'Save game'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.btn} disabled={saving} onPress={() => setShowAdd(false)}>
+              <Text style={styles.btnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.hint}>No video needed. You can add stats after saving from the game&apos;s box score.</Text>
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.addRow} onPress={openAddForm}>
+          <Text style={styles.addRowText}>＋ Add game</Text>
+        </TouchableOpacity>
+      ))}
+
       {loading ? (
         <ActivityIndicator style={{ marginTop: 28 }} color="#534AB7" />
       ) : games.length === 0 ? (
-        <Text style={styles.empty}>No games yet.{'\n'}Add one from the Team tab.</Text>
+        <Text style={styles.empty}>No games yet.{isCoach ? '\nTap “Add game” above.' : ''}</Text>
       ) : (
         <>
           {upcoming.length > 0 && (
@@ -137,4 +252,22 @@ const styles = StyleSheet.create({
   rowMeta: { fontSize: 12, color: '#999', marginTop: 2 },
   rowScore: { fontSize: 14, fontWeight: '800', color: '#534AB7' },
   rowArrow: { fontSize: 20, color: '#ccc' },
+
+  addRow: { marginBottom: 16, paddingVertical: 14, borderRadius: 10, borderWidth: 1, borderColor: '#534AB7', borderStyle: 'dashed', alignItems: 'center' },
+  addRowText: { color: '#534AB7', fontWeight: '700', fontSize: 15 },
+  addBox: { marginBottom: 16, backgroundColor: '#fafafa', borderRadius: 12, padding: 14, gap: 10 },
+  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: '#1a1a1a', backgroundColor: '#fff' },
+  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dateLabel: { fontSize: 15, color: '#333' },
+  dateBtn: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#fff', flex: 1 },
+  dateBtnText: { fontSize: 15, color: '#333' },
+  scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  scoreInput: { flex: 1, textAlign: 'center' },
+  scoreDash: { fontSize: 18, fontWeight: '700', color: '#888' },
+  addBtns: { flexDirection: 'row', gap: 10 },
+  btn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center', backgroundColor: '#eee' },
+  btnText: { fontWeight: '700', color: '#555' },
+  btnPrimary: { backgroundColor: '#534AB7' },
+  btnPrimaryText: { fontWeight: '700', color: '#fff' },
+  hint: { fontSize: 12, color: '#888', lineHeight: 16 },
 });
