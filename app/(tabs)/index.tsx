@@ -229,6 +229,7 @@ export default function HomeScreen() {
         </View>
       </View>
 
+      <ScrollView contentContainerStyle={styles.teamBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <View style={styles.teamHeadingRow}>
         {isCoach ? (
           <TouchableOpacity onPress={changeLogo} disabled={logoBusy} activeOpacity={0.7} hitSlop={8}>
@@ -270,7 +271,7 @@ export default function HomeScreen() {
             ) : visiblePosts.length === 0 ? (
               <Text style={styles.empty}>Nothing matches your filters.</Text>
             ) : (
-              <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }}>
+              <View style={styles.list}>
                 {visiblePosts.map(fi => {
                   const item = postsById.get(fi.id);
                   if (!item) return null;
@@ -294,10 +295,11 @@ export default function HomeScreen() {
                     </TouchableOpacity>
                   );
                 })}
-              </ScrollView>
+              </View>
             )}
           </View>
         </>
+      </ScrollView>
     </View>
   );
 }
@@ -322,10 +324,11 @@ const styles = StyleSheet.create({
   primaryBtn: { backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 16 },
   primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 
-  content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  teamBody: { paddingBottom: 40 },
+  content: { alignItems: 'center', justifyContent: 'center', minHeight: 220 },
   contentTop: { alignItems: 'stretch', justifyContent: 'flex-start' },
   empty: { color: '#555', fontSize: 15, textAlign: 'center', lineHeight: 22 },
-  list: { alignSelf: 'stretch', flex: 1 },
+  list: { alignSelf: 'stretch' },
 
   // wall cards
   card: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#333' },

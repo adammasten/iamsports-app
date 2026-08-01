@@ -599,6 +599,7 @@ export default function KidWallScreen() {
         </TouchableOpacity>
       </View>
 
+      <ScrollView contentContainerStyle={styles.kidBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       {/* Header: tappable avatar (photo or initials) + name + grad + sports */}
       <View style={styles.headerBlock}>
         <TouchableOpacity
@@ -673,8 +674,8 @@ export default function KidWallScreen() {
           <TouchableOpacity style={styles.guardiansCard} onPress={() => setGuardiansOpen(o => !o)} activeOpacity={0.7}>
             <View style={styles.guardiansIcon}><Ionicons name="people" size={18} color="#b9b1e8" /></View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.guardiansCardTitle}>Family</Text>
-              <Text style={styles.guardiansCardSub} numberOfLines={1}>Who can see {name || 'your kid'}’s film · {guardians.length} of 4</Text>
+              <Text style={styles.guardiansCardTitle}>Share with family</Text>
+              <Text style={styles.guardiansCardSub} numberOfLines={1}>Invite family with a sign-up code · {guardians.length} of 4</Text>
             </View>
             <Ionicons name={guardiansOpen ? 'chevron-up' : 'chevron-down'} size={18} color="#888" />
           </TouchableOpacity>
@@ -750,7 +751,7 @@ export default function KidWallScreen() {
           ) : inbox.length === 0 ? (
             <Text style={styles.empty}>Nothing shared yet</Text>
           ) : (
-            <ScrollView style={styles.inboxList} contentContainerStyle={{ paddingBottom: 20 }}>
+            <View style={styles.inboxList}>
               {inbox.map(item => (
                 <View key={item.shareId} style={styles.inboxCard}>
                   <TouchableOpacity
@@ -774,7 +775,7 @@ export default function KidWallScreen() {
                   </TouchableOpacity>
                 </View>
               ))}
-            </ScrollView>
+            </View>
           )
         ) : selectedTab === 'wall' ? (
           wallLoading ? (
@@ -784,7 +785,7 @@ export default function KidWallScreen() {
           ) : wall.length === 0 ? (
             <Text style={styles.empty}>Nothing on the wall yet</Text>
           ) : (
-            <ScrollView style={styles.inboxList} contentContainerStyle={{ paddingBottom: 20 }}>
+            <View style={styles.inboxList}>
               {wall.map(item => (
                 <View key={item.shareId} style={styles.inboxCard}>
                   <TouchableOpacity style={styles.inboxMain} onPress={() => openShared(item)}>
@@ -804,12 +805,13 @@ export default function KidWallScreen() {
                   </TouchableOpacity>
                 </View>
               ))}
-            </ScrollView>
+            </View>
           )
         ) : (
           <Text style={styles.empty}>Nothing here yet</Text>
         )}
       </View>
+      </ScrollView>
 
       {pendingItem && (
         <VisibilityPicker
@@ -867,7 +869,8 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#fff' },
   tabUnderline: { height: 2, backgroundColor: '#534AB7', alignSelf: 'stretch', marginTop: 8 },
 
-  content: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  kidBody: { paddingBottom: 40 },
+  content: { alignItems: 'center', justifyContent: 'center', minHeight: 220 },
   contentTop: { alignItems: 'stretch', justifyContent: 'flex-start', paddingTop: 16 },
   empty: { color: '#555', fontSize: 15 },
   inboxList: { alignSelf: 'stretch' },
