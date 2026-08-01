@@ -52,6 +52,7 @@ export default function KidWallScreen() {
   const [attaching, setAttaching] = useState(false);
   const [guardians, setGuardians] = useState<{ user_id: string; name: string; relationship: string; is_you: boolean }[]>([]);
   const [guardianCode, setGuardianCode] = useState<string | null>(null);
+  const [guardiansOpen, setGuardiansOpen] = useState(false); // collapsed by default so the wall gets the room
   // Inbox ("Shared with you") — player-audience shares targeting this kid.
   const [inbox, setInbox] = useState<{
     shareId: string; contentType: string; contentId: string;
@@ -669,7 +670,11 @@ export default function KidWallScreen() {
       {/* Guardians — who manages this kid; share the code to add family. */}
       {guardians.length > 0 && (
         <View style={styles.guardiansBlock}>
-          <Text style={styles.guardiansTitle}>Guardians · {guardians.length} of 4</Text>
+          <TouchableOpacity style={styles.guardiansHeader} onPress={() => setGuardiansOpen(o => !o)} activeOpacity={0.7}>
+            <Text style={styles.guardiansTitle}>Guardians · {guardians.length} of 4</Text>
+            <Ionicons name={guardiansOpen ? 'chevron-up' : 'chevron-down'} size={16} color="#aaa" />
+          </TouchableOpacity>
+          {guardiansOpen && <>
           {guardians.map(g => (
             <View key={g.user_id} style={styles.guardianRow}>
               <Text style={styles.guardianName} numberOfLines={1}>
@@ -708,6 +713,7 @@ export default function KidWallScreen() {
           ) : guardians.length >= 4 ? (
             <Text style={styles.gHint}>Guardian limit reached (4).</Text>
           ) : null}
+          </>}
         </View>
       )}
 
@@ -884,7 +890,8 @@ const styles = StyleSheet.create({
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 
   guardiansBlock: { marginTop: 16, marginBottom: 8 },
-  guardiansTitle: { color: '#aaa', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  guardiansHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 },
+  guardiansTitle: { color: '#aaa', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   guardianRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#222' },
   guardianName: { color: '#fff', fontSize: 15, fontWeight: '600', flex: 1 },
   gLeave: { color: '#c0392b', fontWeight: '700', fontSize: 13 },
