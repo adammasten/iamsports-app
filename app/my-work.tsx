@@ -30,11 +30,14 @@ import VisibilityPicker, { type VisibilitySelection } from './components/Visibil
 
 // Carries the team/player id so a destination can be precisely un-posted from
 // the Film Room (delete the exact shares row).
+// shareId + note ride along so "Manage sharing" can edit the per-destination
+// note after posting. shareId is the shares.id of the row backing this
+// destination (undefined for optimistic adds until the next load reconciles it).
 type Destination =
-  | { kind: 'public' }
-  | { kind: 'team'; teamName: string; teamId: string }
-  | { kind: 'coaches'; teamName: string; teamId: string }
-  | { kind: 'player'; kidName: string; playerId: string };
+  | { kind: 'public'; shareId?: string; note?: string | null }
+  | { kind: 'team'; teamName: string; teamId: string; shareId?: string; note?: string | null }
+  | { kind: 'coaches'; teamName: string; teamId: string; shareId?: string; note?: string | null }
+  | { kind: 'player'; kidName: string; playerId: string; shareId?: string; note?: string | null };
 
 // Stable identity for a destination — dedup + optimistic add/remove.
 const destKey = (d: Destination): string =>
@@ -185,7 +188,7 @@ export default function MyWorkScreen() {
   const [coachesReel, setCoachesReel] = useState<Postable | null>(null);
   const [teamWallChoice, setTeamWallChoice] = useState<{ item: Postable; teamId: string; teamName: string } | null>(null);
   // Optional per-share note compose. `run` does the actual post(s) + set_share_note.
-  const [noteSheet, setNoteSheet] = useState<{ audience: NoteAudience; run: (note: string) => Promise<void> } | null>(null);
+  const [noteSheet, setNoteSheet] = useState<{ audience: NoteAudience; run: (note: string) => Promise<void>; initialNote?: string } | null>(null);
   const [noteBusy, setNoteBusy] = useState(false);
 
   async function submitNote(note: string) {
@@ -232,23 +235,24 @@ export default function MyWorkScreen() {
       const kidNameById = new Map(userKids.map(k => [k.player_id, k.name]));
       const { data: shareRows } = await supabase
         .from('shares')
-        .select('content_id, audience, team_id, visible, target_player_id, teams ( name )')
+        .select('id, content_id, audience, team_id, visible, target_player_id, note, teams ( name )')
         .eq('content_type', 'reel')
         .in('content_id', reelIds);
       (shareRows || []).forEach((s: any) => {
         const list = destByReel.get(s.content_id) ?? [];
+        const note = (s.note as string) ?? null;
         if (s.audience === 'public' && s.visible) {
-          if (!list.some(d => d.kind === 'public')) list.push({ kind: 'public' });
+          if (!list.some(d => d.kind === 'public')) list.push({ kind: 'public', shareId: s.id, note });
         } else if (s.audience === 'team') {
           const teamName = s.teams?.name ?? 'Team';
-          if (!list.some(d => d.kind === 'team' && d.teamId === s.team_id)) list.push({ kind: 'team', teamName, teamId: s.team_id });
+          if (!list.some(d => d.kind === 'team' && d.teamId === s.team_id)) list.push({ kind: 'team', teamName, teamId: s.team_id, shareId: s.id, note });
         } else if (s.audience === 'coaches') {
           const teamName = s.teams?.name ?? 'Team';
-          if (!list.some(d => d.kind === 'coaches' && d.teamId === s.team_id)) list.push({ kind: 'coaches', teamName, teamId: s.team_id });
+          if (!list.some(d => d.kind === 'coaches' && d.teamId === s.team_id)) list.push({ kind: 'coaches', teamName, teamId: s.team_id, shareId: s.id, note });
         } else if (s.audience === 'player') {
           // A 'player' post lands on the kid's own wall (family-only).
           const kidName = kidNameById.get(s.target_player_id) ?? 'Kid';
-          if (!list.some(d => d.kind === 'player' && d.playerId === s.target_player_id)) list.push({ kind: 'player', kidName, playerId: s.target_player_id });
+          if (!list.some(d => d.kind === 'player' && d.playerId === s.target_player_id)) list.push({ kind: 'player', kidName, playerId: s.target_player_id, shareId: s.id, note });
         }
         destByReel.set(s.content_id, list);
       });
@@ -327,23 +331,24 @@ export default function MyWorkScreen() {
       const kidNameById = new Map(userKids.map(k => [k.player_id, k.name]));
       const { data: shareRows } = await supabase
         .from('shares')
-        .select('content_id, audience, team_id, visible, target_player_id, teams ( name )')
+        .select('id, content_id, audience, team_id, visible, target_player_id, note, teams ( name )')
         .eq('content_type', 'game')
         .in('content_id', gameIds);
       (shareRows || []).forEach((s: any) => {
         const g = byId.get(s.content_id);
         if (!g) return;
+        const note = (s.note as string) ?? null;
         if (s.audience === 'public' && s.visible) {
-          if (!g.destinations.some(d => d.kind === 'public')) g.destinations.push({ kind: 'public' });
+          if (!g.destinations.some(d => d.kind === 'public')) g.destinations.push({ kind: 'public', shareId: s.id, note });
         } else if (s.audience === 'team') {
           const teamName = s.teams?.name ?? 'Team';
-          if (!g.destinations.some(d => d.kind === 'team' && d.teamId === s.team_id)) g.destinations.push({ kind: 'team', teamName, teamId: s.team_id });
+          if (!g.destinations.some(d => d.kind === 'team' && d.teamId === s.team_id)) g.destinations.push({ kind: 'team', teamName, teamId: s.team_id, shareId: s.id, note });
         } else if (s.audience === 'coaches') {
           const teamName = s.teams?.name ?? 'Team';
-          if (!g.destinations.some(d => d.kind === 'coaches' && d.teamId === s.team_id)) g.destinations.push({ kind: 'coaches', teamName, teamId: s.team_id });
+          if (!g.destinations.some(d => d.kind === 'coaches' && d.teamId === s.team_id)) g.destinations.push({ kind: 'coaches', teamName, teamId: s.team_id, shareId: s.id, note });
         } else if (s.audience === 'player') {
           const kidName = kidNameById.get(s.target_player_id) ?? 'Kid';
-          if (!g.destinations.some(d => d.kind === 'player' && d.playerId === s.target_player_id)) g.destinations.push({ kind: 'player', kidName, playerId: s.target_player_id });
+          if (!g.destinations.some(d => d.kind === 'player' && d.playerId === s.target_player_id)) g.destinations.push({ kind: 'player', kidName, playerId: s.target_player_id, shareId: s.id, note });
         }
       });
     }
@@ -834,12 +839,50 @@ export default function MyWorkScreen() {
     removeDestinationLocal(item.contentId, dest);
   }
 
+  // The note-sheet banner for one destination — same audience visuals used at
+  // post time, so editing a coaches note shows the green "only coaches" banner.
+  function audienceForDest(dest: Destination): NoteAudience {
+    if (dest.kind === 'team') return { label: `Everyone on ${dest.teamName} will see this`, icon: 'people-circle', color: '#EF9F27' };
+    if (dest.kind === 'coaches') return { label: `Only ${dest.teamName} coaches will see this`, icon: 'shield-checkmark', color: '#1D9E75' };
+    if (dest.kind === 'player') return { label: `${dest.kidName}’s family will see this`, icon: 'people', color: '#8B7CF6' };
+    return { label: 'Anyone with the link will see this', icon: 'globe', color: '#8B7CF6' };
+  }
+
+  // Optimistically set the note on one destination badge after an edit.
+  function updateDestinationNote(contentId: string, dest: Destination, note: string | null) {
+    const k = destKey(dest);
+    const patch = (d: Destination) => (destKey(d) === k ? { ...d, note } : d);
+    setReels(prev => prev.map(r => (r.id === contentId ? { ...r, destinations: r.destinations.map(patch) } : r)));
+    setGames(prev => prev.map(g => (g.id === contentId ? { ...g, destinations: g.destinations.map(patch) } : g)));
+  }
+
+  // Add / edit / clear the per-share note for one destination. Opens the note
+  // sheet pre-filled; set_share_note is sharer-gated and nullif-clears on empty.
+  function editDestinationNote(item: Postable, dest: Destination) {
+    if (!dest.shareId) { Alert.alert('Not ready', 'Reopen this screen and try again.'); return; }
+    const shareId = dest.shareId;
+    setNoteSheet({
+      audience: audienceForDest(dest),
+      initialNote: dest.note ?? '',
+      run: async (note: string) => {
+        const trimmed = note.trim();
+        const { error } = await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: trimmed || null });
+        if (error) { Alert.alert('Error', error.message); return; }
+        updateDestinationNote(item.contentId, dest, trimmed || null);
+      },
+    });
+  }
+
   // Film Room "Manage sharing" sheet: an Alert listing each current destination
-  // with a Remove, plus "Post to a wall" (the existing add flow).
+  // with an edit-note + remove action, plus "Share…" (the existing add flow).
   function manageSharing(item: Postable, destinations: Destination[]) {
     const label = (d: Destination) =>
       d.kind === 'public' ? 'Public' : d.kind === 'team' ? d.teamName : d.kind === 'coaches' ? `${d.teamName} coaches` : `${d.kidName}’s wall`;
     Alert.alert('Sharing', item.title, [
+      ...destinations.map(d => ({
+        text: `${d.note ? 'Edit' : 'Add'} note · ${label(d)}`,
+        onPress: () => editDestinationNote(item, d),
+      })),
       ...destinations.map(d => ({ text: `Remove from ${label(d)}`, style: 'destructive' as const, onPress: () => removeDestination(item, d) })),
       { text: 'Share…', onPress: () => confirmPostToWall(item) },
       { text: 'Cancel', style: 'cancel' as const },
@@ -1616,6 +1659,7 @@ export default function MyWorkScreen() {
       {noteSheet && (
         <ShareNoteSheet
           audience={noteSheet.audience}
+          initialNote={noteSheet.initialNote}
           busy={noteBusy}
           onSend={submitNote}
           onCancel={() => setNoteSheet(null)}

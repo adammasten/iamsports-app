@@ -13,13 +13,17 @@ export type NoteAudience = {
   color: string;
 };
 
-export function ShareNoteSheet({ audience, busy, onSend, onCancel }: {
+export function ShareNoteSheet({ audience, initialNote, busy, onSend, onCancel }: {
   audience: NoteAudience;
+  // Prefill for editing an already-posted note. When provided (even ''), the
+  // sheet is in edit mode: the button says Save/Remove instead of Share.
+  initialNote?: string;
   busy?: boolean;
   onSend: (note: string) => void;
   onCancel: () => void;
 }) {
-  const [note, setNote] = useState('');
+  const isEdit = initialNote !== undefined;
+  const [note, setNote] = useState(initialNote ?? '');
   return (
     <Modal transparent animationType="slide" onRequestClose={onCancel}>
       <Pressable style={styles.backdrop} onPress={busy ? undefined : onCancel} />
@@ -45,7 +49,9 @@ export function ShareNoteSheet({ audience, busy, onSend, onCancel }: {
               <Text style={styles.cancel}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.sendBtn, busy && { opacity: 0.6 }]} onPress={() => onSend(note.trim())} disabled={busy} activeOpacity={0.8}>
-              <Text style={styles.sendText}>{busy ? 'Sharing…' : note.trim() ? 'Share with note' : 'Share'}</Text>
+              <Text style={styles.sendText}>
+                {busy ? 'Saving…' : isEdit ? (note.trim() ? 'Save note' : 'Remove note') : note.trim() ? 'Share with note' : 'Share'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
