@@ -3,6 +3,7 @@ import { TeamLogo } from '@/components/team-logo';
 import { LoadError } from '@/components/load-error';
 import { SkeletonCards } from '@/components/skeleton-cards';
 import { DebugPanel } from '@/components/debug-panel';
+import { ShareNote } from '@/components/share-note';
 import { withTimeout } from '@/lib/withTimeout';
 import { pickAndUploadTeamLogo } from '@/lib/native/team-logo-upload';
 import { supabase } from '@/supabase';
@@ -292,6 +293,7 @@ export default function HomeScreen() {
                       </View>
                       <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
                       <Text style={styles.cardMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+                      {item.note ? <ShareNote note={item.note} /> : null}
                     </TouchableOpacity>
                   );
                 })}

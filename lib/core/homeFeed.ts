@@ -16,7 +16,7 @@ import { filterModerated, loadModeration } from './moderation';
 // rows collapsed later (dupes) can't crowd genuine content out of it.
 export const FEED_FETCH_LIMIT = 500;
 
-const SELECT = 'id, content_type, content_id, audience, team_id, target_player_id, shared_by_user_id, created_at, teams ( name )';
+const SELECT = 'id, content_type, content_id, audience, team_id, target_player_id, shared_by_user_id, created_at, note, teams ( name )';
 
 // One card per piece of content (a game/reel), deduped across every wall it's
 // posted to. `sources` collects the wall labels it lives on ("Warriors", "Family")
@@ -29,6 +29,7 @@ export type WallPost = {
   sources: string[]; teamId: string; teamName: string;
   // Who posted it — drives the block filter + the "Block this person" action.
   sharedByUserId: string | null;
+  note: string | null; // the sharer's per-share note (RLS-scoped to this audience)
 };
 
 // Per-stage counts + the (otherwise-swallowed) Postgres errors, so a blank feed
@@ -69,6 +70,7 @@ async function resolveAndDedup(rows: any[]): Promise<WallPost[]> {
       storagePath: c?.storage_path ?? null,
       startTime: c?.start_time ?? null, endTime: c?.end_time ?? null,
       sharedByUserId: (r.shared_by_user_id as string) ?? null,
+      note: (r.note as string) ?? null,
       teamId: (r.team_id as string) ?? '',
       teamName: r.team_id ? (r.teams?.name ?? 'Team') : '',
       // The wall label this share lives on: the team name for a team wall, or the
@@ -90,6 +92,7 @@ async function resolveAndDedup(rows: any[]): Promise<WallPost[]> {
         createdAt: r.createdAt, title: r.title, storagePath: r.storagePath,
         startTime: r.startTime, endTime: r.endTime,
         sharedByUserId: r.sharedByUserId,
+        note: r.note,
         teamId: r.teamId, teamName: r.teamName, sources: [r.sourceLabel],
       });
     } else {

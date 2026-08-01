@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
 import { downloadMedia } from '@/lib/native/download-media';
 import { LoadError } from '@/components/load-error';
+import { ShareNoteSheet, type NoteAudience } from '@/components/share-note-sheet';
 import { SkeletonCards } from '@/components/skeleton-cards';
 import { withTimeout } from '@/lib/withTimeout';
 import { requirePermission } from './permissionGuard';
@@ -183,6 +184,16 @@ export default function MyWorkScreen() {
   const [teamWallReel, setTeamWallReel] = useState<Postable | null>(null);
   const [coachesReel, setCoachesReel] = useState<Postable | null>(null);
   const [teamWallChoice, setTeamWallChoice] = useState<{ item: Postable; teamId: string; teamName: string } | null>(null);
+  // Optional per-share note compose. `run` does the actual post(s) + set_share_note.
+  const [noteSheet, setNoteSheet] = useState<{ audience: NoteAudience; run: (note: string) => Promise<void> } | null>(null);
+  const [noteBusy, setNoteBusy] = useState(false);
+
+  async function submitNote(note: string) {
+    if (!noteSheet) return;
+    setNoteBusy(true);
+    try { await noteSheet.run(note); }
+    finally { setNoteBusy(false); setNoteSheet(null); }
+  }
 
   // Reruns all three loaders; used by the error-state Retry button.
   function reloadFilmRoom() { loadReels(); loadGames(); loadSaved(); }
@@ -930,46 +941,59 @@ export default function MyWorkScreen() {
     setTeamWallChoice(null);
     if (!(await requirePermission(teamId, 'post_wall'))) return;
 
-    const { error: teamErr } = await supabase.rpc('post_to_wall', {
-      p_content_type: item.contentType,
-      p_content_id: item.contentId,
-      p_audience: 'team',
-      p_target_player_id: null,
-      p_team_id: teamId,
+    setNoteSheet({
+      audience: { label: `Everyone on ${teamName} will see this`, icon: 'people-circle', color: '#EF9F27' },
+      run: async (note) => {
+        const { data: teamShareId, error: teamErr } = await supabase.rpc('post_to_wall', {
+          p_content_type: item.contentType,
+          p_content_id: item.contentId,
+          p_audience: 'team',
+          p_target_player_id: null,
+          p_team_id: teamId,
+        });
+        if (teamErr) { Alert.alert('Error', teamErr.message); return; }
+        // The note goes on the TEAM share (the team wall audience).
+        if (note && teamShareId) await supabase.rpc('set_share_note', { p_share_id: teamShareId, p_note: note });
+
+        const dests: Destination[] = [{ kind: 'team', teamName, teamId }];
+        if (alsoPublic) {
+          const { error: pubErr } = await supabase.rpc('post_to_wall', {
+            p_content_type: item.contentType,
+            p_content_id: item.contentId,
+            p_audience: 'public',
+            p_target_player_id: null,
+            p_team_id: teamId,
+          });
+          if (pubErr) { Alert.alert('Error', pubErr.message); return; }
+          dests.push({ kind: 'public' });
+        }
+
+        addDestinations(item.contentId, dests);
+        Alert.alert('Posted', alsoPublic ? `Posted to ${teamName} wall and public.` : `Posted to ${teamName} wall.`);
+      },
     });
-    if (teamErr) { Alert.alert('Error', teamErr.message); return; }
-
-    const dests: Destination[] = [{ kind: 'team', teamName, teamId }];
-    if (alsoPublic) {
-      const { error: pubErr } = await supabase.rpc('post_to_wall', {
-        p_content_type: item.contentType,
-        p_content_id: item.contentId,
-        p_audience: 'public',
-        p_target_player_id: null,
-        p_team_id: teamId,
-      });
-      if (pubErr) { Alert.alert('Error', pubErr.message); return; }
-      dests.push({ kind: 'public' });
-    }
-
-    addDestinations(item.contentId, dests);
-    Alert.alert('Posted', alsoPublic ? `Posted to ${teamName} wall and public.` : `Posted to ${teamName} wall.`);
   }
 
   // Post a reel to a team's COACHES' board (player-less, coach-gated). No
   // visibility choice — selecting the team posts immediately.
-  async function postCoachesBoard(item: Postable, teamId: string, teamName: string) {
+  function postCoachesBoard(item: Postable, teamId: string, teamName: string) {
     setCoachesReel(null);
-    const { error } = await supabase.rpc('post_to_wall', {
-      p_content_type: item.contentType,
-      p_content_id: item.contentId,
-      p_audience: 'coaches',
-      p_target_player_id: null,
-      p_team_id: teamId,
+    setNoteSheet({
+      audience: { label: 'Only coaches will see this', icon: 'shield-checkmark', color: '#1D9E75' },
+      run: async (note) => {
+        const { data: shareId, error } = await supabase.rpc('post_to_wall', {
+          p_content_type: item.contentType,
+          p_content_id: item.contentId,
+          p_audience: 'coaches',
+          p_target_player_id: null,
+          p_team_id: teamId,
+        });
+        if (error) { Alert.alert('Error', error.message); return; }
+        if (note && shareId) await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: note });
+        addDestinations(item.contentId, [{ kind: 'coaches', teamId, teamName }]);
+        Alert.alert('Posted', `Posted to ${teamName} coaches’ board.` + (note ? ' With your note.' : ''));
+      },
     });
-    if (error) { Alert.alert('Error', error.message); return; }
-    addDestinations(item.contentId, [{ kind: 'coaches', teamId, teamName }]);
-    Alert.alert('Posted', `Posted to ${teamName} coaches' board.`);
   }
 
   // Picker resolved a SET of audiences. "Only me" writes nothing; each other
@@ -1577,6 +1601,15 @@ export default function MyWorkScreen() {
           teams={userTeams.map(t => ({ id: t.team_id, name: t.name }))}
           onSelect={handleVisibilitySelect}
           onCancel={() => setPendingPost(null)}
+        />
+      )}
+
+      {noteSheet && (
+        <ShareNoteSheet
+          audience={noteSheet.audience}
+          busy={noteBusy}
+          onSend={submitNote}
+          onCancel={() => setNoteSheet(null)}
         />
       )}
     </View>

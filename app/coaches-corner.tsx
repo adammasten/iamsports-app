@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentTypeBadge from './components/ContentTypeBadge';
+import { ShareNote } from '@/components/share-note';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 
@@ -55,6 +56,7 @@ type Post = {
   startTime: number | null;
   endTime: number | null;
   sharedByUserId: string | null;
+  note: string | null;
 };
 
 export default function CoachesCornerScreen() {
@@ -78,7 +80,7 @@ export default function CoachesCornerScreen() {
     setLoading(true);
     const { data: rows } = await supabase
       .from('shares')
-      .select('id, content_type, content_id, team_id, shared_by_user_id, created_at, teams ( name )')
+      .select('id, content_type, content_id, team_id, shared_by_user_id, created_at, note, teams ( name )')
       .eq('audience', 'coaches')
       .eq('visible', true)
       .order('created_at', { ascending: false });
@@ -99,6 +101,7 @@ export default function CoachesCornerScreen() {
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
         sharedByUserId: r.shared_by_user_id ?? null,
+        note: (r.note as string) ?? null,
       };
     }));
     setPosts(filterModerated(items, await loadModeration()));
@@ -241,6 +244,7 @@ export default function CoachesCornerScreen() {
                   </View>
                   <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
                   <Text style={styles.cardMeta}>{relativeTime(item.createdAt)}</Text>
+                  {item.note ? <ShareNote note={item.note} /> : null}
                 </TouchableOpacity>
               );
             })}
