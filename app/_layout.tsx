@@ -211,6 +211,7 @@ export default function RootLayout() {
           <Stack.Screen name="shared-game" options={{ headerShown: false }} />
           <Stack.Screen name="edit-game" options={{ headerShown: false }} />
           <Stack.Screen name="edit-reel" options={{ headerShown: false }} />
+          <Stack.Screen name="box-score" options={{ headerShown: false }} />
           <Stack.Screen name="account" options={{ headerShown: false }} />
           <Stack.Screen name="terms" options={{ headerShown: false }} />
         </Stack>
