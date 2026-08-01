@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentTypeBadge from './components/ContentTypeBadge';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
+import { ShareNote } from '@/components/share-note';
 
 // Single-team wall: no tags loaded here, and the Team dropdown is hidden (one
 // team). Stable module-level refs so FilterBar's memo doesn't churn each render.
@@ -39,7 +40,7 @@ export default function TeamWallScreen() {
   const [posts, setPosts] = useState<{
     shareId: string; contentType: string; createdAt: string;
     title: string; storagePath: string | null;
-    startTime: number | null; endTime: number | null;
+    startTime: number | null; endTime: number | null; note: string | null;
   }[]>([]);
   const [loading, setLoading] = useState(true);
   const [visiblePosts, setVisiblePosts] = useState<FilterableItem[]>([]);
@@ -49,7 +50,7 @@ export default function TeamWallScreen() {
     setLoading(true);
     const { data: rows } = await supabase
       .from('shares')
-      .select('id, content_type, created_at')
+      .select('id, content_type, created_at, note')
       .eq('team_id', teamId)
       .eq('audience', 'team')
       .order('created_at', { ascending: false });
@@ -64,6 +65,7 @@ export default function TeamWallScreen() {
         storagePath: c?.storage_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
+        note: (r.note as string) ?? null,
       };
     }));
     setPosts(items);
@@ -149,6 +151,7 @@ export default function TeamWallScreen() {
                   <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
                   <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
                   <Text style={styles.cardMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+                  {item.note ? <ShareNote note={item.note} /> : null}
                 </TouchableOpacity>
               );
             })}

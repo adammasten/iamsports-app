@@ -14,6 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
 import { TeamLogo } from '@/components/team-logo';
 import { LoadError } from '@/components/load-error';
+import { ShareNoteSheet, type NoteAudience } from '@/components/share-note-sheet';
+import { ShareNote } from '@/components/share-note';
 import { withTimeout } from '@/lib/withTimeout';
 import ContentTypeBadge from './components/ContentTypeBadge';
 import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
@@ -53,11 +55,20 @@ export default function KidWallScreen() {
   const [guardians, setGuardians] = useState<{ user_id: string; name: string; relationship: string; is_you: boolean }[]>([]);
   const [guardianCode, setGuardianCode] = useState<string | null>(null);
   const [guardiansOpen, setGuardiansOpen] = useState(false); // collapsed by default so the wall gets the room
+  const [noteSheet, setNoteSheet] = useState<{ audience: NoteAudience; run: (note: string) => Promise<void> } | null>(null);
+  const [noteBusy, setNoteBusy] = useState(false);
+
+  async function submitNote(note: string) {
+    if (!noteSheet) return;
+    setNoteBusy(true);
+    try { await noteSheet.run(note); }
+    finally { setNoteBusy(false); setNoteSheet(null); }
+  }
   // Inbox ("Shared with you") — player-audience shares targeting this kid.
   const [inbox, setInbox] = useState<{
     shareId: string; contentType: string; contentId: string;
     sharedBy: string | null; sharedByName: string | null; createdAt: string; title: string;
-    storagePath: string | null; startTime: number | null; endTime: number | null;
+    storagePath: string | null; startTime: number | null; endTime: number | null; note: string | null;
   }[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
   const [inboxError, setInboxError] = useState<string | null>(null);
@@ -65,7 +76,7 @@ export default function KidWallScreen() {
   const [wall, setWall] = useState<{
     shareId: string; contentType: string; audience: string; teamName: string | null;
     createdAt: string; title: string; storagePath: string | null;
-    startTime: number | null; endTime: number | null;
+    startTime: number | null; endTime: number | null; note: string | null;
   }[]>([]);
   const [wallLoading, setWallLoading] = useState(false);
   const [wallError, setWallError] = useState<string | null>(null);
@@ -226,7 +237,7 @@ export default function KidWallScreen() {
     try {
       ({ data: rows, error } = await withTimeout(supabase
         .from('shares')
-        .select('id, content_type, content_id, shared_by_user_id, created_at')
+        .select('id, content_type, content_id, shared_by_user_id, created_at, note')
         .eq('target_player_id', playerId)
         .eq('audience', 'player')
         .eq('visible', true)
@@ -247,6 +258,7 @@ export default function KidWallScreen() {
         storagePath: c?.storage_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
+        note: (r.note as string) ?? null,
       };
     }));
 
@@ -300,7 +312,7 @@ export default function KidWallScreen() {
     try {
       ({ data: rows, error } = await withTimeout(supabase
         .from('shares')
-        .select('id, content_type, audience, team_id, created_at, teams ( name )')
+        .select('id, content_type, audience, team_id, created_at, note, teams ( name )')
         .eq('target_player_id', playerId)
         .eq('shared_by_user_id', userId)
         .in('audience', ['player'])
@@ -320,6 +332,7 @@ export default function KidWallScreen() {
         storagePath: c?.storage_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
+        note: (r.note as string) ?? null,
       };
     }));
     setWall(items);
@@ -393,29 +406,41 @@ export default function KidWallScreen() {
       return;
     }
 
-    const posted: string[] = [];
-    const failed: string[] = [];
-    for (const t of targets) {
-      const params: Record<string, any> = {
-        p_content_type: item.contentType,
-        p_content_id: item.contentId,
-        p_audience: t.audience,
-        p_target_player_id: playerId,
-      };
-      if (t.audience === 'team' && t.teamId) params.p_team_id = t.teamId;
-
-      const { error } = await supabase.rpc('post_to_wall', params);
-      if (error) { failed.push(`${t.label}: ${error.message}`); continue; }
-      posted.push(t.label);
-    }
-
-    if (failed.length === 0) {
-      Alert.alert('Saved to wall', `Posted: ${posted.join(', ')}.`);
-    } else if (posted.length === 0) {
-      Alert.alert('Error', `Nothing posted.\n${failed.join('\n')}`);
-    } else {
-      Alert.alert('Partly posted', `Posted: ${posted.join(', ')}.\nFailed:\n${failed.join('\n')}`);
-    }
+    const audLabels = targets.map(t => t.audience === 'player' ? `${name || 'your kid'}’s family`
+      : t.audience === 'team' ? `everyone on ${sel.teamName ?? 'the team'}` : 'public');
+    const hasBroad = targets.some(t => t.audience === 'team' || t.audience === 'public');
+    setNoteSheet({
+      audience: {
+        label: audLabels.length === 1 ? `Only ${audLabels[0]} will see this` : `${audLabels.join(' + ')} will see this`,
+        icon: hasBroad ? 'people-circle' : 'people',
+        color: hasBroad ? '#EF9F27' : '#8B7CF6',
+      },
+      run: async (note) => {
+        const posted: string[] = [];
+        const failed: string[] = [];
+        for (const t of targets) {
+          const params: Record<string, any> = {
+            p_content_type: item.contentType,
+            p_content_id: item.contentId,
+            p_audience: t.audience,
+            p_target_player_id: playerId,
+          };
+          if (t.audience === 'team' && t.teamId) params.p_team_id = t.teamId;
+          const { data: shareId, error } = await supabase.rpc('post_to_wall', params);
+          if (error) { failed.push(`${t.label}: ${error.message}`); continue; }
+          if (note && shareId) await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: note });
+          posted.push(t.label);
+        }
+        if (failed.length === 0) {
+          Alert.alert('Saved to wall', `Posted: ${posted.join(', ')}.` + (note ? ' With your note.' : ''));
+        } else if (posted.length === 0) {
+          Alert.alert('Error', `Nothing posted.\n${failed.join('\n')}`);
+        } else {
+          Alert.alert('Partly posted', `Posted: ${posted.join(', ')}.\nFailed:\n${failed.join('\n')}`);
+        }
+        loadWall();
+      },
+    });
   }
 
   // Pick → one-shot upload to the private Videos bucket (kid-photos/<id>/<ts>.jpg)
@@ -769,6 +794,7 @@ export default function KidWallScreen() {
                     <Text style={styles.inboxMeta}>
                       From {item.sharedBy === userId ? 'you' : (item.sharedByName ?? 'someone')} · {new Date(item.createdAt).toLocaleDateString()}
                     </Text>
+                    {item.note ? <ShareNote note={item.note} /> : null}
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.saveWallBtn} onPress={() => openSaveToWall(item)}>
                     <Text style={styles.saveWallText}>Save to wall</Text>
@@ -799,6 +825,7 @@ export default function KidWallScreen() {
                       </View>
                       <Text style={styles.inboxMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
                     </View>
+                    {item.note ? <ShareNote note={item.note} /> : null}
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.removeBtn} onPress={() => removeFromWall(item.shareId, item.title)}>
                     <Ionicons name="trash-outline" size={18} color="#c0392b" />
@@ -818,6 +845,15 @@ export default function KidWallScreen() {
           teams={kidTeams.map(t => ({ id: t.team_id, name: t.name }))}
           onSelect={handleSaveToWall}
           onCancel={() => setPendingItem(null)}
+        />
+      )}
+
+      {noteSheet && (
+        <ShareNoteSheet
+          audience={noteSheet.audience}
+          busy={noteBusy}
+          onSend={submitNote}
+          onCancel={() => setNoteSheet(null)}
         />
       )}
     </View>

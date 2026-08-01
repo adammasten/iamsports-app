@@ -1025,37 +1025,46 @@ export default function MyWorkScreen() {
       return;
     }
 
-    // Post each selected audience. One failure doesn't abort the rest.
-    const posted: string[] = [];
-    const failed: string[] = [];
-    const newDests: Destination[] = [];
-    for (const t of targets) {
-      const params: Record<string, any> = {
-        p_content_type: item.contentType,
-        p_content_id: item.contentId,
-        p_audience: t.audience,
-        p_target_player_id: playerId,
-      };
-      if (t.audience === 'team' && t.teamId) params.p_team_id = t.teamId;
-
-      const { error } = await supabase.rpc('post_to_wall', params);
-      if (error) { failed.push(`${t.label}: ${error.message}`); continue; }
-      posted.push(t.label);
-      newDests.push(t.dest);
-    }
-
-    // Optimistic badges for everything that posted — no full reload. loadReels/
-    // loadGames read all kinds back, so badges survive a refresh.
-    if (newDests.length > 0) addDestinations(item.contentId, newDests);
-
-    // Summarize what landed.
-    if (failed.length === 0) {
-      Alert.alert('Posted', `Posted to ${kidName}'s wall: ${posted.join(', ')}.`);
-    } else if (posted.length === 0) {
-      Alert.alert('Error', `Nothing posted.\n${failed.join('\n')}`);
-    } else {
-      Alert.alert('Partly posted', `Posted: ${posted.join(', ')}.\nFailed:\n${failed.join('\n')}`);
-    }
+    // Compose an optional note. The banner names exactly who will see it (the
+    // safety element). One note goes to each selected audience; differentiate
+    // per destination afterward via "Edit note" in Manage sharing.
+    const audLabels = targets.map(t => t.audience === 'player' ? `${kidName}’s family`
+      : t.audience === 'team' ? `everyone on ${(t.dest as any).teamName}` : 'public');
+    const hasBroad = targets.some(t => t.audience === 'team' || t.audience === 'public');
+    setNoteSheet({
+      audience: {
+        label: audLabels.length === 1 ? `Only ${audLabels[0]} will see this` : `${audLabels.join(' + ')} will see this`,
+        icon: hasBroad ? 'people-circle' : 'people',
+        color: hasBroad ? '#EF9F27' : '#8B7CF6',
+      },
+      run: async (note) => {
+        const posted: string[] = [];
+        const failed: string[] = [];
+        const newDests: Destination[] = [];
+        for (const t of targets) {
+          const params: Record<string, any> = {
+            p_content_type: item.contentType,
+            p_content_id: item.contentId,
+            p_audience: t.audience,
+            p_target_player_id: playerId,
+          };
+          if (t.audience === 'team' && t.teamId) params.p_team_id = t.teamId;
+          const { data: shareId, error } = await supabase.rpc('post_to_wall', params);
+          if (error) { failed.push(`${t.label}: ${error.message}`); continue; }
+          if (note && shareId) await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: note });
+          posted.push(t.label);
+          newDests.push(t.dest);
+        }
+        if (newDests.length > 0) addDestinations(item.contentId, newDests);
+        if (failed.length === 0) {
+          Alert.alert('Posted', `Posted to ${kidName}'s wall: ${posted.join(', ')}.` + (note ? ' With your note.' : ''));
+        } else if (posted.length === 0) {
+          Alert.alert('Error', `Nothing posted.\n${failed.join('\n')}`);
+        } else {
+          Alert.alert('Partly posted', `Posted: ${posted.join(', ')}.\nFailed:\n${failed.join('\n')}`);
+        }
+      },
+    });
   }
 
   function confirmDelete(reel: Reel) {
