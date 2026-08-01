@@ -1,0 +1,22 @@
+-- migration_post_to_wall_notify.sql — hook notification fan-out into post_to_wall
+-- (applied via CREATE OR REPLACE; the function body is otherwise unchanged from
+-- its prior version — only the block below was added right before `return new_id`).
+--
+-- Fires ONLY on the insert path (a duplicate re-post returns early, so re-posting
+-- never re-notifies), and ONLY for player-audience shares (team/coaches/public
+-- posts intentionally don't notify — avoids red-dot blindness). Fans out to every
+-- guardian of the target kid via parent_player_links; notify_users skips the actor.
+--
+--   -- NOTIFY: a NEW share to a kid's inbox/wall → that kid's OTHER guardians.
+--   if p_audience = 'player' then
+--     perform notify_users(
+--       array(select ppl.parent_user_id from parent_player_links ppl
+--             where ppl.player_id = p_target_player_id),
+--       'share_to_kid', uid, p_target_player_id, p_team_id,
+--       p_content_type::text, p_content_id
+--     );
+--   end if;
+--
+-- See migration_notifications.sql for the notifications table + notify_users +
+-- the UI RPCs (get_notifications / notifications_unseen_count /
+-- mark_notifications_seen / mark_notification_read).
