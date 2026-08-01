@@ -670,9 +670,13 @@ export default function KidWallScreen() {
       {/* Guardians — who manages this kid; share the code to add family. */}
       {guardians.length > 0 && (
         <View style={styles.guardiansBlock}>
-          <TouchableOpacity style={styles.guardiansHeader} onPress={() => setGuardiansOpen(o => !o)} activeOpacity={0.7}>
-            <Text style={styles.guardiansTitle}>Guardians · {guardians.length} of 4</Text>
-            <Ionicons name={guardiansOpen ? 'chevron-up' : 'chevron-down'} size={16} color="#aaa" />
+          <TouchableOpacity style={styles.guardiansCard} onPress={() => setGuardiansOpen(o => !o)} activeOpacity={0.7}>
+            <View style={styles.guardiansIcon}><Ionicons name="people" size={18} color="#b9b1e8" /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.guardiansCardTitle}>Family</Text>
+              <Text style={styles.guardiansCardSub} numberOfLines={1}>Who can see {name || 'your kid'}’s film · {guardians.length} of 4</Text>
+            </View>
+            <Ionicons name={guardiansOpen ? 'chevron-up' : 'chevron-down'} size={18} color="#888" />
           </TouchableOpacity>
           {guardiansOpen && <>
           {guardians.map(g => (
@@ -889,9 +893,11 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: '#534AB7', borderRadius: 8, padding: 16, alignItems: 'center', marginTop: 8 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 
-  guardiansBlock: { marginTop: 16, marginBottom: 8 },
-  guardiansHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 },
-  guardiansTitle: { color: '#aaa', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  guardiansBlock: { marginTop: 16, marginBottom: 8, alignSelf: 'stretch' },
+  guardiansCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#141414', borderRadius: 12, padding: 12 },
+  guardiansIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2a2540', alignItems: 'center', justifyContent: 'center' },
+  guardiansCardTitle: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  guardiansCardSub: { color: '#888', fontSize: 12, marginTop: 1 },
   guardianRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#222' },
   guardianName: { color: '#fff', fontSize: 15, fontWeight: '600', flex: 1 },
   gLeave: { color: '#c0392b', fontWeight: '700', fontSize: 13 },
