@@ -178,6 +178,21 @@ export default function TaggingOverlayScreen() {
 
   useEffect(() => { loadExistingClips(); }, [loadExistingClips]);
 
+  // The team whose players/tags apply is the VIDEO's team — NOT the ambient
+  // activeTeam (which may be a different team, or null). Using activeTeam meant a
+  // video on team B showed team A's (or no) players, so a rostered kid wouldn't
+  // appear to tag, and clips were misfiled. Resolve it from the video.
+  const [videoTeamId, setVideoTeamId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!videoId) return;
+    let cancelled = false;
+    supabase.from('videos').select('team_id').eq('id', videoId).maybeSingle()
+      .then(({ data }) => { if (!cancelled) setVideoTeamId((data?.team_id as string) ?? null); });
+    return () => { cancelled = true; };
+  }, [videoId]);
+  // Team to scope tags + save clips against. Personal mode forces null (global only).
+  const tagTeamId = isPersonal ? null : (videoTeamId ?? (activeTeam ? activeTeam.id : null));
+
   // F.4 tag mode. 'compact' (default) = tag region above bottom controls.
   // 'fullscreen' = tag region also covers the video area between top bar and
   // bottom controls (more rows of chips visible without scrolling). All other
@@ -326,8 +341,8 @@ export default function TaggingOverlayScreen() {
     let cancelled = false;
     (async () => {
       let query = supabase.from('tags').select('*').order('sort_order');
-      if (activeTeam) {
-        query = query.or(`scope.eq.global,and(scope.eq.team,team_id.eq.${activeTeam.id})`);
+      if (tagTeamId) {
+        query = query.or(`scope.eq.global,and(scope.eq.team,team_id.eq.${tagTeamId})`);
       } else {
         query = query.eq('scope', 'global');
       }
@@ -352,7 +367,7 @@ export default function TaggingOverlayScreen() {
       setSpecialTagIds({ highlight: highlightId, poe: poeId });
     })();
     return () => { cancelled = true; };
-  }, [activeTeam]);
+  }, [tagTeamId]);
 
   function toggleTag(tagId: string) {
     if (activeSection === 'clip') {
@@ -580,7 +595,7 @@ export default function TaggingOverlayScreen() {
       .from('clips')
       .insert({
         video_id: videoId,
-        team_id: isPersonal ? null : (activeTeam ? activeTeam.id : null),
+        team_id: tagTeamId,
         created_by_user_id: userId,
         start_time: startTime,
         end_time: endTime,
