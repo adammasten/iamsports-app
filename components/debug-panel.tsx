@@ -1,6 +1,7 @@
 // Shared yellow diagnostic overlay (one component instead of three per-screen
-// copies that drifted). Renders only when overlays are enabled (dev, or the
-// runtime flag). Pass a screen title + stage-count lines.
+// copies that drifted). Renders in development only (__DEV__ via useDebugEnabled)
+// — compiled out of preview/release/TestFlight builds. Pass a screen title +
+// stage-count lines.
 import { useDebugEnabled } from '@/lib/debug-flag';
 import { StyleSheet, Text, View } from 'react-native';
 

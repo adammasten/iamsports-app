@@ -1,6 +1,5 @@
 import { TeamProvider, useTeamContext } from '@/context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { initDebugFlag } from '@/lib/debug-flag';
 import { reconcilePendingUploads } from '@/lib/native/upload-reconcile';
 import { reconcile as reconcileVideoCache } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
@@ -177,7 +176,6 @@ export default function RootLayout() {
   // Hydrate the video-cache manifest and drop entries for files iOS evicted.
   // Independent of auth — runs once per app launch regardless of session state.
   useEffect(() => {
-    initDebugFlag(); // load the persisted debug-overlay flag (for preview builds)
     reconcileVideoCache().catch(e => console.warn('[video-cache] reconcile failed:', e));
     // Resolve videos left 'uploading' by a killed/backgrounded upload: size-verify
     // and flip to 'ready', or mark stale stragglers 'failed'. Self-guards on session.

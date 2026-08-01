@@ -567,10 +567,6 @@ const styles = StyleSheet.create({
   cardTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
   cardMeta: { color: '#888', fontSize: 12, marginTop: 4 },
 
-  // TEMP diagnostic panel — remove after on-device verify.
-  debugBox: { backgroundColor: '#3a2f00', borderColor: '#c8a400', borderWidth: 1, borderRadius: 8, padding: 10, marginHorizontal: 16, marginVertical: 10, gap: 2 },
-  debugTitle: { color: '#ffd11a', fontSize: 12, fontWeight: '800', marginBottom: 4, fontFamily: 'Courier' },
-  debugText: { color: '#ffe680', fontSize: 12, fontFamily: 'Courier' },
   empty: { color: '#888', textAlign: 'center', marginTop: 40, fontSize: 15 },
 
   bottomNav: {

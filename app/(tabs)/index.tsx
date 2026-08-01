@@ -9,7 +9,7 @@ import { pickAndUploadTeamLogo } from '@/lib/native/team-logo-upload';
 import { supabase } from '@/supabase';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { loadTeamWall, type WallPost } from '@/lib/core/homeFeed';
 import { showContentActions } from '../moderationActions';
 import ContentTypeBadge from '../components/ContentTypeBadge';
@@ -316,11 +316,6 @@ const styles = StyleSheet.create({
 
   heading: { color: '#fff', fontSize: 28, fontWeight: '700', letterSpacing: -0.3 },
   teamHeadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-
-  // TEMP diagnostic panel — remove after on-device verify.
-  debugBox: { backgroundColor: '#3a2f00', borderColor: '#c8a400', borderWidth: 1, borderRadius: 8, padding: 10, marginVertical: 10, gap: 2 },
-  debugTitle: { color: '#ffd11a', fontSize: 12, fontWeight: '800', marginBottom: 4, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
-  debugText: { color: '#ffe680', fontSize: 12, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
   subtitle: { color: '#888', fontSize: 13, lineHeight: 18, textAlign: 'center', marginBottom: 14 },
 
   primaryBtn: { backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 16 },
