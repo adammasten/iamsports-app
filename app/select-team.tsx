@@ -323,7 +323,7 @@ export default function SelectTeamScreen() {
       <View style={styles.header}>
         <Text style={styles.brand}>🏀 IamSports</Text>
         <View style={styles.headerIcons}>
-          <TouchableOpacity style={styles.iconBtn}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/search')}>
             <Ionicons name="search-outline" size={22} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/notifications')}>

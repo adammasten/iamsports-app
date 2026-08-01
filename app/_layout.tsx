@@ -195,6 +195,7 @@ export default function RootLayout() {
           <Stack.Screen name="tagging-overlay" options={{ headerShown: false }} />
           <Stack.Screen name="team-archive" options={{ headerShown: false }} />
           <Stack.Screen name="notifications" options={{ headerShown: false }} />
+          <Stack.Screen name="search" options={{ headerShown: false }} />
           <Stack.Screen name="edit-lineup" options={{ headerShown: false }} />
           <Stack.Screen name="clips" options={{ headerShown: false }} />
           <Stack.Screen name="export" options={{ headerShown: false }} />
