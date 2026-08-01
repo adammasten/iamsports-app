@@ -6,8 +6,8 @@ import { loadContentFeed, type ContentFeedDebug, type FeedItem } from '@/lib/cor
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -67,6 +67,12 @@ export default function SelectTeamScreen() {
   const [creatingKid, setCreatingKid] = useState(false);
   // player_id -> signed photo URL, minted from each kid's photo_path.
   const [kidPhotoUris, setKidPhotoUris] = useState<Record<string, string>>({});
+  // Unseen-notification count for the header bell badge. Refetched on every focus
+  // (so it clears after returning from the notifications list, which marks seen).
+  const [unseenNotif, setUnseenNotif] = useState(0);
+  useFocusEffect(useCallback(() => {
+    supabase.rpc('notifications_unseen_count').then(({ data }) => setUnseenNotif((data as number) ?? 0));
+  }, []));
 
   // Home content feed: newest games (quarters collapsed to one card), loose
   // videos + reels across ALL my teams + kids, deduped in @/lib/core/homeFeed.
@@ -320,8 +326,13 @@ export default function SelectTeamScreen() {
           <TouchableOpacity style={styles.iconBtn}>
             <Ionicons name="search-outline" size={22} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/notifications')}>
             <Ionicons name="notifications-outline" size={22} color="#fff" />
+            {unseenNotif > 0 && (
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeText}>{unseenNotif > 99 ? '99+' : unseenNotif}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -513,6 +524,11 @@ const styles = StyleSheet.create({
   brand: { fontSize: 22, fontWeight: '700', color: '#fff' },
   headerIcons: { flexDirection: 'row', gap: 4 },
   iconBtn: { padding: 6 },
+  notifBadge: {
+    position: 'absolute', top: 0, right: 0, minWidth: 16, height: 16, borderRadius: 8,
+    backgroundColor: '#EF5350', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4,
+  },
+  notifBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
 
   body: { paddingHorizontal: 20, paddingBottom: 24 },
   sectionLabel: {
