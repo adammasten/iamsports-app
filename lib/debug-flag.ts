@@ -1,13 +1,11 @@
-// Debug-overlay gate. The yellow diagnostic panels (DebugPanel) render ONLY in
-// development — __DEV__ is compile-time true in a dev/Metro build and is
-// eliminated (false) in preview + release/TestFlight builds, so the overlays
-// disappear in anything shipped while staying available whenever you run a dev
-// build. They're the instrument that caught the orphaned-file bug (edits landing
-// in home.tsx while index.tsx rendered) — kept reachable via dev, not deleted.
+// Debug-overlay gate. The yellow diagnostic panels (DebugPanel) show which
+// screen is rendering + row counts — they're what caught the orphaned-file bug
+// (edits landing in home.tsx while index.tsx rendered). They're OFF everywhere
+// now, including Expo Go / dev, because we no longer need to watch them.
 //
-// (There used to be a persisted runtime flag + hidden Account long-press toggle
-// that could force the overlays on in preview builds. That override was removed
-// so nothing shipped can surface them — gate is __DEV__ only now.)
+// NOT deleted — to bring them back (dev only), flip this to `return __DEV__;`
+// (or `return true;` to force them on in every build). The DebugPanel component
+// and both call sites (select-team.tsx, (tabs)/index.tsx) are still in place.
 export function useDebugEnabled(): boolean {
-  return __DEV__;
+  return false;
 }
