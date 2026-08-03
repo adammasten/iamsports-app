@@ -141,23 +141,32 @@ function computeGameOffline(
   const RED    = { bg: '#fdecea', fg: '#c62828' };
 
   if (anyInFlight) {
-    // Overall percent = bytes written / bytes expected, summed across every
-    // ready video's live progress row. Cached videos aren't in the progress
-    // map, so we skip them — the shown percent is "of the work still active."
+    // Sum live progress across still-active videos. Cached videos aren't in
+    // the progress map. The shown percent is "of the work in flight right now."
     let totalWritten = 0;
     let totalExpected = 0;
     for (const v of ready) {
       const p = progressMap[v.id];
-      if (p && p.bytesExpected > 0) { totalWritten += p.bytesWritten; totalExpected += p.bytesExpected; }
+      if (!p) continue;
+      totalWritten += p.bytesWritten;
+      if (p.bytesExpected > 0) totalExpected += p.bytesExpected;
     }
-    const pct = totalExpected > 0 ? Math.round((totalWritten / totalExpected) * 100) : null;
-    const label = pct != null ? `⋯ Downloading ${pct}%` : '⋯ Downloading…';
+    // Preferred: percent when expected-size is known. Fallback: MB-so-far so
+    // the coach at least sees a number tick up when the server didn't return
+    // a Content-Length. Last resort: '⋯ Starting…' before the first packet.
+    let label: string;
+    if (totalExpected > 0) {
+      label = `⋯ ${Math.round((totalWritten / totalExpected) * 100)}%`;
+    } else if (totalWritten > 0) {
+      label = `⋯ ${(totalWritten / (1024 * 1024)).toFixed(1)} MB`;
+    } else {
+      label = '⋯ Starting…';
+    }
     return { label, ...PURPLE, action: 'inflight' };
   }
-  if (anyError) return { label: '↻ Retry download', ...RED, action: 'retry' };
+  if (anyError) return { label: '↻ Retry', ...RED, action: 'retry' };
   if (cachedCount === total) return { label: '✓ Offline', ...GREEN, action: 'remove' };
-  if (cachedCount > 0) return { label: `⬇ ${cachedCount}/${total} offline`, ...PURPLE, action: 'download' };
-  return { label: '⬇ Save Offline', ...PURPLE, action: 'download' };
+  return { label: '⬇ Offline', ...PURPLE, action: 'download' };
 }
 
 // Tagging-status traffic light for the GAME badge outline. Vivid hues so they
