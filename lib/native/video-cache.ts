@@ -35,21 +35,33 @@ const BUDGET_BYTES = DEFAULT_BUDGET_BYTES;
 
 export type CacheStatus = 'idle' | 'queued' | 'downloading' | 'cached' | 'error';
 
+export type CacheProgress = { bytesWritten: number; bytesExpected: number };
+
 export type PrefetchResult =
   | { ok: true; path: string }
-  | { ok: false; reason: 'too_large' | 'network' | 'web' };
+  | { ok: false; reason: 'too_large' | 'network' | 'web' | 'stalled' };
 
 type StatusListener = (videoId: string, status: CacheStatus) => void;
+type ProgressListener = (videoId: string, p: CacheProgress) => void;
 
 const isWeb = Platform.OS === 'web';
 
+// Kill a download that hasn't reported any bytes in this many ms. Prevents the
+// "just spins forever" case when the network stalls silently (spotty airport
+// wifi, dropped tower, etc.) — createDownloadResumable's promise doesn't
+// resolve or reject on its own until the OS finally times out (many minutes).
+const STALL_TIMEOUT_MS = 90_000;
+
 // --- in-memory state ---------------------------------------------------------
 // Manifest is lazy-loaded from AsyncStorage on first access, then kept in
-// sync via saveManifest. downloadStatus is purely transient (resets on app
-// restart, hydrated from the manifest on first load).
+// sync via saveManifest. downloadStatus + downloadProgress are purely
+// transient (reset on app restart, status is hydrated from the manifest on
+// first load).
 let manifestCache: CacheEntry[] | null = null;
 const downloadStatus = new Map<string, CacheStatus>();
+const downloadProgress = new Map<string, CacheProgress>();
 const listeners = new Set<StatusListener>();
+const progressListeners = new Set<ProgressListener>();
 const inflight = new Map<string, Promise<PrefetchResult>>();
 // Single-slot serial queue: one download at a time so we don't saturate the
 // uplink and don't race manifest writes. .catch keeps the chain alive after
@@ -101,6 +113,27 @@ function setStatus(videoId: string, status: CacheStatus): void {
     } catch (e) {
       console.warn('[video-cache] listener threw:', e);
     }
+  }
+}
+
+function setProgress(videoId: string, p: CacheProgress): void {
+  downloadProgress.set(videoId, p);
+  for (const l of progressListeners) {
+    try {
+      l(videoId, p);
+    } catch (e) {
+      console.warn('[video-cache] progress listener threw:', e);
+    }
+  }
+}
+
+function clearProgress(videoId: string): void {
+  downloadProgress.delete(videoId);
+  // Fire a zeroed-out event so subscribers can clean up their local state.
+  for (const l of progressListeners) {
+    try {
+      l(videoId, { bytesWritten: 0, bytesExpected: 0 });
+    } catch { /* ignore */ }
   }
 }
 
@@ -185,10 +218,21 @@ export function getStatus(videoId: string): CacheStatus {
   return downloadStatus.get(videoId) ?? 'idle';
 }
 
+export function getProgress(videoId: string): CacheProgress | null {
+  return downloadProgress.get(videoId) ?? null;
+}
+
 export function subscribe(listener: StatusListener): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
+  };
+}
+
+export function subscribeProgress(listener: ProgressListener): () => void {
+  progressListeners.add(listener);
+  return () => {
+    progressListeners.delete(listener);
   };
 }
 
@@ -238,11 +282,44 @@ async function runPrefetch(
   }
 
   setStatus(videoId, 'downloading');
+  // Seed with 0/expected — UI can render a paused-looking bar immediately
+  // rather than waiting for the first byte before showing anything.
+  setProgress(videoId, { bytesWritten: 0, bytesExpected: incoming });
 
   const dest = pathFor(videoId);
+  let lastProgressAt = Date.now();
+  let stalled = false;
+  // 4th arg is expo's progress callback. Every packet resets the stall timer.
+  const download = FileSystem.createDownloadResumable(
+    signedUrl,
+    dest,
+    {},
+    (p) => {
+      lastProgressAt = Date.now();
+      setProgress(videoId, { bytesWritten: p.totalBytesWritten, bytesExpected: p.totalBytesExpectedToWrite });
+    },
+  );
+  // Watchdog: if the download hasn't written a byte in STALL_TIMEOUT_MS, cancel
+  // it so the promise below rejects instead of hanging until the OS times out
+  // (which can be many minutes). Fixes the "just spins forever" case.
+  const stallCheck = setInterval(() => {
+    if (Date.now() - lastProgressAt > STALL_TIMEOUT_MS) {
+      stalled = true;
+      download.cancelAsync().catch(() => { /* ignore — race with completion */ });
+    }
+  }, 5000);
+
   try {
-    const download = FileSystem.createDownloadResumable(signedUrl, dest);
     const result = await download.downloadAsync();
+    clearInterval(stallCheck);
+    if (stalled) {
+      // cancelAsync races with normal completion — bias toward reporting the
+      // stall since that's the user-visible symptom to fix.
+      try { await FileSystem.deleteAsync(dest, { idempotent: true }); } catch { /* ignore */ }
+      setStatus(videoId, 'error');
+      clearProgress(videoId);
+      return { ok: false, reason: 'stalled' };
+    }
     if (!result || result.status >= 400) {
       throw new Error(`Download failed: status ${result?.status ?? 'unknown'}`);
     }
@@ -268,8 +345,10 @@ async function runPrefetch(
     });
     await saveManifest(nextManifest);
     setStatus(videoId, 'cached');
+    clearProgress(videoId);
     return { ok: true, path: dest };
   } catch (e) {
+    clearInterval(stallCheck);
     console.warn(`[video-cache] download failed for ${videoId}:`, e);
     try {
       await FileSystem.deleteAsync(dest, { idempotent: true });
@@ -277,7 +356,8 @@ async function runPrefetch(
       /* ignore */
     }
     setStatus(videoId, 'error');
-    return { ok: false, reason: 'network' };
+    clearProgress(videoId);
+    return { ok: false, reason: stalled ? 'stalled' : 'network' };
   }
 }
 

@@ -1,5 +1,4 @@
 import { useTeamContext } from '@/context';
-import { CacheStatus, getManifest, prefetch, remove as removeFromCache, subscribe } from '@/lib/native/video-cache';
 import { makeVideoLabel } from '@/lib/core/upload-meta';
 import { pendingFileSize, pickVideo, uploadVideoToBucket } from '@/lib/native/video-upload';
 import { requirePermission } from './permissionGuard';
@@ -9,16 +8,9 @@ import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-function badgeProps(status: CacheStatus): { label: string; bg: string; fg: string; pressable: boolean } {
-  switch (status) {
-    case 'cached':      return { label: '✓ Offline',      bg: '#e8f5e9', fg: '#2e7d32', pressable: true };
-    case 'downloading': return { label: '⋯ Saving',       bg: '#ede9fe', fg: '#534AB7', pressable: false };
-    case 'queued':      return { label: '⏸ Queued',       bg: '#f0f0f0', fg: '#666',    pressable: false };
-    case 'error':       return { label: '↻ Retry',        bg: '#fdecea', fg: '#c62828', pressable: true };
-    case 'idle':
-    default:            return { label: '⬇ Save Offline', bg: '#ede9fe', fg: '#534AB7', pressable: true };
-  }
-}
+// Note: the per-video "Save Offline" badge used to live here — it moved to the
+// game card on my-work.tsx (Film Room) as a single per-GAME action. Videos on
+// this screen are the tag/clip workflow only.
 
 export default function GameScreen() {
   const params = useLocalSearchParams();
@@ -34,7 +26,6 @@ export default function GameScreen() {
   const [showLabelForm, setShowLabelForm] = useState(false);
   const [videoLabel, setVideoLabel] = useState('');
   const [pendingFile, setPendingFile] = useState<any>(null);
-  const [cacheState, setCacheState] = useState<Record<string, CacheStatus>>({});
   // Persistent "it worked / here's where it is" confirmation after an upload.
   const [justUploaded, setJustUploaded] = useState<string | null>(null);
   // Inline per-video label rename (Q1 → Q3): which video + working draft.
@@ -45,25 +36,6 @@ export default function GameScreen() {
     if (id) { fetchGame(); fetchVideos(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const m = await getManifest();
-      if (cancelled) return;
-      setCacheState(prev => ({
-        ...prev,
-        ...Object.fromEntries(m.map(e => [e.videoId, 'cached' as CacheStatus])),
-      }));
-    })();
-    const unsub = subscribe((videoId, status) => {
-      setCacheState(prev => ({ ...prev, [videoId]: status }));
-    });
-    return () => {
-      cancelled = true;
-      unsub();
-    };
-  }, []);
 
   async function fetchVideos() {
     const { data, error } = await supabase.from('videos').select('*').eq('game_id', id).order('sort_order');
@@ -252,25 +224,22 @@ export default function GameScreen() {
         <FlatList
           data={videos}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => {
-            const status = cacheState[item.id] ?? 'idle';
-            const badge = badgeProps(status);
-            return (
-              <View style={styles.videoCard}>
-                {renamingVideoId === item.id ? (
-                  <View style={styles.videoCardMain}>
-                    <TextInput
-                      style={styles.videoRenameInput}
-                      value={videoDraft}
-                      onChangeText={setVideoDraft}
-                      autoFocus
-                      selectTextOnFocus
-                      returnKeyType="done"
-                      onSubmitEditing={() => commitVideoRename(item)}
-                      onBlur={() => commitVideoRename(item)}
-                    />
-                  </View>
-                ) : (
+          renderItem={({ item }) => (
+            <View style={styles.videoCard}>
+              {renamingVideoId === item.id ? (
+                <View style={styles.videoCardMain}>
+                  <TextInput
+                    style={styles.videoRenameInput}
+                    value={videoDraft}
+                    onChangeText={setVideoDraft}
+                    autoFocus
+                    selectTextOnFocus
+                    returnKeyType="done"
+                    onSubmitEditing={() => commitVideoRename(item)}
+                    onBlur={() => commitVideoRename(item)}
+                  />
+                </View>
+              ) : (
                 <TouchableOpacity
                   style={styles.videoCardMain}
                   onPress={() => item.upload_status && item.upload_status !== 'ready'
@@ -291,33 +260,9 @@ export default function GameScreen() {
                     {item.upload_status === 'uploading' ? 'Uploading…' : item.upload_status === 'failed' ? 'Upload didn’t finish · tap to delete' : 'Tap for options • Hold to delete'}
                   </Text>
                 </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={[styles.cacheBadge, { backgroundColor: badge.bg }]}
-                  onPress={() => {
-                    // A not-yet-finalized video has no object to cache — skip prefetch.
-                    if (item.upload_status && item.upload_status !== 'ready') return;
-                    if (status === 'idle' || status === 'error') {
-                      prefetch(item.id, item.url);
-                    } else if (status === 'cached') {
-                      Alert.alert(
-                        'Remove from device?',
-                        'The video stays in the cloud — you can save it offline again later.',
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Remove', style: 'destructive', onPress: () => removeFromCache(item.id) },
-                        ]
-                      );
-                    }
-                  }}
-                  disabled={!badge.pressable}
-                  activeOpacity={badge.pressable ? 0.6 : 1}
-                >
-                  <Text style={[styles.cacheBadgeText, { color: badge.fg }]} numberOfLines={2}>{badge.label}</Text>
-                </TouchableOpacity>
-              </View>
-            );
-          }}
+              )}
+            </View>
+          )}
         />
       )}
     </View>
@@ -350,7 +295,5 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#534AB7',
   },
   videoHint: { fontSize: 12, color: '#aaa' },
-  cacheBadge: { width: 96, paddingHorizontal: 8, paddingVertical: 8, justifyContent: 'center', alignItems: 'center' },
-  cacheBadgeText: { fontSize: 11, fontWeight: '600', textAlign: 'center' },
   empty: { textAlign: 'center', color: '#888', marginTop: 60, fontSize: 16 },
 });

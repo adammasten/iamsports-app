@@ -8,6 +8,15 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Tex
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
 import { downloadMedia } from '@/lib/native/download-media';
+import {
+  type CacheProgress,
+  type CacheStatus,
+  getManifest as getVideoCacheManifest,
+  prefetch as prefetchVideo,
+  remove as removeVideoFromCache,
+  subscribe as subscribeVideoCache,
+  subscribeProgress as subscribeVideoProgress,
+} from '@/lib/native/video-cache';
 import { LoadError } from '@/components/load-error';
 import { ShareNoteSheet, type NoteAudience } from '@/components/share-note-sheet';
 import { SkeletonCards } from '@/components/skeleton-cards';
@@ -98,6 +107,59 @@ type Game = {
   destinations: Destination[];
 };
 
+// Aggregate the video-cache state across a game's ready videos into ONE
+// button-shaped descriptor. Returns null when the game has no cacheable
+// videos (nothing uploaded/finalized yet — button should hide entirely).
+//
+// action:
+//   'download' — no manual entry yet, tap to prefetch all missing
+//   'inflight' — anything queued/downloading, tap is a no-op (spinner text)
+//   'retry'    — any video errored, tap to re-prefetch missing ones
+//   'remove'   — every video is cached, tap to confirm-and-remove-all
+type GameOfflineState = {
+  label: string;
+  bg: string;
+  fg: string;
+  action: 'download' | 'inflight' | 'retry' | 'remove';
+};
+function computeGameOffline(
+  game: Game,
+  statusMap: Record<string, CacheStatus>,
+  progressMap: Record<string, CacheProgress>,
+): GameOfflineState | null {
+  const ready = game.videos.filter(v => v.uploadStatus === 'ready');
+  if (ready.length === 0) return null;
+
+  const statuses = ready.map(v => statusMap[v.id] ?? 'idle');
+  const anyError = statuses.some(s => s === 'error');
+  const anyInFlight = statuses.some(s => s === 'downloading' || s === 'queued');
+  const cachedCount = statuses.filter(s => s === 'cached').length;
+  const total = ready.length;
+
+  const PURPLE = { bg: '#534AB7', fg: '#fff' };
+  const GREEN  = { bg: '#e8f5e9', fg: '#2e7d32' };
+  const RED    = { bg: '#fdecea', fg: '#c62828' };
+
+  if (anyInFlight) {
+    // Overall percent = bytes written / bytes expected, summed across every
+    // ready video's live progress row. Cached videos aren't in the progress
+    // map, so we skip them — the shown percent is "of the work still active."
+    let totalWritten = 0;
+    let totalExpected = 0;
+    for (const v of ready) {
+      const p = progressMap[v.id];
+      if (p && p.bytesExpected > 0) { totalWritten += p.bytesWritten; totalExpected += p.bytesExpected; }
+    }
+    const pct = totalExpected > 0 ? Math.round((totalWritten / totalExpected) * 100) : null;
+    const label = pct != null ? `⋯ Downloading ${pct}%` : '⋯ Downloading…';
+    return { label, ...PURPLE, action: 'inflight' };
+  }
+  if (anyError) return { label: '↻ Retry download', ...RED, action: 'retry' };
+  if (cachedCount === total) return { label: '✓ Offline', ...GREEN, action: 'remove' };
+  if (cachedCount > 0) return { label: `⬇ ${cachedCount}/${total} offline`, ...PURPLE, action: 'download' };
+  return { label: '⬇ Save Offline', ...PURPLE, action: 'download' };
+}
+
 // Tagging-status traffic light for the GAME badge outline. Vivid hues so they
 // read against the badge's amber fill (yellow is the tightest contrast — tune
 // here if it muddies). Green ("done") arrives with the tagging_complete flag.
@@ -165,6 +227,30 @@ export default function MyWorkScreen() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [savedItems, setSavedItems] = useState<SavedEntry[]>([]);
   const [draftName, setDraftName] = useState('');
+
+  // Per-video offline cache state. Aggregated into per-game "Save for offline"
+  // buttons on game cards below. Hydrated once from the persisted manifest,
+  // then kept live via video-cache subscribers.
+  const [videoCacheStatus, setVideoCacheStatus] = useState<Record<string, CacheStatus>>({});
+  const [videoCacheProgress, setVideoCacheProgress] = useState<Record<string, CacheProgress>>({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const m = await getVideoCacheManifest();
+      if (cancelled) return;
+      setVideoCacheStatus(prev => ({
+        ...prev,
+        ...Object.fromEntries(m.map(e => [e.videoId, 'cached' as CacheStatus])),
+      }));
+    })();
+    const unsubStatus = subscribeVideoCache((vid, s) =>
+      setVideoCacheStatus(prev => ({ ...prev, [vid]: s })),
+    );
+    const unsubProgress = subscribeVideoProgress((vid, p) =>
+      setVideoCacheProgress(prev => ({ ...prev, [vid]: p })),
+    );
+    return () => { cancelled = true; unsubStatus(); unsubProgress(); };
+  }, []);
   // Inline video-label rename (per-video, e.g. Q1 → Q3): which video + draft.
   const [renamingVideoId, setRenamingVideoId] = useState<string | null>(null);
   const [videoDraft, setVideoDraft] = useState('');
@@ -905,6 +991,38 @@ export default function MyWorkScreen() {
     }
   }
 
+  // Tap handler for the per-game Save Offline button. Branches on the aggregate
+  // state's action (see computeGameOffline). Prefetch is idempotent — cached
+  // videos are cheap to re-request (they return { ok: true } immediately).
+  function handleOfflineTap(game: Game, action: GameOfflineState['action']) {
+    if (action === 'inflight') return;
+    const ready = game.videos.filter(v => v.uploadStatus === 'ready');
+    if (ready.length === 0) return;
+
+    if (action === 'remove') {
+      Alert.alert(
+        'Remove from device?',
+        `The videos stay in the cloud — you can save them offline again later.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove', style: 'destructive', onPress: async () => {
+            for (const v of ready) await removeVideoFromCache(v.id);
+          }},
+        ],
+      );
+      return;
+    }
+
+    // 'download' or 'retry' — kick off missing/errored videos. prefetch is
+    // dedup'd inside video-cache (in-flight promise + serial queue), so mass
+    // calling here is safe.
+    for (const v of ready) {
+      const s = videoCacheStatus[v.id] ?? 'idle';
+      if (s === 'cached' || s === 'downloading' || s === 'queued') continue;
+      prefetchVideo(v.id, v.url).catch(() => { /* per-video errors surface via status → 'error' → red button */ });
+    }
+  }
+
   async function downloadGame(game: Game) {
     const items = game.videos.filter(v => v.url && v.uploadStatus === 'ready').map(v => ({ key: v.url, filename: `${game.title} - ${v.label}` }));
     if (items.length === 0) { Alert.alert('Download', 'This game has no finished videos yet.'); return; }
@@ -1404,6 +1522,24 @@ export default function MyWorkScreen() {
                       >
                         <Text style={styles.postBtnText}>{game.destinations.length ? 'Manage sharing' : 'Share'}</Text>
                       </TouchableOpacity>
+                      {(() => {
+                        // Per-game aggregate: cache each ready video individually,
+                        // roll status + progress into one label. The label doubles
+                        // as the button's "state" — tap behavior follows what it
+                        // currently shows.
+                        const off = computeGameOffline(game, videoCacheStatus, videoCacheProgress);
+                        if (!off) return null;   // no ready videos → nothing to offer
+                        return (
+                          <TouchableOpacity
+                            style={[styles.gameOfflineBtn, { flex: 1, backgroundColor: off.bg }]}
+                            onPress={() => handleOfflineTap(game, off.action)}
+                            disabled={off.action === 'inflight'}
+                            activeOpacity={off.action === 'inflight' ? 1 : 0.6}
+                          >
+                            <Text style={[styles.gameOfflineText, { color: off.fg }]} numberOfLines={1}>{off.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })()}
                       <TouchableOpacity style={styles.trashBtn} onPress={() => downloadGame(game)} disabled={downloadingId === game.id}>
                         {downloadingId === game.id
                           ? <ActivityIndicator size="small" color="#4a90d9" />
@@ -1721,7 +1857,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#534AB7',
   },
   videoOptHint: { color: '#888', fontSize: 11, marginTop: 1 },
-  gamePostBtn: { alignSelf: 'flex-start', backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 10 },
+  gamePostBtn: { alignSelf: 'flex-start', backgroundColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 10, alignItems: 'center', justifyContent: 'center' },
+  gameOfflineBtn: { borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, marginTop: 10, alignItems: 'center', justifyContent: 'center' },
+  gameOfflineText: { fontSize: 12, fontWeight: '700' },
   gameAddBtn: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#534AB7', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, marginTop: 8 },
   gameAddText: { color: '#534AB7', fontSize: 12, fontWeight: '700' },
   typeBadgeWrap: { marginBottom: 6 },
