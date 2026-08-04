@@ -118,6 +118,10 @@ end $$;
 
 
 -- ── 6. Coach holds a roster spot (placeholder + its guardian code) ──────────
+-- SUPERSEDED: this version raises "column reference player_id is ambiguous" (the
+-- returns-table OUT var collides with player_teams.player_id in ON CONFLICT).
+-- Fixed in migration_fix_roster_placeholder_ambiguous.sql (adds
+-- #variable_conflict use_column). Keep them in sync if you touch this.
 create or replace function public.create_roster_placeholder(p_team_id uuid, p_name text, p_jersey text default null)
 returns table (player_id uuid, guardian_code text)
 language plpgsql security definer set search_path to 'public' as $$
