@@ -39,7 +39,7 @@ export type CacheProgress = { bytesWritten: number; bytesExpected: number };
 
 export type PrefetchResult =
   | { ok: true; path: string }
-  | { ok: false; reason: 'too_large' | 'network' | 'web' | 'stalled' };
+  | { ok: false; reason: 'too_large' | 'network' | 'web' | 'stalled' | 'incomplete' };
 
 type StatusListener = (videoId: string, status: CacheStatus) => void;
 type ProgressListener = (videoId: string, p: CacheProgress) => void;
@@ -243,16 +243,23 @@ async function runPrefetch(
   await ensureCacheDir();
   let manifest = await loadManifest();
 
-  if (manifest.some(e => e.videoId === videoId)) {
+  const existing = manifest.find(e => e.videoId === videoId);
+  if (existing) {
     const p = pathFor(videoId);
     const info = await FileSystem.getInfoAsync(p);
-    if (info.exists) {
+    const onDisk = (info as { size?: number }).size ?? 0;
+    // Treat as cached ONLY if the file exists AND its on-disk size matches the
+    // size we recorded when caching. A mismatch means a truncated/partial file
+    // (e.g. a big download that ended early) — never hand that to the player, it
+    // errors on the missing trailing moov atom. (sizeBytes<=0 = a pre-fix entry
+    // with no recorded size; fall back to existence so we don't churn old caches.)
+    if (info.exists && (existing.sizeBytes <= 0 || onDisk === existing.sizeBytes)) {
       await saveManifest(touchPolicy(manifest, videoId, Date.now()));
       setStatus(videoId, 'cached');
       return { ok: true, path: p };
     }
-    // Manifest claims cached but disk says otherwise — drop the stale entry
-    // and fall through to download.
+    // Missing or size-mismatched — drop the stale entry and fall through to
+    // re-download.
     manifest = removeEntries(manifest, [videoId]);
     await saveManifest(manifest);
   }
@@ -324,15 +331,33 @@ async function runPrefetch(
       throw new Error(`Download failed: status ${result?.status ?? 'unknown'}`);
     }
 
-    const info = await FileSystem.getInfoAsync(dest, { size: true });
+    const info = await FileSystem.getInfoAsync(dest);
     if (!info.exists) throw new Error('Download finished but file missing');
     const realSize = (info as { size?: number }).size ?? 0;
+
+    // Completeness gate: downloadAsync can resolve "successfully" with a short
+    // file when the connection drops mid-stream without an HTTP error (common on
+    // a multi-GB game over flaky venue wifi). A truncated video is missing its
+    // trailing moov atom and will fail to play — so if HEAD told us the expected
+    // length and the file on disk is short, reject it rather than caching a
+    // broken "✓ Offline" file the player later chokes on.
+    if (headSize != null && realSize !== headSize) {
+      console.warn(`[video-cache] incomplete download for ${videoId}: ${realSize}/${headSize} bytes — discarding`);
+      try { await FileSystem.deleteAsync(dest, { idempotent: true }); } catch { /* ignore */ }
+      setStatus(videoId, 'error');
+      clearProgress(videoId);
+      return { ok: false, reason: 'incomplete' };
+    }
+
+    // The complete size to record: the HEAD-reported length when we have it
+    // (== realSize past the gate above), else the measured size.
+    const cachedSize = headSize ?? realSize;
 
     // Recovery pass: if HEAD lied (or was missing) and we're now over budget,
     // run eviction again now that we know the real size.
     let nextManifest = await loadManifest();
-    if (totalUsageBytes(nextManifest) + realSize > BUDGET_BYTES) {
-      const recovery = planEvictions(nextManifest, BUDGET_BYTES, realSize);
+    if (totalUsageBytes(nextManifest) + cachedSize > BUDGET_BYTES) {
+      const recovery = planEvictions(nextManifest, BUDGET_BYTES, cachedSize);
       if (recovery.evict.length > 0) {
         nextManifest = await evictAndPersist(recovery.evict, nextManifest);
       }
@@ -340,7 +365,7 @@ async function runPrefetch(
 
     nextManifest = upsertEntry(nextManifest, {
       videoId,
-      sizeBytes: realSize,
+      sizeBytes: cachedSize,
       lastAccessedAt: Date.now(),
     });
     await saveManifest(nextManifest);
