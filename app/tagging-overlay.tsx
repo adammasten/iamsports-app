@@ -14,7 +14,7 @@ import { goBackOrHome } from '@/lib/nav';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -62,6 +62,14 @@ export default function TaggingOverlayScreen() {
     ? parseFloat(Array.isArray(params.startAt) ? params.startAt[0] : (params.startAt as string))
     : null;
   const insets = useSafeAreaInsets();
+  // Bind the root's size to the live window. app.json is orientation:"portrait";
+  // this screen force-locks LANDSCAPE at runtime, so on entry the OS rotates and
+  // resizes the window a beat AFTER the tree first lays out. Reading window size
+  // here re-renders the moment that resize lands, forcing the root (and every
+  // absolute-fill child) to re-measure to landscape — fixing the intermittent
+  // "left half paints, right half blank" first-entry race. NOT keyed → no player
+  // remount.
+  const { width: winW, height: winH } = useWindowDimensions();
   const { activeTeam, userId } = useTeamContext();
 
   const [startTime, setStartTime] = useState<number | null>(null);
@@ -660,7 +668,7 @@ export default function TaggingOverlayScreen() {
   }
 
   return (
-    <GestureHandlerRootView style={styles.container}>
+    <GestureHandlerRootView style={[styles.container, { width: winW, height: winH }]}>
       <VideoView
         player={player}
         style={StyleSheet.absoluteFillObject}

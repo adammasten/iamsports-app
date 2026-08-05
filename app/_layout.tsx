@@ -190,7 +190,7 @@ export default function RootLayout() {
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
           <Stack.Screen name="game" options={{ headerShown: false }} />
-          <Stack.Screen name="tagging-overlay" options={{ headerShown: false }} />
+          <Stack.Screen name="tagging-overlay" options={{ headerShown: false, contentStyle: { backgroundColor: '#000' } }} />
           <Stack.Screen name="team-archive" options={{ headerShown: false }} />
           <Stack.Screen name="notifications" options={{ headerShown: false }} />
           <Stack.Screen name="search" options={{ headerShown: false }} />
