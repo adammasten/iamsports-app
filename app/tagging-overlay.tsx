@@ -62,14 +62,19 @@ export default function TaggingOverlayScreen() {
     ? parseFloat(Array.isArray(params.startAt) ? params.startAt[0] : (params.startAt as string))
     : null;
   const insets = useSafeAreaInsets();
-  // Bind the root's size to the live window. app.json is orientation:"portrait";
-  // this screen force-locks LANDSCAPE at runtime, so on entry the OS rotates and
-  // resizes the window a beat AFTER the tree first lays out. Reading window size
-  // here re-renders the moment that resize lands, forcing the root (and every
-  // absolute-fill child) to re-measure to landscape — fixing the intermittent
-  // "left half paints, right half blank" first-entry race. NOT keyed → no player
-  // remount.
+  // Size the root to a LANDSCAPE shape regardless of the phone's current
+  // orientation: long edge = width, short edge = height. app.json is
+  // orientation:"portrait" and this screen force-locks LANDSCAPE at runtime, so
+  // the window can momentarily report portrait dimensions — on entry (before the
+  // rotate settles) and on exit (when you turn the phone upright mid-back). Using
+  // the raw window size made the landscape overlay collapse into a portrait
+  // column stack in those windows. Pinning to max/min keeps the frame landscape
+  // through every transition; reading useWindowDimensions still re-renders when
+  // the physical size is known, so the root always fills the real screen. NOT
+  // keyed → no player remount.
   const { width: winW, height: winH } = useWindowDimensions();
+  const landW = Math.max(winW, winH);
+  const landH = Math.min(winW, winH);
   const { activeTeam, userId } = useTeamContext();
 
   const [startTime, setStartTime] = useState<number | null>(null);
@@ -344,6 +349,22 @@ export default function TaggingOverlayScreen() {
       };
     }, [])
   );
+
+  // Exit handler for the Back button: rotate to portrait FIRST (awaited), THEN
+  // navigate. Doing the rotation before the nav transition — rather than firing
+  // nav immediately and letting the blur-cleanup rotate whenever — means there's
+  // no half-rotated / half-navigated moment for a physical phone-turn to catch,
+  // which is what jammed the screen (stuck, landscape overlay squished into a
+  // portrait column). lockAsync can reject if the screen's already tearing down;
+  // swallow it and navigate regardless so Back can never be a dead end.
+  async function handleBack() {
+    try {
+      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    } catch {
+      /* orientation module unavailable / screen unmounting — navigate anyway */
+    }
+    goBackOrHome();
+  }
 
   // V3 tag scope is global | team only. Global tags are visible to every team;
   // team tags are visible only to memberships of activeTeam. The .or(...)
@@ -672,7 +693,7 @@ export default function TaggingOverlayScreen() {
   }
 
   return (
-    <GestureHandlerRootView style={[styles.container, { width: winW, height: winH }]}>
+    <GestureHandlerRootView style={[styles.container, { width: landW, height: landH }]}>
       <VideoView
         player={player}
         style={StyleSheet.absoluteFillObject}
@@ -736,7 +757,7 @@ export default function TaggingOverlayScreen() {
             style={[styles.topBar, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
             pointerEvents="box-none"
           >
-            <TouchableOpacity style={styles.backBtn} onPress={goBackOrHome} hitSlop={8}>
+            <TouchableOpacity style={styles.backBtn} onPress={handleBack} hitSlop={8}>
               <Text style={styles.backBtnText}>←</Text>
             </TouchableOpacity>
             {!isWatch && (
