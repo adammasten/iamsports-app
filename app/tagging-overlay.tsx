@@ -4,7 +4,7 @@
 // stays the same in both modes: top bar, right-edge bundle strip, scrub bar,
 // bottom controls row. Toggle is in the bottom controls row (rightmost).
 import { useTeamContext } from '@/context';
-import { getCachedPathSync, prefetch as prefetchVideo, subscribeProgress, touch as touchVideoCache } from '@/lib/native/video-cache';
+import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { useEvent } from 'expo';
@@ -78,12 +78,6 @@ export default function TaggingOverlayScreen() {
   // True when getSignedVideoUrl returned null (couldn't mint a signed URL for
   // network playback). Routed into the existing error/retry overlay below.
   const [signFailed, setSignFailed] = useState(false);
-  // Non-null while we're downloading-then-playing a non-cached game (0-100). These
-  // full-game files are multi-GB and don't stream reliably (MP4 index at the end),
-  // but the fully-downloaded local copy plays fine — so for an uncached video we
-  // fetch it to the cache first (with the completeness check) and play the local
-  // file, falling back to streaming only if the download fails.
-  const [downloadPct, setDownloadPct] = useState<number | null>(null);
 
   const [clipLevelTags, setClipLevelTags] = useState<string[]>([]);
   const [bundles, setBundles] = useState<string[][]>([]);
@@ -271,35 +265,13 @@ export default function TaggingOverlayScreen() {
     }
   }, [remoteUrl, player]);
 
-  // Initial load. Cached → the player already has the local file (initialSource).
-  // Not cached → DOWNLOAD-THEN-PLAY: fetch to the cache first and play the local
-  // copy (big games don't stream reliably; the local file does). Fall back to
-  // streaming if there's nothing to cache under or the download fails.
+  // Initial load. Cached → the player already has the local file (initialSource,
+  // instant + offline). Not cached → just STREAM: mint a signed URL and play.
+  // (Big games stream fine now that they're faststarted server-side, so no
+  // download-first — that stopgap made Watch download the whole game before
+  // playing, which is the opposite of what we want.)
   useEffect(() => {
-    if (cachedPath) return; // local file already wired as initialSource
-    if (!videoId || !remoteUrl) { loadSignedSource(); return; } // can't cache → stream
-
-    let cancelled = false;
-    setDownloadPct(0);
-    const unsub = subscribeProgress((vid, p) => {
-      if (vid !== videoId || cancelled) return;
-      setDownloadPct(p.bytesExpected > 0 ? Math.floor((p.bytesWritten / p.bytesExpected) * 100) : 0);
-    });
-
-    (async () => {
-      const res = await prefetchVideo(videoId, remoteUrl);
-      if (cancelled) return;
-      setDownloadPct(null);
-      if (res.ok) {
-        try { player.replace(res.path); } catch (e) { console.warn('[watch] play cached skipped (released):', e); }
-        return;
-      }
-      // Download failed (incomplete/stalled/network) — last-resort stream.
-      console.warn('[watch] prefetch failed, streaming instead:', res.reason);
-      loadSignedSource();
-    })();
-
-    return () => { cancelled = true; unsub(); };
+    if (!cachedPath) loadSignedSource();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -743,9 +715,7 @@ export default function TaggingOverlayScreen() {
             <>
               <ActivityIndicator size="large" color="#EF9F27" />
               <Text style={styles.loadingText}>
-                {downloadPct !== null
-                  ? `Downloading… ${downloadPct}%  (big games download once, then play)`
-                  : `Loading video...${retryCountRef.current > 0 ? ' (retrying)' : ''}`}
+                Loading video...{retryCountRef.current > 0 ? ' (retrying)' : ''}
               </Text>
             </>
           )}
