@@ -25,7 +25,6 @@ import { requirePermission } from './permissionGuard';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 import ContentTypeBadge from './components/ContentTypeBadge';
-import VisibilityPicker, { type VisibilitySelection } from './components/VisibilityPicker';
 
 // "My Work" — lists the current user's highlight reels (highlight_reels rows
 // they created). Each card shows WHERE the reel lives (public / team / private)
@@ -263,10 +262,6 @@ export default function MyWorkScreen() {
   // Inline video-label rename (per-video, e.g. Q1 → Q3): which video + draft.
   const [renamingVideoId, setRenamingVideoId] = useState<string | null>(null);
   const [videoDraft, setVideoDraft] = useState('');
-
-  // Post-to-wall picker state: which reel + kid the user chose in the Alert,
-  // held while VisibilityPicker collects the tier. null = picker hidden.
-  const [pendingPost, setPendingPost] = useState<{ item: Postable; playerId: string; kidName: string } | null>(null);
 
   // Players on teams the user coaches (loaded below) — candidates for the
   // post-to-wall picker beyond the user's own kids.
@@ -872,7 +867,7 @@ export default function MyWorkScreen() {
   }
 
   // Open the destination tier chooser (Your Kids / Your Teams / Coaches' Corner).
-  // Your Kids routes to the existing player sheet + VisibilityPicker flow; the
+  // Your Kids routes to the player sheet → note → post to that kid's family; the
   // two team tiers post player-less, coach-gated shares. Empty-state stands when
   // the user has neither kids nor coached teams.
   function confirmPostToWall(item: Postable) {
@@ -885,10 +880,26 @@ export default function MyWorkScreen() {
     setTierReel(item);
   }
 
-  // Player chosen in the sheet — defer posting and let VisibilityPicker collect
-  // the tier (public / team / private) before any RPC fires.
+  // Player chosen in the sheet → straight to the note sheet, then post to that
+  // kid's family (audience='player'). No visibility step: picking a kid already
+  // says who it's for, so re-asking "Only me / Friends & Family / Team wall"
+  // (which is where a mistaken "Only me" silently kept it private) is dropped.
   function postReelToKid(item: Postable, playerId: string, kidName: string) {
-    setPendingPost({ item, playerId, kidName });
+    setNoteSheet({
+      audience: { label: `Only ${kidName}’s family will see this`, icon: 'people', color: '#8B7CF6' },
+      run: async (note) => {
+        const { data: shareId, error } = await supabase.rpc('post_to_wall', {
+          p_content_type: item.contentType,
+          p_content_id: item.contentId,
+          p_audience: 'player',
+          p_target_player_id: playerId,
+        });
+        if (error) { Alert.alert('Couldn’t share', error.message); return; }
+        if (note && shareId) await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: note });
+        addDestinations(item.contentId, [{ kind: 'player', kidName, playerId }]);
+        Alert.alert('Shared', `Sent to ${kidName}’s family.` + (note ? ' With your note.' : ''));
+      },
+    });
   }
 
   // Merge destination badges onto content (dedup by kind; team by name).
@@ -1162,77 +1173,6 @@ export default function MyWorkScreen() {
         if (note && shareId) await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: note });
         addDestinations(item.contentId, [{ kind: 'coaches', teamId, teamName }]);
         Alert.alert('Posted', `Posted to ${teamName} coaches’ board.` + (note ? ' With your note.' : ''));
-      },
-    });
-  }
-
-  // Picker resolved a SET of audiences. "Only me" writes nothing; each other
-  // selection is one post_to_wall call (SECURITY DEFINER — requires the caller
-  // be a linked parent of the target player, true for the user's own kids).
-  // Friends & Family maps to the 'player' audience (family-only — NEVER 'public').
-  async function handleVisibilitySelect(sel: VisibilitySelection) {
-    const pending = pendingPost;
-    if (!pending) return;
-    setPendingPost(null);
-    const { item, playerId, kidName } = pending;
-
-    // Build the list of audiences to post, each with the badge it maps to.
-    const targets: { audience: 'player' | 'public' | 'team'; teamId?: string; label: string; dest: Destination }[] = [];
-    if (sel.friendsFamily) {
-      targets.push({ audience: 'player', label: 'Friends & Family', dest: { kind: 'player', kidName, playerId } });
-    }
-    if (sel.public) {
-      targets.push({ audience: 'public', label: 'Public', dest: { kind: 'public' } });
-    }
-    if (sel.teamWall && sel.teamId) {
-      const teamName = sel.teamName ?? 'Team';
-      targets.push({ audience: 'team', teamId: sel.teamId, label: `${teamName} wall`, dest: { kind: 'team', teamName, teamId: sel.teamId } });
-    }
-
-    // Only-me (or an empty set) means no wall placement at all.
-    if (targets.length === 0) {
-      Alert.alert('Kept private', `“${item.title}” stays visible only to you.`);
-      return;
-    }
-
-    // Compose an optional note. The banner names exactly who will see it (the
-    // safety element). One note goes to each selected audience; differentiate
-    // per destination afterward via "Edit note" in Manage sharing.
-    const audLabels = targets.map(t => t.audience === 'player' ? `${kidName}’s family`
-      : t.audience === 'team' ? `everyone on ${(t.dest as any).teamName}` : 'public');
-    const hasBroad = targets.some(t => t.audience === 'team' || t.audience === 'public');
-    setNoteSheet({
-      audience: {
-        label: audLabels.length === 1 ? `Only ${audLabels[0]} will see this` : `${audLabels.join(' + ')} will see this`,
-        icon: hasBroad ? 'people-circle' : 'people',
-        color: hasBroad ? '#EF9F27' : '#8B7CF6',
-      },
-      run: async (note) => {
-        const posted: string[] = [];
-        const failed: string[] = [];
-        const newDests: Destination[] = [];
-        for (const t of targets) {
-          const params: Record<string, any> = {
-            p_content_type: item.contentType,
-            p_content_id: item.contentId,
-            p_audience: t.audience,
-            p_target_player_id: playerId,
-          };
-          if (t.audience === 'team' && t.teamId) params.p_team_id = t.teamId;
-          const { data: shareId, error } = await supabase.rpc('post_to_wall', params);
-          if (error) { failed.push(`${t.label}: ${error.message}`); continue; }
-          if (note && shareId) await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: note });
-          posted.push(t.label);
-          newDests.push(t.dest);
-        }
-        if (newDests.length > 0) addDestinations(item.contentId, newDests);
-        if (failed.length === 0) {
-          Alert.alert('Posted', `Posted to ${kidName}'s wall: ${posted.join(', ')}.` + (note ? ' With your note.' : ''));
-        } else if (posted.length === 0) {
-          Alert.alert('Error', `Nothing posted.\n${failed.join('\n')}`);
-        } else {
-          Alert.alert('Partly posted', `Posted: ${posted.join(', ')}.\nFailed:\n${failed.join('\n')}`);
-        }
       },
     });
   }
@@ -1793,14 +1733,6 @@ export default function MyWorkScreen() {
         </Modal>
       )}
 
-      {pendingPost && (
-        <VisibilityPicker
-          teams={userTeams.map(t => ({ id: t.team_id, name: t.name }))}
-          onSelect={handleVisibilitySelect}
-          onCancel={() => setPendingPost(null)}
-        />
-      )}
-
       {noteSheet && (
         <ShareNoteSheet
           audience={noteSheet.audience}
@@ -1919,7 +1851,7 @@ const styles = StyleSheet.create({
   postBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   trashBtn: { padding: 8 },
 
-  // Grouped "Post to wall" player-picker bottom sheet (mirrors VisibilityPicker).
+  // Grouped "Post to wall" player-picker bottom sheet.
   sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#1a1a1a', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20, paddingBottom: 32 },
   sheetTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
