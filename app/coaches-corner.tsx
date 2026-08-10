@@ -9,6 +9,7 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacit
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentTypeBadge from './components/ContentTypeBadge';
 import { ShareNote } from '@/components/share-note';
+import { ShareComments } from '@/components/share-comments';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 
@@ -232,20 +233,22 @@ export default function CoachesCornerScreen() {
               const item = postsById.get(fi.id);
               if (!item) return null;
               return (
-                <TouchableOpacity
-                  key={item.shareId}
-                  style={styles.card}
-                  onPress={() => openShared(item)}
-                  onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: true, onChanged: loadCoachesBoard })}
-                >
-                  <View style={styles.cardTop}>
-                    <Text style={styles.teamPill} numberOfLines={1}>{item.teamName}</Text>
-                    <ContentTypeBadge type={item.contentType} />
-                  </View>
-                  <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                  <Text style={styles.cardMeta}>{relativeTime(item.createdAt)}</Text>
-                  {item.note ? <ShareNote note={item.note} /> : null}
-                </TouchableOpacity>
+                <View key={item.shareId} style={styles.card}>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => openShared(item)}
+                    onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: true, onChanged: loadCoachesBoard })}
+                  >
+                    <View style={styles.cardTop}>
+                      <Text style={styles.teamPill} numberOfLines={1}>{item.teamName}</Text>
+                      <ContentTypeBadge type={item.contentType} />
+                    </View>
+                    <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+                    <Text style={styles.cardMeta}>{relativeTime(item.createdAt)}</Text>
+                    {item.note ? <ShareNote note={item.note} /> : null}
+                  </TouchableOpacity>
+                  <ShareComments shareId={item.shareId} />
+                </View>
               );
             })}
           </ScrollView>
