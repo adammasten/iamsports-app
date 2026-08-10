@@ -8,6 +8,10 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+// 🧪 Phase 0b spike toggle — shows the background-upload test card even in a
+// TestFlight/release build. Set to false (or delete the card) once 0b is done.
+const SPIKE_SHOW_BG_TEST = true;
+
 // Account controls. Two very different "leaving" paths, deliberately ranked:
 //   • Deactivate (top, friendly) — reversible; NOTHING is deleted. Log back in
 //     and everything's restored (see reactivate_my_account in the auth gate).
@@ -121,9 +125,10 @@ export default function AccountScreen() {
           )}
         </View>
 
-        {/* 🧪 DEV-ONLY — Phase 0b background-upload spike harness. Stripped from
-            release builds by __DEV__. Remove when 0b is done. */}
-        {__DEV__ && (
+        {/* 🧪 Phase 0b background-upload spike harness. Visible in TestFlight too
+            (a plain __DEV__ gate would hide it in a release build). Flip
+            SPIKE_SHOW_BG_TEST to false / remove this card when 0b is done. */}
+        {SPIKE_SHOW_BG_TEST && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>🧪 Dev: Background upload test</Text>
             <TouchableOpacity style={styles.btnPrimary} onPress={() => router.push('/bg-upload-test')}>
