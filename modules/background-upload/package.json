@@ -1,0 +1,6 @@
+{
+  "name": "background-upload",
+  "version": "1.0.0",
+  "description": "Local Expo module: background URLSession uploader (Phase 0b spike)",
+  "main": "index.ts"
+}

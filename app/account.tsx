@@ -121,6 +121,17 @@ export default function AccountScreen() {
           )}
         </View>
 
+        {/* 🧪 DEV-ONLY — Phase 0b background-upload spike harness. Stripped from
+            release builds by __DEV__. Remove when 0b is done. */}
+        {__DEV__ && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>🧪 Dev: Background upload test</Text>
+            <TouchableOpacity style={styles.btnPrimary} onPress={() => router.push('/bg-upload-test')}>
+              <Text style={styles.btnPrimaryText}>Open BG upload test</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Friendly, reversible — the one we want people to reach for. */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Take a break</Text>
