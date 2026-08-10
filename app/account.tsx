@@ -1,10 +1,11 @@
 import { SUPPORT_EMAIL } from '@/constants/legal';
 import { colors } from '@/constants/theme';
+import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { router } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
-import { useState } from 'react';
-import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Account controls. Two very different "leaving" paths, deliberately ranked:
@@ -15,7 +16,34 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 //     delete-account Edge Function). Apple requires a real deletion path.
 export default function AccountScreen() {
   const insets = useSafeAreaInsets();
+  const { userId } = useTeamContext();
   const [busy, setBusy] = useState(false);
+
+  // Display name — what teams/families see on your shares and coach comments.
+  // Reuses the same set_my_display_name RPC the first-run name gate uses.
+  const [name, setName] = useState('');
+  const [nameLoading, setNameLoading] = useState(true);
+  const [nameSaving, setNameSaving] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from('user_profiles').select('display_name').eq('user_id', userId).maybeSingle();
+      if (!cancelled) { setName(data?.display_name ?? ''); setNameLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  async function saveName() {
+    const next = name.trim();
+    if (!next) { Alert.alert('Name required', 'Enter what you’d like to be called.'); return; }
+    setNameSaving(true);
+    const { error } = await supabase.rpc('set_my_display_name', { p_name: next });
+    setNameSaving(false);
+    if (error) { Alert.alert('Error', error.message); return; }
+    Alert.alert('Saved', `You’ll show as “${next}” on your shares and comments.`);
+  }
 
   async function signOut() {
     await supabase.auth.signOut(); // AuthGate routes to /login when the session clears.
@@ -68,6 +96,31 @@ export default function AccountScreen() {
       <Text style={styles.title}>Account</Text>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
+        {/* Display name — shown on your shares + coach comments. */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Your name</Text>
+          <Text style={styles.cardBody}>What teams and families see when you share or comment. Use whatever you like — “Coach Masten,” your name, or a nickname.</Text>
+          {nameLoading ? (
+            <ActivityIndicator color={colors.brand} />
+          ) : (
+            <>
+              <TextInput
+                style={styles.nameInput}
+                value={name}
+                onChangeText={setName}
+                placeholder="e.g. Coach Masten"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="words"
+                maxLength={60}
+                editable={!nameSaving}
+              />
+              <TouchableOpacity style={styles.btnPrimary} onPress={saveName} disabled={nameSaving}>
+                <Text style={styles.btnPrimaryText}>{nameSaving ? 'Saving…' : 'Save name'}</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+
         {/* Friendly, reversible — the one we want people to reach for. */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Take a break</Text>
@@ -116,6 +169,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: colors.surface, borderRadius: 14, padding: 18, borderWidth: 1, borderColor: colors.border, marginBottom: 16 },
   cardTitle: { color: colors.text, fontSize: 17, fontWeight: '700', marginBottom: 6 },
   cardBody: { color: colors.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 14 },
+  nameInput: { backgroundColor: colors.bg, borderRadius: 8, borderWidth: 1, borderColor: colors.border, padding: 12, color: colors.text, fontSize: 16, marginBottom: 12 },
 
   btnPrimary: { backgroundColor: colors.brand, borderRadius: 8, padding: 14, alignItems: 'center' },
   btnPrimaryText: { color: '#fff', fontSize: 15, fontWeight: '700' },
