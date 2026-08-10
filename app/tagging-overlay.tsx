@@ -92,6 +92,13 @@ export default function TaggingOverlayScreen() {
   // surfaced only via dedicated buttons in markGroup — never rendered in the
   // category columns. The ★ and POE buttons are just tag toggles in disguise.
   const [specialTagIds, setSpecialTagIds] = useState<{ highlight: string | null; poe: string | null }>({ highlight: null, poe: null });
+  // Game periods (category='period') — a sticky, mutually-exclusive selector in
+  // the top bar. Whichever period is active auto-stamps every saved clip until
+  // the coach switches (halftime → tap 2nd). Stays lit across saves (NOT reset
+  // in saveClip); null = no period selected. Rendered only via the period strip,
+  // never in the tag columns.
+  const [periodTags, setPeriodTags] = useState<any[]>([]);
+  const [activePeriod, setActivePeriod] = useState<string | null>(null);
 
   // Chrome visibility — pointerEvents flips synchronously via React state; the
   // opacity transition is driven by Reanimated over 200ms. Both must move
@@ -388,16 +395,20 @@ export default function TaggingOverlayScreen() {
       const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [] };
       let highlightId: string | null = null;
       let poeId: string | null = null;
+      const periods: any[] = [];
       (data || []).forEach((t: any) => {
         if (t.category === 'special') {
           if (t.name === '★ Highlight') highlightId = t.id;
           else if (t.name === 'POE') poeId = t.id;
+        } else if (t.category === 'period') {
+          periods.push(t);
         } else if (grouped[t.category]) {
           grouped[t.category].push(t);
         }
       });
       setTags(grouped);
       setSpecialTagIds({ highlight: highlightId, poe: poeId });
+      setPeriodTags(periods);
     })();
     return () => { cancelled = true; };
   }, [tagTeamId]);
@@ -644,7 +655,13 @@ export default function TaggingOverlayScreen() {
     }
 
     const rows: any[] = [];
-    for (const tagId of clipLevelTags) {
+    // Sticky game-period stamp: the active period (if any) rides along as a
+    // clip-level tag so every saved clip carries "1st/2nd/…" with no per-clip
+    // fiddling. Dedup guards the rare case it's already in clipLevelTags.
+    const clipLevelIds = activePeriod && !clipLevelTags.includes(activePeriod)
+      ? [...clipLevelTags, activePeriod]
+      : clipLevelTags;
+    for (const tagId of clipLevelIds) {
       rows.push({ clip_id: clip.id, tag_id: tagId, bundle_number: 0 });
     }
     bundles.forEach((bundle, idx) => {
@@ -663,7 +680,7 @@ export default function TaggingOverlayScreen() {
       }
     }
 
-    const clipLevelCount = clipLevelTags.length;
+    const clipLevelCount = clipLevelIds.length;
     const bundledCount = rows.length - clipLevelCount;
     const nonEmptyBundles = bundles.filter(b => b.length > 0).length;
     const bundlesWord = nonEmptyBundles === 1 ? 'bundle' : 'bundles';
@@ -776,6 +793,29 @@ export default function TaggingOverlayScreen() {
               <View style={styles.topReadout} pointerEvents="none">
                 <View style={styles.topReadoutDot} />
                 <Text style={styles.topReadoutText} numberOfLines={1}>{activeTagNames.join('  ·  ')}</Text>
+              </View>
+            )}
+
+            {/* Sticky game-period strip — sits just right of Back, always
+                visible while tagging. One period lit at a time (mutually
+                exclusive); tap the lit one to clear. Orange = game context, so
+                it reads apart from the purple tag/save chrome. Only renders once
+                the period tags exist (migration run); empty = nothing shown. */}
+            {!isWatch && periodTags.length > 0 && (
+              <View style={[styles.periodStrip, { left: insets.left + 56 }]} pointerEvents="box-none">
+                {periodTags.map((p) => {
+                  const on = activePeriod === p.id;
+                  return (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={[styles.periodPill, on ? styles.periodPillOn : styles.periodPillOff]}
+                      onPress={() => setActivePeriod(on ? null : p.id)}
+                      hitSlop={6}
+                    >
+                      <Text style={[styles.periodPillText, on && styles.periodPillTextOn]}>{p.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             )}
           </View>
@@ -1300,9 +1340,23 @@ const styles = StyleSheet.create({
   // "Now tagged" readout in the top bar — centered between Back (left 40) and
   // Save (right 120), so it never collides with either.
   topReadout: {
-    position: 'absolute', left: 56, right: 132, top: 0, bottom: 0,
+    position: 'absolute', left: 280, right: 132, top: 0, bottom: 0,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
   },
+  // Sticky game-period strip (top bar, just right of Back). Orange active pill
+  // so it reads as game context, distinct from the purple tag/save chrome.
+  periodStrip: {
+    position: 'absolute', top: 0, bottom: 0,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+  },
+  periodPill: {
+    minWidth: 34, height: 30, paddingHorizontal: 8, borderRadius: 15,
+    justifyContent: 'center', alignItems: 'center', borderWidth: 1.5,
+  },
+  periodPillOff: { backgroundColor: 'rgba(0,0,0,0.35)', borderColor: 'rgba(255,255,255,0.35)' },
+  periodPillOn: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
+  periodPillText: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '700' },
+  periodPillTextOn: { color: '#1a1a1a' },
   topReadoutDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#EF9F27' },
   topReadoutText: {
     color: '#fff', fontSize: 13, fontWeight: '700', flexShrink: 1,
