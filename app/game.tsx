@@ -1,6 +1,7 @@
 import { useTeamContext } from '@/context';
 import { makeVideoLabel } from '@/lib/core/upload-meta';
 import { pendingFileSize, pickVideo, uploadVideoToBucket } from '@/lib/native/video-upload';
+import { optimizeVideoInBackground } from '@/lib/native/optimize';
 import { requirePermission } from './permissionGuard';
 import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -121,6 +122,7 @@ export default function GameScreen() {
       newVideoId = v.id;
 
       await uploadVideoToBucket(fileName, pendingFile, setUploadProgress, bytes);
+      optimizeVideoInBackground(fileName);   // auto-optimize the fresh upload (faststart 720p; fire-and-forget)
 
       const { error: flipErr } = await supabase.from('videos')
         .update({ upload_status: 'ready' }).eq('id', newVideoId);

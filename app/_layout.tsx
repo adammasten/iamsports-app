@@ -208,7 +208,6 @@ export default function RootLayout() {
           <Stack.Screen name="team-permissions" options={{ headerShown: false }} />
           <Stack.Screen name="upload" options={{ headerShown: false }} />
           <Stack.Screen name="shared-viewer" options={{ headerShown: false }} />
-          <Stack.Screen name="shared-game" options={{ headerShown: false }} />
           <Stack.Screen name="edit-game" options={{ headerShown: false }} />
           <Stack.Screen name="game-detail" options={{ headerShown: false }} />
           <Stack.Screen name="game-player" options={{ headerShown: false }} />

@@ -1,5 +1,6 @@
 import { useTeamContext } from '@/context';
 import { pendingFileSize, pickVideos, uploadVideoToBucket, type PendingFile } from '@/lib/native/video-upload';
+import { optimizeVideoInBackground } from '@/lib/native/optimize';
 import { requirePermission } from './permissionGuard';
 import {
   defaultUploadTitle, dateToYMD, deriveResult, EVENT_TYPES, gameTitle, makeVideoLabel, NEW_TOURNAMENT, SEASON_TERMS, SPORTS,
@@ -252,6 +253,7 @@ export default function UploadScreen() {
         if (error || !v) throw new Error(error?.message ?? 'Failed to save video');
         vid = v.id;
         await uploadVideoToBucket(fileName, files[i], setProgress, bytes);
+        optimizeVideoInBackground(fileName);   // auto-optimize the fresh upload (faststart 720p; fire-and-forget)
         const { error: flipErr } = await supabase.from('videos')
           .update({ upload_status: 'ready' }).eq('id', vid);
         // A failed flip is non-fatal: the object is up, so reconciliation will
