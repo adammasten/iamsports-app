@@ -177,11 +177,6 @@ const TAG_STATUS = {
   inProgress: '#FFD60A', // yellow — has clips
   done:       '#32D74B', // green  — marked fully tagged (Shot 2)
 };
-// A game is "done" (green) only when it has videos AND every one is marked
-// tagging-complete. An empty game (no videos) can never be green.
-function gameIsDone(game: Game): boolean {
-  return game.videos.length > 0 && game.videos.every(v => v.taggingComplete);
-}
 // Filter-bar options for My Work. Team options are built from the user's teams
 // at render (see teamOptions); Type stays a small fixed set.
 const MY_WORK_TYPE_OPTIONS: DropdownOption[] = [
@@ -1279,7 +1274,6 @@ export default function MyWorkScreen() {
                       {
                         icon: reel.destinations.length ? 'share-social' : 'share-outline',
                         label: reel.destinations.length ? 'Manage sharing' : 'Share',
-                        caption: 'Share',
                         active: reel.destinations.length > 0,
                         onPress: () => {
                           const item: Postable = { contentType: 'reel', contentId: reel.id, title: reel.name };
@@ -1287,7 +1281,6 @@ export default function MyWorkScreen() {
                         },
                       },
                       { icon: 'download-outline', label: 'Download', busy: downloadingId === reel.id, onPress: () => downloadReel(reel) },
-                      { icon: 'trash-outline', label: 'Delete reel', caption: 'Delete', danger: true, onPress: () => confirmDelete(reel) },
                     ]}
                   />
                 );
@@ -1295,34 +1288,32 @@ export default function MyWorkScreen() {
               if (fi.contentType === 'game') {
                 const game = gamesById.get(fi.id);
                 if (!game) return null;
-                const done = gameIsDone(game);
                 const dateStr = formatGameDate(game.gameDate);
                 const videoCount = `${game.videos.length} video${game.videos.length === 1 ? '' : 's'}`;
                 return (
-                  <View key={`game:${game.id}`}>
                     <ContentCard
+                      key={`game:${game.id}`}
                       content={{
                         id: game.id,
                         kind: 'game',
                         title: game.title,
-                        meta: dateStr ? `${dateStr} · ${videoCount}` : videoCount,
-                        tagStatus: done ? 'done' : (game.clipCount > 0 ? 'tagging' : 'none'),
+                        meta: dateStr ?? videoCount,
+                        videoCount: game.videos.length,
                         thumbnailUri: null,
                       }}
                       onOpen={() => router.push({ pathname: '/game-detail', params: { id: game.id, title: game.title } })}
                       onLongPress={() => Alert.alert(game.title, undefined, [
                         { text: 'Edit game', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
                         { text: 'Edit lineup (who played)', onPress: () => router.push({ pathname: '/edit-lineup', params: { gameId: game.id, gameTitle: game.title } }) },
+                        { text: 'Download', onPress: () => downloadGame(game) },
                         { text: 'Delete game', style: 'destructive', onPress: () => confirmDeleteGame(game) },
                         { text: 'Cancel', style: 'cancel' },
                       ])}
                       shareStatus={deriveShareStatus(game.destinations)}
-                      trailing={<Ionicons name="chevron-forward" size={20} color="#888" />}
                       actions={(() => {
                         const acts: CardAction[] = [{
                           icon: game.destinations.length ? 'share-social' : 'share-outline',
                           label: game.destinations.length ? 'Manage sharing' : 'Share',
-                          caption: 'Share',
                           active: game.destinations.length > 0,
                           onPress: () => {
                             // A shared game plays only its finalized videos — nothing ready → nothing to share.
@@ -1335,16 +1326,13 @@ export default function MyWorkScreen() {
                         if (off) acts.push({
                           icon: off.action === 'remove' ? 'cloud-done' : off.action === 'retry' ? 'refresh' : 'cloud-download-outline',
                           label: off.label,
-                          caption: off.action === 'retry' ? 'Retry' : 'Offline',
                           active: off.action === 'remove',
                           busy: off.action === 'inflight',
                           onPress: () => handleOfflineTap(game, off.action),
                         });
-                        acts.push({ icon: 'download-outline', label: 'Download', busy: downloadingId === game.id, onPress: () => downloadGame(game) });
                         return acts;
                       })()}
                     />
-                  </View>
                 );
               }
               return null;
