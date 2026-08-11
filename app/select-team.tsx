@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import ContentTypeBadge from './components/ContentTypeBadge';
+import ContentCard from '@/components/content-card/ContentCard';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 
@@ -473,20 +473,20 @@ export default function SelectTeamScreen() {
         ) : (
           <View style={styles.feed}>
             {visible.map(fi => {
-              const isReel = fi.contentType === 'reel';
+              const it = itemsByKey.get(fi.id);
+              const isReel = (it?.kind ?? 'video') === 'reel';
+              const d = new Date(fi.createdAt).toLocaleDateString();
+              const dur = it?.durationSeconds ? `${Math.floor(it.durationSeconds / 60)}:${String(Math.floor(it.durationSeconds % 60)).padStart(2, '0')}` : null;
+              const meta = isReel ? [dur, d].filter(Boolean).join(' · ') : (fi.teamName ? `${fi.teamName} · ${d}` : d);
+              const typeLabel = isReel ? 'Reel' : (it?.eventType ? it.eventType.charAt(0).toUpperCase() + it.eventType.slice(1) : 'Video');
               return (
-                <TouchableOpacity
+                <ContentCard
                   key={`${fi.contentType}:${fi.id}`}
-                  style={styles.card}
-                  onPress={() => openItem(fi)}
-                >
-                  <View style={styles.cardTop}>
-                    <ContentTypeBadge type={isReel ? 'reel' : 'game'} />
-                    {fi.teamName ? <Text style={styles.sourcePill} numberOfLines={1}>{fi.teamName}</Text> : null}
-                  </View>
-                  <Text style={styles.cardTitle} numberOfLines={1}>{fi.title}</Text>
-                  <Text style={styles.cardMeta}>{new Date(fi.createdAt).toLocaleDateString()}</Text>
-                </TouchableOpacity>
+                  content={{ id: fi.id, kind: isReel ? 'reel' : 'game', title: fi.title, meta, typeLabel, thumbnailUri: null }}
+                  onOpen={() => openItem(fi)}
+                  showPlayOnThumb
+                  onPlay={() => openItem(fi)}
+                />
               );
             })}
           </View>
