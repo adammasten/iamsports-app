@@ -18,7 +18,7 @@ export type CardContent = {
   title: string;
   meta: string;                                   // prebuilt meta line
   result?: string | null;                          // e.g. "Won 48-41"
-  clipCount?: number;                              // games; chip hidden when <= 1
+  videoCount?: number;                             // games; chip shown only where the meta line does NOT already state the count (e.g. walls). Hidden when <= 1.
   thumbnailUri?: string | null;                    // null → icon fallback
   tagStatus?: 'none' | 'tagging' | 'done';         // Film Room badge ring; undefined → none
 };
@@ -69,11 +69,14 @@ function ShareStatusPill({ status }: { status: ShareStatus }) {
   );
 }
 
-function ClipCountChip({ count }: { count: number }) {
+// Videos = the uploaded footage in a game (First Half, etc.). Clips = tagged moments
+// cut from them. A game contains VIDEOS. Shown only where the meta line doesn't
+// already state the count.
+function VideoCountChip({ count }: { count: number }) {
   return (
     <View style={styles.clipChip}>
       <Ionicons name="reorder-three" size={13} color="#aaa" />
-      <Text style={styles.clipChipText}>{count} clips</Text>
+      <Text style={styles.clipChipText}>{count} videos</Text>
     </View>
   );
 }
@@ -121,7 +124,7 @@ export default function ContentCard({
         <View style={styles.body}>
           <View style={styles.badgeLine}>
             <ContentTypeBadge type={content.kind} outlineColor={ring} />
-            {isGame && (content.clipCount ?? 0) > 1 ? <ClipCountChip count={content.clipCount!} /> : null}
+            {isGame && (content.videoCount ?? 0) > 1 ? <VideoCountChip count={content.videoCount!} /> : null}
           </View>
           <Text style={styles.title} numberOfLines={1}>{content.title}</Text>
           <Text style={styles.meta} numberOfLines={1}>

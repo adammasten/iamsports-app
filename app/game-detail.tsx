@@ -65,7 +65,7 @@ export default function GameDetailScreen() {
   }
 
   function renameClip(v: Vid) {
-    Alert.prompt?.('Rename clip', undefined, async (text?: string) => {
+    Alert.prompt?.('Rename video', undefined, async (text?: string) => {
       const next = (text ?? '').trim();
       if (!next || next === v.label) return;
       setVideos(prev => prev.map(x => x.id === v.id ? { ...x, label: next } : x));
@@ -88,7 +88,7 @@ export default function GameDetailScreen() {
 
   const sheetActions = (v: Vid): { icon: string; label: string; danger?: boolean; onPress: () => void }[] => [
     { icon: 'play-circle-outline', label: 'Watch', onPress: () => { setSheetVid(null); watch(v); } },
-    { icon: 'pricetag-outline', label: 'Tag this clip', onPress: () => { setSheetVid(null); tag(v); } },
+    { icon: 'pricetag-outline', label: 'Tag video', onPress: () => { setSheetVid(null); tag(v); } },
     { icon: 'list-outline', label: 'View clips', onPress: () => { setSheetVid(null); viewClips(v); } },
     { icon: 'create-outline', label: 'Rename', onPress: () => { setSheetVid(null); renameClip(v); } },
     { icon: 'remove-circle-outline', label: 'Remove from game', danger: true, onPress: () => removeFromGame(v) },
@@ -98,14 +98,14 @@ export default function GameDetailScreen() {
     <View style={[styles.c, { paddingTop: insets.top + 8 }]}>
       <TouchableOpacity onPress={goBackOrHome} style={styles.back}><Text style={styles.backTxt}>← Back</Text></TouchableOpacity>
       <Text style={styles.h1} numberOfLines={1}>{title}</Text>
-      {dateStr ? <Text style={styles.sub}>{dateStr} · {videos.length} clip{videos.length === 1 ? '' : 's'}</Text> : null}
+      {dateStr ? <Text style={styles.sub}>{dateStr} · {videos.length} video{videos.length === 1 ? '' : 's'}</Text> : null}
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator size="large" color="#534AB7" /></View>
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}>
           {videos.length === 0 ? (
-            <Text style={styles.empty}>No clips in this game yet.</Text>
+            <Text style={styles.empty}>No videos in this game yet.</Text>
           ) : videos.map((v, i) => {
             const ready = v.uploadStatus === 'ready';
             return (
@@ -133,7 +133,7 @@ export default function GameDetailScreen() {
           })}
 
           <TouchableOpacity style={styles.addBtn} onPress={() => router.push({ pathname: '/game', params: { id: gameId, title } })}>
-            <Text style={styles.addText}>＋ Add clip</Text>
+            <Text style={styles.addText}>＋ Add video</Text>
           </TouchableOpacity>
         </ScrollView>
       )}

@@ -1305,7 +1305,6 @@ export default function MyWorkScreen() {
                         kind: 'game',
                         title: game.title,
                         meta: dateStr ? `${dateStr} · ${videoCount}` : videoCount,
-                        clipCount: game.videos.length,
                         tagStatus: done ? 'done' : (game.clipCount > 0 ? 'tagging' : 'none'),
                         thumbnailUri: null,
                       }}
