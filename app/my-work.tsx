@@ -211,7 +211,6 @@ export default function MyWorkScreen() {
   // Loose footage: the user's uploads with no game (game_id IS NULL) — personal
   // "+" uploads. Kept as its OWN list, never forced through the game grouping.
   const [looseVideos, setLooseVideos] = useState<GameVideo[]>([]);
-  const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
   // Video being attached/moved to a game — non-null opens the game picker.
   // fromGameId = the video's current game (null = loose); excluded from the picker.
   const [attachTarget, setAttachTarget] = useState<{ video: GameVideo; fromGameId: string | null } | null>(null);
@@ -442,26 +441,6 @@ export default function MyWorkScreen() {
 
   // Manual per-video "done tagging" toggle. Coach decides — not derived from
   // clip count. Flipping the last incomplete video to done turns the game green.
-  // Optimistic: flip the check locally first (instant, and re-derives the green
-  // card face), write in the background, revert only if the write fails.
-  async function toggleVideoComplete(video: GameVideo) {
-    const next = !video.taggingComplete;
-    const applyLocal = (val: boolean) =>
-      setGames(prev => prev.map(g => ({
-        ...g,
-        videos: g.videos.map(v => (v.id === video.id ? { ...v, taggingComplete: val } : v)),
-      })));
-    applyLocal(next);
-    const { error } = await supabase
-      .from('videos')
-      .update({ tagging_complete: next })
-      .eq('id', video.id);
-    if (error) {
-      applyLocal(!next); // revert
-      Alert.alert('Error', error.message);
-    }
-  }
-
   // Delete a game. videos.game_id and clips.video_id both CASCADE, so one delete
   // removes the game, its videos, and their clips — warn about that.
   function confirmDeleteGame(game: Game) {
@@ -479,7 +458,6 @@ export default function MyWorkScreen() {
             // videos/clips). A raw games.delete() would error once a lineup exists.
             const { error } = await supabase.rpc('delete_game', { p_game_id: game.id });
             if (error) { Alert.alert('Error', error.message); return; }
-            if (expandedGameId === game.id) setExpandedGameId(null);
             loadGames();
           },
         },
@@ -521,16 +499,6 @@ export default function MyWorkScreen() {
       return;
     }
     setAttachTarget({ video, fromGameId });
-  }
-
-  // "Remove from game" → make the video loose again (game_id = null). team_id and
-  // visibility are DELIBERATELY preserved: removing from a game changes only game
-  // membership, not team ownership or who can see it. It lands back in "Unsorted
-  // footage", re-fileable via "Add to a game" / "Move to another game".
-  async function detachFromGame(video: GameVideo) {
-    const { error } = await supabase.from('videos').update({ game_id: null }).eq('id', video.id);
-    if (error) { Alert.alert('Could not remove from game', error.message); return; }
-    loadGames();
   }
 
   // Attach loose footage to an existing game. Mirrors edit-game.tsx's cascade:
@@ -1326,7 +1294,6 @@ export default function MyWorkScreen() {
               if (fi.contentType === 'game') {
                 const game = gamesById.get(fi.id);
                 if (!game) return null;
-                const expanded = expandedGameId === game.id;
                 const done = gameIsDone(game);
                 const dateStr = formatGameDate(game.gameDate);
                 const videoCount = `${game.videos.length} video${game.videos.length === 1 ? '' : 's'}`;
@@ -1342,7 +1309,7 @@ export default function MyWorkScreen() {
                         tagStatus: done ? 'done' : (game.clipCount > 0 ? 'tagging' : 'none'),
                         thumbnailUri: null,
                       }}
-                      onOpen={() => setExpandedGameId(expanded ? null : game.id)}
+                      onOpen={() => router.push({ pathname: '/game-detail', params: { id: game.id, title: game.title } })}
                       onLongPress={() => Alert.alert(game.title, undefined, [
                         { text: 'Edit game', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
                         { text: 'Edit lineup (who played)', onPress: () => router.push({ pathname: '/edit-lineup', params: { gameId: game.id, gameTitle: game.title } }) },
@@ -1350,7 +1317,7 @@ export default function MyWorkScreen() {
                         { text: 'Cancel', style: 'cancel' },
                       ])}
                       shareStatus={deriveShareStatus(game.destinations)}
-                      trailing={<Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={20} color="#888" />}
+                      trailing={<Ionicons name="chevron-forward" size={20} color="#888" />}
                       actions={(() => {
                         const acts: CardAction[] = [{
                           icon: game.destinations.length ? 'share-social' : 'share-outline',
@@ -1375,82 +1342,6 @@ export default function MyWorkScreen() {
                         return acts;
                       })()}
                     />
-                    {expanded && (
-                      <View style={styles.videoList}>
-                        {game.videos.length === 0 ? (
-                          <Text style={styles.videoRowEmpty}>No videos uploaded yet.</Text>
-                        ) : (
-                          game.videos.map(v => (
-                            <View key={v.id} style={styles.videoRow}>
-                              {/* Tap the circle or "Tagged" to toggle this video's
-                                  tagging-complete. When every video is checked, the
-                                  game card face turns green. */}
-                              <TouchableOpacity style={styles.videoCheck} onPress={() => v.uploadStatus === 'ready' && toggleVideoComplete(v)} disabled={v.uploadStatus !== 'ready'} hitSlop={8}>
-                                <Ionicons
-                                  name={v.taggingComplete ? 'checkmark-circle' : 'ellipse-outline'}
-                                  size={22}
-                                  color={v.uploadStatus !== 'ready' ? '#bbb' : v.taggingComplete ? TAG_STATUS.done : '#666'}
-                                />
-                                <Text style={[styles.videoCheckLabel, v.taggingComplete && styles.videoCheckLabelDone]}>Tagged</Text>
-                              </TouchableOpacity>
-                              {renamingVideoId === v.id ? (
-                                <View style={styles.videoOptionsCell}>
-                                  <Ionicons name="film-outline" size={18} color="#888" />
-                                  <TextInput
-                                    style={styles.videoRenameInput}
-                                    value={videoDraft}
-                                    onChangeText={setVideoDraft}
-                                    autoFocus
-                                    selectTextOnFocus
-                                    returnKeyType="done"
-                                    onSubmitEditing={() => commitVideoRename(v)}
-                                    onBlur={() => commitVideoRename(v)}
-                                  />
-                                </View>
-                              ) : (
-                              <TouchableOpacity
-                                style={styles.videoOptionsCell}
-                                activeOpacity={0.7}
-                                onLongPress={() => confirmDeleteVideo(v)}
-                                onPress={() => v.uploadStatus !== 'ready'
-                                  ? Alert.alert(v.label, v.uploadStatus === 'uploading' ? 'Still uploading — check back in a moment.' : 'This upload didn’t finish.', [
-                                      { text: 'Delete video', style: 'destructive', onPress: () => confirmDeleteVideo(v) },
-                                      { text: 'Cancel', style: 'cancel' },
-                                    ])
-                                  : Alert.alert(v.label, undefined, [
-                                      { text: 'Tag video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } }) },
-                                      // Watch game: same player, view-only. `watch: '1'` suppresses all tag
-                                      // chrome in tagging-overlay — no new player, no divergent playback.
-                                      { text: 'Watch game', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, watch: '1' } }) },
-                                      { text: 'View clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
-                                      { text: 'Rename', onPress: () => startVideoRename(v) },
-                                      { text: 'Move to another game', onPress: () => openAttachPicker(v, game.id) },
-                                      { text: 'Remove from game', style: 'destructive', onPress: () => detachFromGame(v) },
-                                      { text: 'Cancel', style: 'cancel' },
-                                    ])}
-                              >
-                                <Ionicons name="film-outline" size={18} color="#888" />
-                                <View style={styles.videoOptBody}>
-                                  <Text style={styles.videoOptTitle} numberOfLines={1}>{v.label}</Text>
-                                  <Text style={styles.videoOptHint}>
-                                    {v.uploadStatus === 'uploading' ? 'Uploading…' : v.uploadStatus === 'failed' ? 'Upload didn’t finish · tap to delete' : 'Tap for options • Hold to delete'}
-                                  </Text>
-                                </View>
-                                <Ionicons name="ellipsis-horizontal" size={18} color="#888" />
-                              </TouchableOpacity>
-                              )}
-                            </View>
-                          ))
-                        )}
-                        {/* Add-video is safe: game.tsx sources team_id from the game's own row, not the active team. */}
-                        <TouchableOpacity
-                          style={styles.gameAddBtn}
-                          onPress={() => router.push({ pathname: '/game', params: { id: game.id, title: game.title } })}
-                        >
-                          <Text style={styles.gameAddText}>＋ Add video</Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
                   </View>
                 );
               }
