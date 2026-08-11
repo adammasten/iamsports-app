@@ -38,6 +38,7 @@ export default function GamePlayerScreen() {
   const videosRef = useRef<Vid[]>([]);
   videosRef.current = videos;
 
+  const videoRef = useRef<VideoView>(null);
   const player = useVideoPlayer(null, p => { p.timeUpdateEventInterval = 0.25; });
   const { currentTime } = useEvent(player, 'timeUpdate', { currentTime: 0, currentLiveTimestamp: null, currentOffsetFromLive: null, bufferedPosition: 0 });
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: false });
@@ -88,7 +89,7 @@ export default function GamePlayerScreen() {
   return (
     <View style={styles.c}>
       <Pressable style={StyleSheet.absoluteFill} onPress={() => setControls(v => !v)}>
-        <VideoView player={player} style={StyleSheet.absoluteFill} nativeControls={false} contentFit="contain" />
+        <VideoView ref={videoRef} player={player} style={StyleSheet.absoluteFill} nativeControls={false} contentFit="contain" allowsFullscreen />
       </Pressable>
       {srcLoading ? <View style={styles.loading} pointerEvents="none"><ActivityIndicator size="large" color="#fff" /></View> : null}
 
@@ -97,10 +98,14 @@ export default function GamePlayerScreen() {
           {/* Top */}
           <View style={[styles.top, { paddingTop: insets.top + 8 }]} pointerEvents="box-none">
             <Pressable onPress={goBackOrHome} hitSlop={12}><Text style={styles.back}>‹</Text></Pressable>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.topTitle} numberOfLines={1}>{title}</Text>
               <Text style={styles.topSub} numberOfLines={1}>{cur ? `${cur.label} · video ${currentIndex + 1} of ${videos.length}` : ''}</Text>
             </View>
+            {/* Widescreen: native fullscreen rotates to landscape for wide footage. */}
+            <Pressable onPress={() => videoRef.current?.enterFullscreen()} hitSlop={12}>
+              <Ionicons name="expand" size={22} color="#fff" />
+            </Pressable>
           </View>
 
           {/* Bottom: dual bar + meta + transport */}
