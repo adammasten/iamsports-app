@@ -1,16 +1,20 @@
-// Game detail — the screen a game card opens (card-system slice 2a). A game's videos
-// are ROWS: tap a row = watch that clip; the per-row ⋯ opens a bottom SHEET for the
-// rare actions. Replaces the old Film Room accordion + OS action-sheet ("Tap for
-// options"). Auto-advance 1→2→3 and the dual progress bar come in 2b/2c.
+// Game detail — the screen a game card opens (card-system slices 2a + 2b). A game's
+// videos are ROWS with a video player BOX at the top: tap a row (or "Play game") and
+// it plays IN the box; when a video ends it AUTO-ADVANCES to the next (1→2→3, one
+// continuous game). The per-row ⋯ opens a bottom SHEET for the rare actions. Portrait,
+// so it stays Expo-Go-testable and dodges the landscape orientation issues.
 //
-// Self-contained: loads the game + its videos and owns the simple per-video ops
-// (toggle tagged / rename / remove-from-game). Heavier game-level actions (Share /
-// Offline) still live on the Film Room card for now.
+// 2c will replace the native player controls with a custom DUAL progress bar
+// (segmented game timeline + within-video bar). Heavier game-level actions
+// (Share / Offline) still live on the Film Room card for now.
 import { Ionicons } from '@expo/vector-icons';
 import { goBackOrHome } from '@/lib/nav';
 import { supabase } from '@/supabase';
+import { getSignedVideoUrl } from '@/lib/native/video-url';
+import { getCachedPathSync } from '@/lib/native/video-cache';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -35,6 +39,13 @@ export default function GameDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [sheetVid, setSheetVid] = useState<Vid | null>(null);
 
+  // In-box player + auto-advance.
+  const [currentIndex, setCurrentIndex] = useState<number | null>(null);
+  const [srcLoading, setSrcLoading] = useState(false);
+  const player = useVideoPlayer(null, p => { p.timeUpdateEventInterval = 0.5; });
+  const videosRef = useRef<Vid[]>([]);
+  videosRef.current = videos;
+
   const load = useCallback(async () => {
     if (!gameId) { setLoading(false); return; }
     const [{ data: g }, { data: vs }] = await Promise.all([
@@ -50,10 +61,44 @@ export default function GameDetailScreen() {
     setLoading(false);
   }, [gameId]);
 
-  // Reload on focus so returning from the tagger / rename reflects changes.
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const watch = (v: Vid) => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, watch: '1' } });
+  // Load the current video's source (cached file if available, else a signed URL) and
+  // play it. Runs whenever currentIndex changes — including auto-advance.
+  useEffect(() => {
+    if (currentIndex == null) return;
+    const v = videos[currentIndex];
+    if (!v || v.uploadStatus !== 'ready') return;
+    let cancelled = false;
+    setSrcLoading(true);
+    (async () => {
+      const cached = getCachedPathSync(v.id);
+      const src = cached ?? await getSignedVideoUrl(v.url, { forceRefresh: true });
+      if (cancelled) return;
+      setSrcLoading(false);
+      if (!src) { Alert.alert('Couldn’t load video', 'Try again in a moment.'); return; }
+      try { player.replace(src); player.play(); } catch { /* player released */ }
+    })();
+    return () => { cancelled = true; };
+  }, [currentIndex, videos, player]);
+
+  // Auto-advance: when a video finishes, jump to the next READY one. Reads videosRef to
+  // avoid a stale closure.
+  useEffect(() => {
+    const sub = player.addListener('playToEnd', () => {
+      setCurrentIndex(i => {
+        if (i == null) return i;
+        const list = videosRef.current;
+        for (let j = i + 1; j < list.length; j++) if (list[j].uploadStatus === 'ready') return j;
+        return i; // end of game
+      });
+    });
+    return () => sub.remove();
+  }, [player]);
+
+  const firstReady = () => videos.findIndex(v => v.uploadStatus === 'ready');
+  const playGame = () => { const f = firstReady(); if (f >= 0) setCurrentIndex(f); };
+
   const tag = (v: Vid) => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } });
   const viewClips = (v: Vid) => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } });
 
@@ -64,7 +109,7 @@ export default function GameDetailScreen() {
     if (error) { setVideos(prev => prev.map(x => x.id === v.id ? { ...x, taggingComplete: v.taggingComplete } : x)); Alert.alert('Error', error.message); }
   }
 
-  function renameClip(v: Vid) {
+  function renameVideo(v: Vid) {
     Alert.prompt?.('Rename video', undefined, async (text?: string) => {
       const next = (text ?? '').trim();
       if (!next || next === v.label) return;
@@ -82,15 +127,17 @@ export default function GameDetailScreen() {
         if (error) { Alert.alert('Error', error.message); return; }
         setVideos(prev => prev.filter(x => x.id !== v.id));
         setSheetVid(null);
+        if (currentIndex != null && videos[currentIndex]?.id === v.id) { player.pause(); setCurrentIndex(null); }
       } },
     ]);
   }
 
+  const indexOf = (v: Vid) => videos.findIndex(x => x.id === v.id);
   const sheetActions = (v: Vid): { icon: string; label: string; danger?: boolean; onPress: () => void }[] => [
-    { icon: 'play-circle-outline', label: 'Watch', onPress: () => { setSheetVid(null); watch(v); } },
+    { icon: 'play-circle-outline', label: 'Watch', onPress: () => { setSheetVid(null); const i = indexOf(v); if (i >= 0) setCurrentIndex(i); } },
     { icon: 'pricetag-outline', label: 'Tag video', onPress: () => { setSheetVid(null); tag(v); } },
     { icon: 'list-outline', label: 'View clips', onPress: () => { setSheetVid(null); viewClips(v); } },
-    { icon: 'create-outline', label: 'Rename', onPress: () => { setSheetVid(null); renameClip(v); } },
+    { icon: 'create-outline', label: 'Rename', onPress: () => { setSheetVid(null); renameVideo(v); } },
     { icon: 'remove-circle-outline', label: 'Remove from game', danger: true, onPress: () => removeFromGame(v) },
   ];
 
@@ -100,6 +147,24 @@ export default function GameDetailScreen() {
       <Text style={styles.h1} numberOfLines={1}>{title}</Text>
       {dateStr ? <Text style={styles.sub}>{dateStr} · {videos.length} video{videos.length === 1 ? '' : 's'}</Text> : null}
 
+      {/* Player box */}
+      <View style={styles.playerBox}>
+        {currentIndex == null ? (
+          <TouchableOpacity style={styles.placeholder} onPress={playGame} disabled={firstReady() < 0} activeOpacity={0.8}>
+            <Ionicons name="play-circle" size={56} color={firstReady() < 0 ? '#444' : '#8B82E8'} />
+            <Text style={styles.placeholderText}>{firstReady() < 0 ? 'No playable video yet' : 'Play game'}</Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            <VideoView player={player} style={StyleSheet.absoluteFill} nativeControls contentFit="contain" allowsFullscreen />
+            {srcLoading ? <View style={styles.playerLoading}><ActivityIndicator color="#fff" /></View> : null}
+          </>
+        )}
+      </View>
+      {currentIndex != null && videos[currentIndex] ? (
+        <Text style={styles.nowPlaying} numberOfLines={1}>▶ {videos[currentIndex].label}</Text>
+      ) : null}
+
       {loading ? (
         <View style={styles.center}><ActivityIndicator size="large" color="#534AB7" /></View>
       ) : (
@@ -108,22 +173,23 @@ export default function GameDetailScreen() {
             <Text style={styles.empty}>No videos in this game yet.</Text>
           ) : videos.map((v, i) => {
             const ready = v.uploadStatus === 'ready';
+            const playing = currentIndex === i;
             return (
-              <View key={v.id} style={styles.row}>
+              <View key={v.id} style={[styles.row, playing && styles.rowPlaying]}>
                 <TouchableOpacity style={styles.check} onPress={() => ready && toggleComplete(v)} disabled={!ready} hitSlop={8}>
                   <Ionicons name={v.taggingComplete ? 'checkmark-circle' : 'ellipse-outline'} size={24} color={!ready ? '#555' : v.taggingComplete ? '#32D74B' : '#666'} />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.rowMain}
                   activeOpacity={0.7}
-                  onPress={() => ready ? watch(v) : Alert.alert(v.label, v.uploadStatus === 'uploading' ? 'Still uploading — check back in a moment.' : 'This upload didn’t finish.')}
+                  onPress={() => ready ? setCurrentIndex(i) : Alert.alert(v.label, v.uploadStatus === 'uploading' ? 'Still uploading — check back in a moment.' : 'This upload didn’t finish.')}
                 >
-                  <Text style={styles.rowNum}>{i + 1}</Text>
+                  <Text style={[styles.rowNum, playing && { color: '#8B82E8' }]}>{i + 1}</Text>
                   <View style={styles.rowBody}>
                     <Text style={styles.rowTitle} numberOfLines={1}>{v.label}</Text>
-                    <Text style={styles.rowHint}>{v.uploadStatus === 'uploading' ? 'Uploading…' : v.uploadStatus === 'failed' ? 'Upload didn’t finish' : 'Tap to watch'}</Text>
+                    <Text style={styles.rowHint}>{v.uploadStatus === 'uploading' ? 'Uploading…' : v.uploadStatus === 'failed' ? 'Upload didn’t finish' : playing ? 'Now playing' : 'Tap to watch'}</Text>
                   </View>
-                  {ready ? <Ionicons name="play" size={18} color="#8B82E8" /> : null}
+                  {ready ? <Ionicons name={playing ? 'volume-medium' : 'play'} size={18} color="#8B82E8" /> : null}
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.more} onPress={() => setSheetVid(v)} hitSlop={8}>
                   <Ionicons name="ellipsis-horizontal" size={20} color="#aaa" />
@@ -138,7 +204,7 @@ export default function GameDetailScreen() {
         </ScrollView>
       )}
 
-      {/* Per-row overflow SHEET (replaces the OS Alert). */}
+      {/* Per-row overflow SHEET (replaces the old OS Alert). */}
       <Modal visible={!!sheetVid} transparent animationType="slide" onRequestClose={() => setSheetVid(null)}>
         <Pressable style={styles.backdrop} onPress={() => setSheetVid(null)}>
           <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]} onPress={() => {}}>
@@ -164,10 +230,17 @@ const styles = StyleSheet.create({
   back: { paddingVertical: 8 }, backTxt: { color: '#8B82E8', fontSize: 16 },
   h1: { color: '#fff', fontSize: 26, fontWeight: '800', letterSpacing: -0.3, marginTop: 4 },
   sub: { color: '#888', fontSize: 13, marginTop: 4, marginBottom: 12 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  center: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
   empty: { color: '#888', fontSize: 15, textAlign: 'center', marginTop: 40 },
 
-  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#333', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 10 },
+  playerBox: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#222' },
+  placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#0D0D0D' },
+  placeholderText: { color: '#888', fontSize: 13, fontWeight: '700' },
+  playerLoading: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.35)' },
+  nowPlaying: { color: '#8B82E8', fontSize: 12, fontWeight: '700', marginTop: 8, marginBottom: 4 },
+
+  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#333', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 10, marginTop: 8 },
+  rowPlaying: { borderColor: '#534AB7', backgroundColor: '#17152a' },
   check: { marginRight: 10 },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   rowNum: { color: '#555', fontSize: 15, fontWeight: '800', width: 18, textAlign: 'center' },
