@@ -3,7 +3,6 @@ import { TeamLogo } from '@/components/team-logo';
 import { LoadError } from '@/components/load-error';
 import { SkeletonCards } from '@/components/skeleton-cards';
 import { DebugPanel } from '@/components/debug-panel';
-import { ShareNote } from '@/components/share-note';
 import { withTimeout } from '@/lib/withTimeout';
 import { pickAndUploadTeamLogo } from '@/lib/native/team-logo-upload';
 import { supabase } from '@/supabase';
@@ -12,7 +11,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { loadTeamWall, type WallPost } from '@/lib/core/homeFeed';
 import { showContentActions } from '../moderationActions';
-import ContentTypeBadge from '../components/ContentTypeBadge';
+import ContentCard from '@/components/content-card/ContentCard';
 import { type DropdownOption } from '../components/Dropdown';
 import FilterBar, { type FilterableItem } from '../components/FilterBar';
 
@@ -278,23 +277,19 @@ export default function HomeScreen() {
                   if (!item) return null;
                   // Show the wall labels this content lives on, teams before Family.
                   const sources = [...item.sources].sort((a, b) => (a === 'Family' ? 1 : 0) - (b === 'Family' ? 1 : 0));
+                  const isReel = item.contentType === 'reel';
+                  const typeLabel = item.contentType.charAt(0).toUpperCase() + item.contentType.slice(1);
+                  const d = new Date(item.createdAt).toLocaleDateString();
                   return (
-                    <TouchableOpacity
+                    <ContentCard
                       key={item.key}
-                      style={styles.card}
-                      onPress={() => openShared(item)}
+                      content={{ id: item.contentId, kind: isReel ? 'reel' : 'game', title: item.title, meta: [sources.join(' · '), d].filter(Boolean).join(' · '), typeLabel, thumbnailUri: null }}
+                      onOpen={() => openShared(item)}
                       onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: item.sharedByUserId === userId || isCoach, onChanged: loadHome })}
-                    >
-                      <View style={styles.cardTop}>
-                        <ContentTypeBadge type={item.contentType} />
-                        {sources.map(s => (
-                          <Text key={s} style={styles.sourcePill} numberOfLines={1}>{s}</Text>
-                        ))}
-                      </View>
-                      <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                      <Text style={styles.cardMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
-                      {item.note ? <ShareNote note={item.note} /> : null}
-                    </TouchableOpacity>
+                      showPlayOnThumb
+                      onPlay={() => openShared(item)}
+                      note={item.note ? { text: item.note } : undefined}
+                    />
                   );
                 })}
               </View>
