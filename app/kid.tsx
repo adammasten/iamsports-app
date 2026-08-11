@@ -14,9 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
 import { TeamLogo } from '@/components/team-logo';
 import { LoadError } from '@/components/load-error';
-import { ShareNote } from '@/components/share-note';
 import { withTimeout } from '@/lib/withTimeout';
-import ContentTypeBadge from './components/ContentTypeBadge';
+import ContentCard from '@/components/content-card/ContentCard';
 import { showContentActions } from './moderationActions';
 import { initials, teamColor } from './select-team';
 
@@ -715,30 +714,30 @@ export default function KidWallScreen() {
             <Text style={styles.empty}>Nothing shared yet</Text>
           ) : (
             <View style={styles.inboxList}>
-              {inbox.map(item => (
-                <View key={item.shareId} style={styles.inboxCard}>
-                  <TouchableOpacity
-                    style={styles.inboxMain}
-                    onPress={() => openShared(item)}
-                    onLongPress={() => showContentActions({
-                      contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedBy,
-                      canRemove: item.sharedBy === userId,
-                      hideFromWallLabel: item.sharedBy && item.sharedBy !== userId ? (name ? `Hide from ${name}’s wall` : 'Hide from this wall') : undefined,
-                      onChanged: loadInbox,
-                    })}
-                  >
-                    <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
-                    <Text style={styles.inboxTitle} numberOfLines={1}>{item.title}</Text>
-                    <Text style={styles.inboxMeta}>
-                      From {item.sharedBy === userId ? 'you' : (item.sharedByName ?? 'someone')} · {new Date(item.createdAt).toLocaleDateString()}
-                    </Text>
-                    {item.note ? <ShareNote note={item.note} /> : null}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.saveWallBtn} onPress={() => putOnWall(item.shareId)}>
-                    <Text style={styles.saveWallText}>Put on wall</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
+              {inbox.map(item => {
+                const isReel = item.contentType === 'reel';
+                const typeLabel = item.contentType.charAt(0).toUpperCase() + item.contentType.slice(1);
+                return (
+                  <View key={item.shareId}>
+                    <ContentCard
+                      content={{ id: item.contentId ?? item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: `From ${item.sharedBy === userId ? 'you' : (item.sharedByName ?? 'someone')} · ${new Date(item.createdAt).toLocaleDateString()}`, typeLabel, thumbnailUri: null }}
+                      onOpen={() => openShared(item)}
+                      onLongPress={() => showContentActions({
+                        contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedBy,
+                        canRemove: item.sharedBy === userId,
+                        hideFromWallLabel: item.sharedBy && item.sharedBy !== userId ? (name ? `Hide from ${name}’s wall` : 'Hide from this wall') : undefined,
+                        onChanged: loadInbox,
+                      })}
+                      showPlayOnThumb
+                      onPlay={() => openShared(item)}
+                      note={item.note ? { text: item.note } : undefined}
+                    />
+                    <TouchableOpacity style={styles.saveWallBtn} onPress={() => putOnWall(item.shareId)}>
+                      <Text style={styles.saveWallText}>Put on wall</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
             </View>
           )
         ) : selectedTab === 'wall' ? (
@@ -750,19 +749,21 @@ export default function KidWallScreen() {
             <Text style={styles.empty}>Nothing on the wall yet</Text>
           ) : (
             <View style={styles.inboxList}>
-              {wall.map(item => (
-                <View key={item.shareId} style={styles.inboxCard}>
-                  <TouchableOpacity style={styles.inboxMain} onPress={() => openShared(item)}>
-                    <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
-                    <Text style={styles.inboxTitle} numberOfLines={1}>{item.title}</Text>
-                    <Text style={styles.inboxMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
-                    {item.note ? <ShareNote note={item.note} /> : null}
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.removeBtn} onPress={() => takeOffWall(item.shareId, item.title)}>
-                    <Ionicons name="trash-outline" size={18} color="#c0392b" />
-                  </TouchableOpacity>
-                </View>
-              ))}
+              {wall.map(item => {
+                const isReel = item.contentType === 'reel';
+                const typeLabel = item.contentType.charAt(0).toUpperCase() + item.contentType.slice(1);
+                return (
+                  <ContentCard
+                    key={item.shareId}
+                    content={{ id: item.contentId ?? item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: new Date(item.createdAt).toLocaleDateString(), typeLabel, thumbnailUri: null }}
+                    onOpen={() => openShared(item)}
+                    showPlayOnThumb
+                    onPlay={() => openShared(item)}
+                    note={item.note ? { text: item.note } : undefined}
+                    actions={[{ icon: 'trash-outline', label: 'Take off wall', onPress: () => takeOffWall(item.shareId, item.title) }]}
+                  />
+                );
+              })}
             </View>
           )
         ) : (
