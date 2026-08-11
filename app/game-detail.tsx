@@ -1,30 +1,38 @@
-// Game detail — the screen a game card opens (card-system slices 2a + 2b). A game's
-// videos are ROWS with a video player BOX at the top: tap a row (or "Play game") and
-// it plays IN the box; when a video ends it AUTO-ADVANCES to the next (1→2→3, one
-// continuous game). The per-row ⋯ opens a bottom SHEET for the rare actions. Portrait,
-// so it stays Expo-Go-testable and dodges the landscape orientation issues.
+// Game detail — matches docs/game-card-prototype.html (the design Adam approved).
+// A LIST screen (no inline player): header + a Film-Room Watch/Tag toggle + video ROWS
+// (thumb + name + "Uploaded date", ⋯ overflow) + a "Game" actions section. Watch mode:
+// tap a row → launch the fullscreen plays-through player (app/game-player). Tag mode:
+// rows show tagging status + tapping opens the tagger. Portrait, Expo-Go-testable.
 //
-// 2c will replace the native player controls with a custom DUAL progress bar
-// (segmented game timeline + within-video bar). Heavier game-level actions
-// (Share / Offline) still live on the Film Room card for now.
+// Deferred (flagged): "Move to another game" in the sheet (needs a game picker) and a
+// full Share/Offline row here (those live on the Film Room card for now). Real
+// thumbnails + per-video durations arrive with the optimize pipeline.
 import { Ionicons } from '@expo/vector-icons';
 import { goBackOrHome } from '@/lib/nav';
 import { supabase } from '@/supabase';
-import { getSignedVideoUrl } from '@/lib/native/video-url';
-import { getCachedPathSync } from '@/lib/native/video-cache';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-type Vid = { id: string; label: string; url: string; sortOrder: number; taggingComplete: boolean; uploadStatus: 'uploading' | 'ready' | 'failed' };
+// ── design tokens (game-card-prototype.html) ──
+const C = {
+  bg: '#0a0a0c', surface: '#16161a', surface2: '#1e1e24', line: '#2a2a32',
+  text: '#f4f4f6', dim: '#9a9aa5', faint: '#62626c', accent: '#6c5ce7',
+  accentSoft: 'rgba(108,92,231,0.2)', danger: '#e2574a', plays: '#3ec46d',
+};
 
-function formatGameDate(ymd: string | null): string | null {
-  if (!ymd) return null;
-  const [y, m, d] = ymd.split('-').map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+type Vid = { id: string; label: string; url: string; taggingComplete: boolean; uploadStatus: 'uploading' | 'ready' | 'failed'; createdAt: string };
+
+function fmtDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+function resultStr(t: number | null, o: number | null): string | null {
+  if (t == null || o == null) return null;
+  return `${t > o ? 'Won' : t < o ? 'Lost' : 'Tied'} ${t}–${o}`;
 }
 
 export default function GameDetailScreen() {
@@ -34,80 +42,39 @@ export default function GameDetailScreen() {
   const paramTitle = (Array.isArray(params.title) ? params.title[0] : params.title) as string | undefined;
 
   const [title, setTitle] = useState(paramTitle ?? 'Game');
-  const [dateStr, setDateStr] = useState<string | null>(null);
+  const [sub, setSub] = useState<string>('');
   const [videos, setVideos] = useState<Vid[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState<'watch' | 'tag'>('watch');
   const [sheetVid, setSheetVid] = useState<Vid | null>(null);
-
-  // In-box player + auto-advance.
-  const [currentIndex, setCurrentIndex] = useState<number | null>(null);
-  const [srcLoading, setSrcLoading] = useState(false);
-  const player = useVideoPlayer(null, p => { p.timeUpdateEventInterval = 0.5; });
-  const videosRef = useRef<Vid[]>([]);
-  videosRef.current = videos;
 
   const load = useCallback(async () => {
     if (!gameId) { setLoading(false); return; }
     const [{ data: g }, { data: vs }] = await Promise.all([
-      supabase.from('games').select('title, game_date').eq('id', gameId).maybeSingle(),
-      supabase.from('videos').select('id, label, url, sort_order, tagging_complete, upload_status').eq('game_id', gameId).order('sort_order'),
+      supabase.from('games').select('title, game_date, team_score, opponent_score').eq('id', gameId).maybeSingle(),
+      supabase.from('videos').select('id, label, url, tagging_complete, upload_status, created_at').eq('game_id', gameId).order('sort_order'),
     ]);
     if (g?.title) setTitle(g.title);
-    setDateStr(formatGameDate((g?.game_date as string) ?? null));
-    setVideos((vs ?? []).map((v: any) => ({
-      id: v.id, label: v.label, url: v.url, sortOrder: v.sort_order,
-      taggingComplete: v.tagging_complete === true, uploadStatus: v.upload_status,
-    })));
+    const list: Vid[] = (vs ?? []).map((v: any) => ({
+      id: v.id, label: v.label, url: v.url, taggingComplete: v.tagging_complete === true,
+      uploadStatus: v.upload_status, createdAt: v.created_at,
+    }));
+    setVideos(list);
+    const parts = [fmtDate((g?.game_date as string) ?? null), resultStr(g?.team_score ?? null, g?.opponent_score ?? null), `${list.length} video${list.length === 1 ? '' : 's'}`].filter(Boolean);
+    setSub(parts.join(' · '));
     setLoading(false);
   }, [gameId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // Load the current video's source (cached file if available, else a signed URL) and
-  // play it. Runs whenever currentIndex changes — including auto-advance.
-  useEffect(() => {
-    if (currentIndex == null) return;
-    const v = videos[currentIndex];
-    if (!v || v.uploadStatus !== 'ready') return;
-    let cancelled = false;
-    setSrcLoading(true);
-    (async () => {
-      const cached = getCachedPathSync(v.id);
-      const src = cached ?? await getSignedVideoUrl(v.url, { forceRefresh: true });
-      if (cancelled) return;
-      setSrcLoading(false);
-      if (!src) { Alert.alert('Couldn’t load video', 'Try again in a moment.'); return; }
-      try { player.replace(src); player.play(); } catch { /* player released */ }
-    })();
-    return () => { cancelled = true; };
-  }, [currentIndex, videos, player]);
-
-  // Auto-advance: when a video finishes, jump to the next READY one. Reads videosRef to
-  // avoid a stale closure.
-  useEffect(() => {
-    const sub = player.addListener('playToEnd', () => {
-      setCurrentIndex(i => {
-        if (i == null) return i;
-        const list = videosRef.current;
-        for (let j = i + 1; j < list.length; j++) if (list[j].uploadStatus === 'ready') return j;
-        return i; // end of game
-      });
-    });
-    return () => sub.remove();
-  }, [player]);
-
-  const firstReady = () => videos.findIndex(v => v.uploadStatus === 'ready');
-  const playGame = () => { const f = firstReady(); if (f >= 0) setCurrentIndex(f); };
-
-  const tag = (v: Vid) => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } });
+  const readyIndex = (v: Vid) => videos.filter(x => x.uploadStatus === 'ready').findIndex(x => x.id === v.id);
+  const openPlayer = (v: Vid) => {
+    const i = readyIndex(v);
+    if (i < 0) { Alert.alert(v.label, v.uploadStatus === 'uploading' ? 'Still uploading — check back in a moment.' : 'This upload didn’t finish.'); return; }
+    router.push({ pathname: '/game-player', params: { id: gameId, index: String(i), title } });
+  };
+  const openTagger = (v: Vid) => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } });
   const viewClips = (v: Vid) => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } });
-
-  async function toggleComplete(v: Vid) {
-    const next = !v.taggingComplete;
-    setVideos(prev => prev.map(x => x.id === v.id ? { ...x, taggingComplete: next } : x));
-    const { error } = await supabase.from('videos').update({ tagging_complete: next }).eq('id', v.id);
-    if (error) { setVideos(prev => prev.map(x => x.id === v.id ? { ...x, taggingComplete: v.taggingComplete } : x)); Alert.alert('Error', error.message); }
-  }
 
   function renameVideo(v: Vid) {
     Alert.prompt?.('Rename video', undefined, async (text?: string) => {
@@ -118,7 +85,6 @@ export default function GameDetailScreen() {
       if (error) { Alert.alert('Error', error.message); load(); }
     }, 'plain-text', v.label);
   }
-
   function removeFromGame(v: Vid) {
     Alert.alert('Remove from game', `Take “${v.label}” out of this game? It becomes loose footage — not deleted.`, [
       { text: 'Cancel', style: 'cancel' },
@@ -127,97 +93,89 @@ export default function GameDetailScreen() {
         if (error) { Alert.alert('Error', error.message); return; }
         setVideos(prev => prev.filter(x => x.id !== v.id));
         setSheetVid(null);
-        if (currentIndex != null && videos[currentIndex]?.id === v.id) { player.pause(); setCurrentIndex(null); }
       } },
     ]);
   }
 
-  const indexOf = (v: Vid) => videos.findIndex(x => x.id === v.id);
-  const sheetActions = (v: Vid): { icon: string; label: string; danger?: boolean; onPress: () => void }[] => [
-    { icon: 'play-circle-outline', label: 'Watch', onPress: () => { setSheetVid(null); const i = indexOf(v); if (i >= 0) setCurrentIndex(i); } },
-    { icon: 'pricetag-outline', label: 'Tag video', onPress: () => { setSheetVid(null); tag(v); } },
-    { icon: 'list-outline', label: 'View clips', onPress: () => { setSheetVid(null); viewClips(v); } },
+  const sheetActions = (v: Vid) => [
+    { icon: 'play', label: 'Watch', onPress: () => { setSheetVid(null); openPlayer(v); } },
+    { icon: 'pricetag-outline', label: 'Tag video', onPress: () => { setSheetVid(null); openTagger(v); } },
+    { icon: 'sparkles-outline', label: 'View clips', onPress: () => { setSheetVid(null); viewClips(v); } },
     { icon: 'create-outline', label: 'Rename', onPress: () => { setSheetVid(null); renameVideo(v); } },
     { icon: 'remove-circle-outline', label: 'Remove from game', danger: true, onPress: () => removeFromGame(v) },
   ];
 
   return (
-    <View style={[styles.c, { paddingTop: insets.top + 8 }]}>
-      <TouchableOpacity onPress={goBackOrHome} style={styles.back}><Text style={styles.backTxt}>← Back</Text></TouchableOpacity>
-      <Text style={styles.h1} numberOfLines={1}>{title}</Text>
-      {dateStr ? <Text style={styles.sub}>{dateStr} · {videos.length} video{videos.length === 1 ? '' : 's'}</Text> : null}
-
-      {/* Player box */}
-      <View style={styles.playerBox}>
-        {currentIndex == null ? (
-          <TouchableOpacity style={styles.placeholder} onPress={playGame} disabled={firstReady() < 0} activeOpacity={0.8}>
-            <Ionicons name="play-circle" size={56} color={firstReady() < 0 ? '#444' : '#8B82E8'} />
-            <Text style={styles.placeholderText}>{firstReady() < 0 ? 'No playable video yet' : 'Play game'}</Text>
-          </TouchableOpacity>
-        ) : (
-          <>
-            <VideoView player={player} style={StyleSheet.absoluteFill} nativeControls contentFit="contain" allowsFullscreen />
-            {srcLoading ? <View style={styles.playerLoading}><ActivityIndicator color="#fff" /></View> : null}
-          </>
-        )}
+    <View style={[styles.c, { paddingTop: insets.top + 6 }]}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={goBackOrHome} hitSlop={10}><Text style={styles.back}>‹</Text></TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          {sub ? <Text style={styles.sub} numberOfLines={1}>{sub}</Text> : null}
+        </View>
       </View>
-      {currentIndex != null && videos[currentIndex] ? (
-        <Text style={styles.nowPlaying} numberOfLines={1}>▶ {videos[currentIndex].label}</Text>
-      ) : null}
+
+      {/* Watch / Tag toggle (Film Room) */}
+      <View style={styles.toggle}>
+        {(['watch', 'tag'] as const).map(m => (
+          <TouchableOpacity key={m} style={[styles.toggleBtn, mode === m && styles.toggleBtnOn]} onPress={() => setMode(m)}>
+            <Text style={[styles.toggleText, mode === m && styles.toggleTextOn]}>{m === 'watch' ? '▶ Watch' : '⊕ Tag'}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <Text style={styles.sectionLabel}>{mode === 'watch' ? 'Tap a video to watch · plays through' : 'Tap a video to tag it'}</Text>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator size="large" color="#534AB7" /></View>
+        <View style={styles.center}><ActivityIndicator size="large" color={C.accent} /></View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
           {videos.length === 0 ? (
             <Text style={styles.empty}>No videos in this game yet.</Text>
-          ) : videos.map((v, i) => {
-            const ready = v.uploadStatus === 'ready';
-            const playing = currentIndex === i;
+          ) : videos.map((v) => {
             return (
-              <View key={v.id} style={[styles.row, playing && styles.rowPlaying]}>
-                <TouchableOpacity style={styles.check} onPress={() => ready && toggleComplete(v)} disabled={!ready} hitSlop={8}>
-                  <Ionicons name={v.taggingComplete ? 'checkmark-circle' : 'ellipse-outline'} size={24} color={!ready ? '#555' : v.taggingComplete ? '#32D74B' : '#666'} />
-                </TouchableOpacity>
+              <TouchableOpacity key={v.id} style={styles.row} activeOpacity={0.85} onPress={() => mode === 'watch' ? openPlayer(v) : openTagger(v)}>
+                <View style={styles.thumb}>
+                  <Ionicons name="play" size={20} color="rgba(255,255,255,0.85)" />
+                </View>
+                <View style={styles.info}>
+                  <Text style={styles.name} numberOfLines={1}>{v.label}</Text>
+                  {mode === 'tag'
+                    ? <Text style={[styles.meta, { color: v.taggingComplete ? C.plays : C.dim }]}>{v.taggingComplete ? '✓ Tagged' : 'Not tagged yet'}</Text>
+                    : <Text style={styles.meta}>{v.uploadStatus === 'uploading' ? 'Uploading…' : v.uploadStatus === 'failed' ? 'Upload didn’t finish' : `Uploaded ${fmtDate(v.createdAt) ?? ''}`}</Text>}
+                </View>
                 <TouchableOpacity
-                  style={styles.rowMain}
-                  activeOpacity={0.7}
-                  onPress={() => ready ? setCurrentIndex(i) : Alert.alert(v.label, v.uploadStatus === 'uploading' ? 'Still uploading — check back in a moment.' : 'This upload didn’t finish.')}
+                  style={[styles.rowAction, mode === 'tag' && styles.rowActionTag]}
+                  onPress={() => mode === 'watch' ? setSheetVid(v) : openTagger(v)}
+                  hitSlop={8}
                 >
-                  <Text style={[styles.rowNum, playing && { color: '#8B82E8' }]}>{i + 1}</Text>
-                  <View style={styles.rowBody}>
-                    <Text style={styles.rowTitle} numberOfLines={1}>{v.label}</Text>
-                    <Text style={styles.rowHint}>{v.uploadStatus === 'uploading' ? 'Uploading…' : v.uploadStatus === 'failed' ? 'Upload didn’t finish' : playing ? 'Now playing' : 'Tap to watch'}</Text>
-                  </View>
-                  {ready ? <Ionicons name={playing ? 'volume-medium' : 'play'} size={18} color="#8B82E8" /> : null}
+                  <Text style={[styles.rowActionText, mode === 'tag' && { color: '#b3a7f5' }]}>{mode === 'watch' ? '⋯' : '⊕'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.more} onPress={() => setSheetVid(v)} hitSlop={8}>
-                  <Ionicons name="ellipsis-horizontal" size={20} color="#aaa" />
-                </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
             );
           })}
 
-          <TouchableOpacity style={styles.addBtn} onPress={() => router.push({ pathname: '/game', params: { id: gameId, title } })}>
-            <Text style={styles.addText}>＋ Add video</Text>
-          </TouchableOpacity>
+          <Text style={[styles.sectionLabel, { marginTop: 22 }]}>Game</Text>
+          <View style={styles.gameActions}>
+            <TouchableOpacity style={[styles.gameBtn, styles.gameBtnPrimary]} onPress={() => router.push({ pathname: '/game', params: { id: gameId, title } })}>
+              <Text style={[styles.gameBtnText, { color: '#fff' }]}>＋ Add video</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       )}
 
-      {/* Per-row overflow SHEET (replaces the old OS Alert). */}
+      {/* Overflow sheet */}
       <Modal visible={!!sheetVid} transparent animationType="slide" onRequestClose={() => setSheetVid(null)}>
-        <Pressable style={styles.backdrop} onPress={() => setSheetVid(null)}>
+        <Pressable style={styles.scrim} onPress={() => setSheetVid(null)}>
           <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]} onPress={() => {}}>
+            <View style={styles.grip} />
             {sheetVid ? <Text style={styles.sheetTitle} numberOfLines={1}>{sheetVid.label}</Text> : null}
             {sheetVid ? sheetActions(sheetVid).map(a => (
-              <TouchableOpacity key={a.label} style={styles.sheetRow} onPress={a.onPress}>
-                <Ionicons name={a.icon as any} size={20} color={a.danger ? '#DC3545' : '#aaa'} />
-                <Text style={[styles.sheetLabel, a.danger && { color: '#DC3545' }]}>{a.label}</Text>
+              <TouchableOpacity key={a.label} style={styles.sheetItem} onPress={a.onPress}>
+                <Ionicons name={a.icon as any} size={19} color={a.danger ? C.danger : C.dim} style={{ width: 26, textAlign: 'center' }} />
+                <Text style={[styles.sheetLabel, a.danger && { color: C.danger }]}>{a.label}</Text>
               </TouchableOpacity>
             )) : null}
-            <TouchableOpacity style={[styles.sheetRow, styles.sheetCancel]} onPress={() => setSheetVid(null)}>
-              <Text style={styles.sheetCancelText}>Cancel</Text>
-            </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
@@ -226,37 +184,40 @@ export default function GameDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  c: { flex: 1, backgroundColor: '#000', paddingHorizontal: 16 },
-  back: { paddingVertical: 8 }, backTxt: { color: '#8B82E8', fontSize: 16 },
-  h1: { color: '#fff', fontSize: 26, fontWeight: '800', letterSpacing: -0.3, marginTop: 4 },
-  sub: { color: '#888', fontSize: 13, marginTop: 4, marginBottom: 12 },
-  center: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
-  empty: { color: '#888', fontSize: 15, textAlign: 'center', marginTop: 40 },
+  c: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, paddingBottom: 14 },
+  back: { color: C.accent, fontSize: 30, fontWeight: '400', width: 24 },
+  title: { color: C.text, fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
+  sub: { color: C.dim, fontSize: 13, marginTop: 2 },
 
-  playerBox: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#222' },
-  placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#0D0D0D' },
-  placeholderText: { color: '#888', fontSize: 13, fontWeight: '700' },
-  playerLoading: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.35)' },
-  nowPlaying: { color: '#8B82E8', fontSize: 12, fontWeight: '700', marginTop: 8, marginBottom: 4 },
+  toggle: { flexDirection: 'row', backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 11, padding: 4, marginBottom: 16 },
+  toggleBtn: { flex: 1, paddingVertical: 9, borderRadius: 8, alignItems: 'center' },
+  toggleBtnOn: { backgroundColor: C.accent },
+  toggleText: { color: C.dim, fontSize: 14, fontWeight: '600' },
+  toggleTextOn: { color: '#fff' },
 
-  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#333', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 10, marginTop: 8 },
-  rowPlaying: { borderColor: '#534AB7', backgroundColor: '#17152a' },
-  check: { marginRight: 10 },
-  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  rowNum: { color: '#555', fontSize: 15, fontWeight: '800', width: 18, textAlign: 'center' },
-  rowBody: { flex: 1, minWidth: 0 },
-  rowTitle: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  rowHint: { color: '#888', fontSize: 12, marginTop: 1 },
-  more: { paddingLeft: 8, paddingVertical: 4 },
+  sectionLabel: { color: C.faint, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12, marginLeft: 2 },
+  center: { alignItems: 'center', justifyContent: 'center', paddingVertical: 50 },
+  empty: { color: C.dim, fontSize: 15, textAlign: 'center', marginTop: 40 },
 
-  addBtn: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#534AB7', borderRadius: 8, paddingVertical: 9, paddingHorizontal: 14, marginTop: 4 },
-  addText: { color: '#8B82E8', fontSize: 13, fontWeight: '700' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 13, padding: 11, marginBottom: 11 },
+  thumb: { width: 92, height: 56, borderRadius: 9, backgroundColor: '#232733', alignItems: 'center', justifyContent: 'center' },
+  info: { flex: 1, minWidth: 0 },
+  name: { color: C.text, fontSize: 15, fontWeight: '700' },
+  meta: { color: C.dim, fontSize: 12, marginTop: 3 },
+  rowAction: { width: 38, height: 38, borderRadius: 10, backgroundColor: C.surface2, borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center' },
+  rowActionTag: { backgroundColor: C.accentSoft, borderColor: C.accent },
+  rowActionText: { color: C.dim, fontSize: 18, fontWeight: '700' },
 
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#1A1A1A', borderTopLeftRadius: 16, borderTopRightRadius: 16, borderWidth: 1, borderColor: '#333', paddingTop: 8, paddingHorizontal: 8 },
-  sheetTitle: { color: '#888', fontSize: 12, fontWeight: '700', paddingHorizontal: 12, paddingVertical: 8 },
-  sheetRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 12, borderRadius: 10 },
-  sheetLabel: { color: '#eee', fontSize: 16, fontWeight: '600' },
-  sheetCancel: { justifyContent: 'center', marginTop: 4, backgroundColor: '#0D0D0D' },
-  sheetCancelText: { color: '#8B82E8', fontSize: 16, fontWeight: '700' },
+  gameActions: { flexDirection: 'row', gap: 10, marginLeft: 2 },
+  gameBtn: { flex: 1, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  gameBtnPrimary: { backgroundColor: C.accent, borderColor: C.accent },
+  gameBtnText: { color: C.text, fontSize: 13, fontWeight: '600' },
+
+  scrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: C.surface2, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderTopWidth: 1, borderColor: C.line, paddingHorizontal: 14, paddingTop: 6 },
+  grip: { width: 38, height: 4, borderRadius: 2, backgroundColor: C.line, alignSelf: 'center', marginVertical: 8 },
+  sheetTitle: { color: C.dim, fontSize: 13, textAlign: 'center', marginBottom: 8 },
+  sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 15, paddingHorizontal: 12, borderRadius: 12 },
+  sheetLabel: { color: C.text, fontSize: 16, fontWeight: '500' },
 });
