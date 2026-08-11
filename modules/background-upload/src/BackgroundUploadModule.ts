@@ -1,4 +1,4 @@
-import { NativeModule, requireNativeModule } from 'expo';
+import { NativeModule, requireOptionalNativeModule } from 'expo';
 
 export type UploadPart = { partNumber: number; url: string };
 
@@ -28,4 +28,8 @@ declare class BackgroundUploadModuleType extends NativeModule<BackgroundUploadEv
   startMultipartUpload(uploadId: string, fileUri: string, partSize: number, parts: UploadPart[]): Promise<void>;
 }
 
-export default requireNativeModule<BackgroundUploadModuleType>('BackgroundUpload');
+// requireOPTIONALNativeModule returns null when the native module isn't present —
+// e.g. Expo Go, which can't load custom native code. This makes importing the module
+// SAFE everywhere (no crash on load); callers must null-check (see bg-upload-test.tsx).
+// In a real build (TestFlight/dev client) the module is present and this is non-null.
+export default requireOptionalNativeModule<BackgroundUploadModuleType>('BackgroundUpload');

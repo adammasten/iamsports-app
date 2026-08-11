@@ -28,6 +28,7 @@ export default function BgUploadTest() {
     setLog(prev => [`${new Date().toLocaleTimeString()}  ${line}`, ...prev].slice(0, 60));
 
   useEffect(() => {
+    if (!BackgroundUpload) return;   // Expo Go: native module absent — no listeners.
     const subs = [
       BackgroundUpload.addListener('onProgress', ({ progress }) => setProgress(progress)),
       BackgroundUpload.addListener('onComplete', async (e) => {
@@ -58,6 +59,7 @@ export default function BgUploadTest() {
   }, []);
 
   async function doPing() {
+    if (!BackgroundUpload) { add('Native module unavailable — this needs a TestFlight/dev build, not Expo Go.'); return; }
     try {
       const r = await BackgroundUpload.ping();
       add(`ping → "${r}"  (native module is linked ✓)`);
@@ -67,6 +69,7 @@ export default function BgUploadTest() {
   }
 
   async function pickSingle() {
+    if (!BackgroundUpload) { add('Native module unavailable — needs a TestFlight/dev build, not Expo Go.'); return; }
     try {
       setBusy(true); setProgress(0);
       const pending = await pickVideo();
@@ -83,6 +86,7 @@ export default function BgUploadTest() {
   }
 
   async function pickMultipart() {
+    if (!BackgroundUpload) { add('Native module unavailable — needs a TestFlight/dev build, not Expo Go.'); return; }
     try {
       setBusy(true); setProgress(0);
       const pending = await pickVideo();
