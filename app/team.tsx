@@ -4,10 +4,9 @@ import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import ContentTypeBadge from './components/ContentTypeBadge';
+import ContentCard from '@/components/content-card/ContentCard';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
-import { ShareNote } from '@/components/share-note';
 
 // Single-team wall: no tags loaded here, and the Team dropdown is hidden (one
 // team). Stable module-level refs so FilterBar's memo doesn't churn each render.
@@ -146,13 +145,17 @@ export default function TeamWallScreen() {
             {visiblePosts.map(fi => {
               const item = postsById.get(fi.id);
               if (!item) return null;
+              const isReel = item.contentType === 'reel';
+              const typeLabel = item.contentType.charAt(0).toUpperCase() + item.contentType.slice(1);
               return (
-                <TouchableOpacity key={item.shareId} style={styles.card} onPress={() => openShared(item)}>
-                  <View style={styles.typeBadgeWrap}><ContentTypeBadge type={item.contentType} /></View>
-                  <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                  <Text style={styles.cardMeta}>{new Date(item.createdAt).toLocaleDateString()}</Text>
-                  {item.note ? <ShareNote note={item.note} /> : null}
-                </TouchableOpacity>
+                <ContentCard
+                  key={item.shareId}
+                  content={{ id: item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: new Date(item.createdAt).toLocaleDateString(), typeLabel, thumbnailUri: null }}
+                  onOpen={() => openShared(item)}
+                  showPlayOnThumb
+                  onPlay={() => openShared(item)}
+                  note={item.note ? { text: item.note } : undefined}
+                />
               );
             })}
           </ScrollView>
