@@ -40,6 +40,11 @@ export default function EditGameScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Free-text game title. Prefilled from the existing title; saved as typed. If
+  // cleared, we fall back to the auto-name (gameTitle) from opponent + date — so
+  // "leave blank to auto-name" still works.
+  const [gameTitleText, setGameTitleText] = useState('');
+
   // Prefilled fields (mirror the upload form, minus per-video Title).
   const [opponent, setOpponent] = useState('');
   const [vsAt, setVsAt] = useState<'vs' | 'at'>('vs');
@@ -98,6 +103,7 @@ export default function EditGameScreen() {
         .eq('id', gameId).single();
       if (error || !g) { Alert.alert('Error', error?.message ?? 'Game not found'); goBackOrHome(); return; }
 
+      setGameTitleText(g.title ?? '');
       setOpponent(g.opponent ?? '');
       setVsAt(typeof g.title === 'string' && g.title.startsWith('at ') ? 'at' : 'vs');
       setGameDate(ymdToDate(g.game_date));
@@ -179,7 +185,8 @@ export default function EditGameScreen() {
         }
       }
 
-      const title = gameTitle(opponent, vsAt, eventType, gameDate);
+      // Typed title wins; blank falls back to the auto-name (opponent + date).
+      const title = gameTitleText.trim() || gameTitle(opponent, vsAt, eventType, gameDate);
       const { error: gErr } = await supabase.from('games').update({
         title,
         opponent: opponent.trim() || null,
@@ -241,6 +248,16 @@ export default function EditGameScreen() {
       <Text style={styles.title}>Edit game</Text>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
+        <Text style={styles.label}>Game title</Text>
+        <TextInput
+          style={styles.input}
+          value={gameTitleText}
+          onChangeText={setGameTitleText}
+          placeholder="e.g. vs North Tigers"
+          placeholderTextColor="#888"
+        />
+        <Text style={styles.sublabel}>Leave blank to auto-name from the opponent + date.</Text>
+
         <Text style={styles.label}>Event type</Text>
         <Dropdown value={eventType} options={EVENT_TYPES} onSelect={v => setEventType(v as EventTypeKey)} />
 
