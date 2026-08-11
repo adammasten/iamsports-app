@@ -24,7 +24,8 @@ import { withTimeout } from '@/lib/withTimeout';
 import { requirePermission } from './permissionGuard';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
-import ContentTypeBadge from './components/ContentTypeBadge';
+import ContentCard, { type CardAction } from '@/components/content-card/ContentCard';
+import { deriveShareStatus } from '@/lib/core/shareStatus';
 
 // "My Work" — lists the current user's highlight reels (highlight_reels rows
 // they created). Each card shows WHERE the reel lives (public / team / private)
@@ -181,13 +182,6 @@ const TAG_STATUS = {
 function gameIsDone(game: Game): boolean {
   return game.videos.length > 0 && game.videos.every(v => v.taggingComplete);
 }
-// Green (all videos complete) takes precedence; otherwise the derived
-// clip-based signal: yellow = has clips, red = none yet.
-function gameStatusColor(game: Game): string {
-  if (gameIsDone(game)) return TAG_STATUS.done;
-  return game.clipCount > 0 ? TAG_STATUS.inProgress : TAG_STATUS.notStarted;
-}
-
 // Filter-bar options for My Work. Team options are built from the user's teams
 // at render (see teamOptions); Type stays a small fixed set.
 const MY_WORK_TYPE_OPTIONS: DropdownOption[] = [
@@ -230,11 +224,8 @@ export default function MyWorkScreen() {
   const [tagsById, setTagsById] = useState<Map<string, Set<string>>>(new Map());
   const [tagMeta, setTagMeta] = useState<Map<string, { name: string; category: string }>>(new Map());
 
-  // Inline rename state: which reel is being renamed + the working draft.
-  const [renamingId, setRenamingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [savedItems, setSavedItems] = useState<SavedEntry[]>([]);
-  const [draftName, setDraftName] = useState('');
 
   // Per-video offline cache state. Aggregated into per-game "Save for offline"
   // buttons on game cards below. Hydrated once from the persisted manifest,
@@ -821,24 +812,6 @@ export default function MyWorkScreen() {
     });
   }
 
-  function startRename(reel: Reel) {
-    setRenamingId(reel.id);
-    setDraftName(reel.name);
-  }
-
-  async function commitRename(reel: Reel) {
-    const next = draftName.trim();
-    setRenamingId(null);
-    if (!next || next === reel.name) return;
-    // Optimistic local update; revert on error.
-    setReels(prev => prev.map(r => r.id === reel.id ? { ...r, name: next } : r));
-    const { error } = await supabase.from('highlight_reels').update({ name: next }).eq('id', reel.id);
-    if (error) {
-      Alert.alert('Error', error.message);
-      setReels(prev => prev.map(r => r.id === reel.id ? { ...r, name: reel.name } : r));
-    }
-  }
-
   // Inline rename of a single video's LABEL (per-video, e.g. Q1 → Q3) — distinct
   // from a game's title. Owner/coach only (videos_update RLS). Optimistic across
   // both in-game footage (games[].videos) and loose footage (looseVideos).
@@ -1190,49 +1163,6 @@ export default function MyWorkScreen() {
     ]);
   }
 
-  function renderBadges(destinations: Destination[]) {
-    if (destinations.length === 0) {
-      return (
-        <View style={[styles.badge, styles.badgeLock]}>
-          <Ionicons name="lock-closed" size={11} color="#888" />
-          <Text style={styles.badgeLockText}>Only you</Text>
-        </View>
-      );
-    }
-    return destinations.map((d, i) => {
-      if (d.kind === 'public') {
-        return (
-          <View key={`pub-${i}`} style={[styles.badge, styles.badgePublic]}>
-            <Ionicons name="globe-outline" size={11} color="#fff" />
-            <Text style={styles.badgeText}>Public</Text>
-          </View>
-        );
-      }
-      if (d.kind === 'coaches') {
-        return (
-          <View key={`co-${i}`} style={[styles.badge, styles.badgeCoaches]}>
-            <Ionicons name="clipboard-outline" size={11} color="#fff" />
-            <Text style={styles.badgeText}>Coaches</Text>
-          </View>
-        );
-      }
-      if (d.kind === 'player') {
-        return (
-          <View key={`player-${i}`} style={[styles.badge, styles.badgePlayer]}>
-            <Ionicons name="lock-closed" size={11} color="#fff" />
-            <Text style={styles.badgeText} numberOfLines={1}>Shared with {d.kidName}</Text>
-          </View>
-        );
-      }
-      return (
-        <View key={`team-${i}`} style={[styles.badge, styles.badgeTeam]}>
-          <Ionicons name="people" size={11} color="#fff" />
-          <Text style={styles.badgeText} numberOfLines={1}>{d.teamName}</Text>
-        </View>
-      );
-    });
-  }
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.topRow}>
@@ -1361,66 +1291,36 @@ export default function MyWorkScreen() {
                 const reel = reelsById.get(fi.id);
                 if (!reel) return null;
                 return (
-                  <View key={`reel:${reel.id}`} style={styles.card}>
-                    <TouchableOpacity
-                      style={styles.thumb}
-                      onPress={() => openReel(reel)}
-                      onLongPress={() => Alert.alert(reel.name, undefined, [
-                        { text: 'Edit reel', onPress: () => router.push({ pathname: '/edit-reel', params: { id: reel.id } }) },
-                        { text: 'Delete reel', style: 'destructive', onPress: () => confirmDelete(reel) },
-                        { text: 'Cancel', style: 'cancel' },
-                      ])}
-                    >
-                      <Ionicons name="film-outline" size={30} color="#666" />
-                    </TouchableOpacity>
-
-                    <View style={styles.cardBody}>
-                      <View style={styles.typeBadgeWrap}><ContentTypeBadge type="reel" /></View>
-                      {renamingId === reel.id ? (
-                        <TextInput
-                          style={styles.cardTitleInput}
-                          value={draftName}
-                          onChangeText={setDraftName}
-                          autoFocus
-                          selectTextOnFocus
-                          returnKeyType="done"
-                          onSubmitEditing={() => commitRename(reel)}
-                          onBlur={() => commitRename(reel)}
-                        />
-                      ) : (
-                        <TouchableOpacity onPress={() => startRename(reel)}>
-                          <Text style={styles.cardTitle} numberOfLines={1}>{reel.name}</Text>
-                        </TouchableOpacity>
-                      )}
-
-                      <TouchableOpacity onPress={() => openReel(reel)} activeOpacity={0.7}>
-                        <Text style={styles.cardMeta} numberOfLines={1}>
-                          {formatDuration(reel.durationSeconds)} · {new Date(reel.createdAt).toLocaleDateString()}
-                        </Text>
-                      </TouchableOpacity>
-
-                      <View style={styles.badgeRow}>{renderBadges(reel.destinations)}</View>
-
-                      <View style={styles.actions}>
-                        <TouchableOpacity style={styles.postBtn} onPress={() => {
+                  <ContentCard
+                    key={`reel:${reel.id}`}
+                    content={{
+                      id: reel.id,
+                      kind: 'reel',
+                      title: reel.name,
+                      meta: `${formatDuration(reel.durationSeconds)} · ${new Date(reel.createdAt).toLocaleDateString()}`,
+                      thumbnailUri: null,
+                    }}
+                    onOpen={() => openReel(reel)}
+                    onLongPress={() => Alert.alert(reel.name, undefined, [
+                      { text: 'Edit reel (rename)', onPress: () => router.push({ pathname: '/edit-reel', params: { id: reel.id } }) },
+                      { text: 'Delete reel', style: 'destructive', onPress: () => confirmDelete(reel) },
+                      { text: 'Cancel', style: 'cancel' },
+                    ])}
+                    shareStatus={deriveShareStatus(reel.destinations)}
+                    actions={[
+                      {
+                        icon: reel.destinations.length ? 'share-social' : 'share-outline',
+                        label: reel.destinations.length ? 'Manage sharing' : 'Share',
+                        active: reel.destinations.length > 0,
+                        onPress: () => {
                           const item: Postable = { contentType: 'reel', contentId: reel.id, title: reel.name };
-                          reel.destinations.length ? manageSharing(item, reel.destinations) : confirmPostToWall(item);
-                        }}>
-                          <Text style={styles.postBtnText}>{reel.destinations.length ? 'Manage sharing' : 'Share'}</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity style={styles.trashBtn} onPress={() => downloadReel(reel)} disabled={downloadingId === reel.id}>
-                          {downloadingId === reel.id
-                            ? <ActivityIndicator size="small" color="#4a90d9" />
-                            : <Ionicons name="download-outline" size={18} color="#4a90d9" />}
-                        </TouchableOpacity>
-
-                        <TouchableOpacity style={styles.trashBtn} onPress={() => confirmDelete(reel)}>
-                          <Ionicons name="trash-outline" size={18} color="#a55" />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
+                          if (reel.destinations.length) manageSharing(item, reel.destinations); else confirmPostToWall(item);
+                        },
+                      },
+                      { icon: 'download-outline', label: 'Download', busy: downloadingId === reel.id, onPress: () => downloadReel(reel) },
+                      { icon: 'trash-outline', label: 'Delete reel', danger: true, onPress: () => confirmDelete(reel) },
+                    ]}
+                  />
                 );
               }
               if (fi.contentType === 'game') {
@@ -1431,70 +1331,50 @@ export default function MyWorkScreen() {
                 const dateStr = formatGameDate(game.gameDate);
                 const videoCount = `${game.videos.length} video${game.videos.length === 1 ? '' : 's'}`;
                 return (
-                  <View key={`game:${game.id}`} style={[styles.card, styles.gameCard, done && styles.gameCardDone]}>
-                    <TouchableOpacity
-                      style={styles.gameHeader}
-                      onPress={() => setExpandedGameId(expanded ? null : game.id)}
+                  <View key={`game:${game.id}`}>
+                    <ContentCard
+                      content={{
+                        id: game.id,
+                        kind: 'game',
+                        title: game.title,
+                        meta: dateStr ? `${dateStr} · ${videoCount}` : videoCount,
+                        clipCount: game.videos.length,
+                        tagStatus: done ? 'done' : (game.clipCount > 0 ? 'tagging' : 'none'),
+                        thumbnailUri: null,
+                      }}
+                      onOpen={() => setExpandedGameId(expanded ? null : game.id)}
                       onLongPress={() => Alert.alert(game.title, undefined, [
                         { text: 'Edit game', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
                         { text: 'Edit lineup (who played)', onPress: () => router.push({ pathname: '/edit-lineup', params: { gameId: game.id, gameTitle: game.title } }) },
                         { text: 'Delete game', style: 'destructive', onPress: () => confirmDeleteGame(game) },
                         { text: 'Cancel', style: 'cancel' },
                       ])}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.gameThumb}>
-                        <Ionicons name="basketball" size={24} color="#C8742B" />
-                      </View>
-                      <View style={styles.cardBody}>
-                        <View style={styles.typeBadgeWrap}>
-                          <ContentTypeBadge type="game" outlineColor={gameStatusColor(game)} />
-                        </View>
-                        <Text style={styles.cardTitle} numberOfLines={1}>{game.title}</Text>
-                        <Text style={styles.cardMeta} numberOfLines={1}>
-                          {dateStr ? `${dateStr} · ${videoCount}` : videoCount}
-                        </Text>
-                      </View>
-                      <Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={20} color="#888" />
-                    </TouchableOpacity>
-                    <View style={[styles.badgeRow, { marginTop: 10 }]}>{renderBadges(game.destinations)}</View>
-                    <View style={styles.actions}>
-                      <TouchableOpacity
-                        style={[styles.gamePostBtn, { flex: 1 }]}
-                        onPress={() => {
-                          // A shared game plays only its finalized videos (resolve_shared_game
-                          // filters to ready). Nothing ready yet → nothing to share.
-                          if (!game.videos.some(v => v.uploadStatus === 'ready')) { Alert.alert('Share', 'No finished videos to share yet.'); return; }
-                          const item: Postable = { contentType: 'game', contentId: game.id, title: game.title };
-                          game.destinations.length ? manageSharing(item, game.destinations) : confirmPostToWall(item);
-                        }}
-                      >
-                        <Text style={styles.postBtnText}>{game.destinations.length ? 'Manage sharing' : 'Share'}</Text>
-                      </TouchableOpacity>
-                      {(() => {
-                        // Per-game aggregate: cache each ready video individually,
-                        // roll status + progress into one label. The label doubles
-                        // as the button's "state" — tap behavior follows what it
-                        // currently shows.
+                      shareStatus={deriveShareStatus(game.destinations)}
+                      trailing={<Ionicons name={expanded ? 'chevron-down' : 'chevron-forward'} size={20} color="#888" />}
+                      actions={(() => {
+                        const acts: CardAction[] = [{
+                          icon: game.destinations.length ? 'share-social' : 'share-outline',
+                          label: game.destinations.length ? 'Manage sharing' : 'Share',
+                          active: game.destinations.length > 0,
+                          onPress: () => {
+                            // A shared game plays only its finalized videos — nothing ready → nothing to share.
+                            if (!game.videos.some(v => v.uploadStatus === 'ready')) { Alert.alert('Share', 'No finished videos to share yet.'); return; }
+                            const item: Postable = { contentType: 'game', contentId: game.id, title: game.title };
+                            if (game.destinations.length) manageSharing(item, game.destinations); else confirmPostToWall(item);
+                          },
+                        }];
                         const off = computeGameOffline(game, videoCacheStatus, videoCacheProgress);
-                        if (!off) return null;   // no ready videos → nothing to offer
-                        return (
-                          <TouchableOpacity
-                            style={[styles.gameOfflineBtn, { flex: 1, backgroundColor: off.bg }]}
-                            onPress={() => handleOfflineTap(game, off.action)}
-                            disabled={off.action === 'inflight'}
-                            activeOpacity={off.action === 'inflight' ? 1 : 0.6}
-                          >
-                            <Text style={[styles.gameOfflineText, { color: off.fg }]} numberOfLines={1}>{off.label}</Text>
-                          </TouchableOpacity>
-                        );
+                        if (off) acts.push({
+                          icon: off.action === 'remove' ? 'cloud-done' : off.action === 'retry' ? 'refresh' : 'cloud-download-outline',
+                          label: off.label,
+                          active: off.action === 'remove',
+                          busy: off.action === 'inflight',
+                          onPress: () => handleOfflineTap(game, off.action),
+                        });
+                        acts.push({ icon: 'download-outline', label: 'Download', busy: downloadingId === game.id, onPress: () => downloadGame(game) });
+                        return acts;
                       })()}
-                      <TouchableOpacity style={styles.trashBtn} onPress={() => downloadGame(game)} disabled={downloadingId === game.id}>
-                        {downloadingId === game.id
-                          ? <ActivityIndicator size="small" color="#4a90d9" />
-                          : <Ionicons name="download-outline" size={18} color="#4a90d9" />}
-                      </TouchableOpacity>
-                    </View>
+                    />
                     {expanded && (
                       <View style={styles.videoList}>
                         {game.videos.length === 0 ? (
