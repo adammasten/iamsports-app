@@ -108,9 +108,14 @@ Tabs (`app/(tabs)/_layout.tsx`) register **`index`** (a single team's wall,
   `overlay_mode`, `status`, `public_share_token?` (dead — retire-Public; zero app
   refs).
 - **`shares`** — the single sharing chokepoint (see Security model):
-  `content_type` (reel/video/clip/game), `content_id`, `team_id?`, `audience`
-  (`share_audience`: team/coaches/player — **no public**, retired),
-  `target_player_id?`, `shared_by_user_id`, `visible`, `hidden_by_family`.
+  `content_type` (`share_content`: reel/video/clip/**game** — `'game'` added via
+  `migration_share_content_add_game.sql`), `content_id`, `team_id?`, `season_id?`
+  (a team can play multiple seasons — shares are season-scoped; see per-season
+  rosters note below), `audience` (`share_audience`: team/coaches/player — **no
+  public**, retired), `target_player_id?`, `shared_by_user_id`, `visible`,
+  `hidden_by_family`, `note` (per-destination caption, set via `set_share_note`;
+  the text that renders **below the card** — distinct from `share_comments`, the
+  coaches-only thread), `on_wall` (guardian posted it to the kid's wall).
 - **`seasons`**, **`tournaments`**, **`game_lineups`**, **`saved_items`** ("My
   Film" bookmarks), **`content_reports`** / **`user_blocks`** (moderation),
   **`super_admins`**, **`team_member_permissions`** /
