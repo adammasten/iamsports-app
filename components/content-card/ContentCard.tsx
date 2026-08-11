@@ -25,7 +25,8 @@ export type CardContent = {
 
 export type CardAction = {
   icon: string;
-  label: string;                                   // accessibility / long-press
+  label: string;                                   // accessibility (full)
+  caption?: string;                                // short visible label under the icon (falls back to label)
   onPress: () => void;
   active?: boolean;
   danger?: boolean;
@@ -138,20 +139,26 @@ export default function ContentCard({
 
       {actions && actions.length > 0 ? (
         <View style={styles.actions}>
-          {actions.map((a, i) => (
-            <TouchableOpacity
-              key={`${a.label}-${i}`}
-              style={[styles.iconBtn, a.active && styles.iconBtnActive]}
-              onPress={a.onPress}
-              accessibilityLabel={a.label}
-              disabled={a.busy}
-              hitSlop={6}
-            >
-              {a.busy
-                ? <ActivityIndicator size="small" color="#8B82E8" />
-                : <Ionicons name={a.icon as any} size={18} color={a.danger ? '#DC3545' : a.active ? '#8B82E8' : '#aaa'} />}
-            </TouchableOpacity>
-          ))}
+          {actions.map((a, i) => {
+            const tint = a.danger ? '#DC3545' : a.active ? '#8B82E8' : '#aaa';
+            return (
+              <TouchableOpacity
+                key={`${a.label}-${i}`}
+                style={[styles.iconBtn, a.active && styles.iconBtnActive]}
+                onPress={a.onPress}
+                accessibilityLabel={a.label}
+                disabled={a.busy}
+                hitSlop={6}
+              >
+                {a.busy
+                  ? <ActivityIndicator size="small" color="#8B82E8" />
+                  : <Ionicons name={a.icon as any} size={18} color={tint} />}
+                <Text style={[styles.iconBtnLabel, { color: a.danger ? '#DC3545' : a.active ? '#8B82E8' : '#888' }]} numberOfLines={1}>
+                  {a.caption ?? a.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       ) : null}
 
@@ -186,8 +193,9 @@ const styles = StyleSheet.create({
   clipChipText: { color: '#aaa', fontSize: 11, fontWeight: '700' },
 
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6, marginTop: 10, borderTopWidth: 1, borderTopColor: '#2A2A2A', paddingTop: 10 },
-  iconBtn: { width: 40, height: 32, borderRadius: 8, backgroundColor: '#0D0D0D', borderWidth: 1, borderColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { minWidth: 54, height: 46, borderRadius: 8, backgroundColor: '#0D0D0D', borderWidth: 1, borderColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 8 },
   iconBtnActive: { borderColor: '#534AB7', backgroundColor: '#2A2740' },
+  iconBtnLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
 
   note: { marginTop: 10, backgroundColor: '#141414', borderWidth: 1, borderColor: '#2A2A2A', borderRadius: 8, padding: 10 },
   noteHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },

@@ -1279,6 +1279,7 @@ export default function MyWorkScreen() {
                       {
                         icon: reel.destinations.length ? 'share-social' : 'share-outline',
                         label: reel.destinations.length ? 'Manage sharing' : 'Share',
+                        caption: 'Share',
                         active: reel.destinations.length > 0,
                         onPress: () => {
                           const item: Postable = { contentType: 'reel', contentId: reel.id, title: reel.name };
@@ -1286,7 +1287,7 @@ export default function MyWorkScreen() {
                         },
                       },
                       { icon: 'download-outline', label: 'Download', busy: downloadingId === reel.id, onPress: () => downloadReel(reel) },
-                      { icon: 'trash-outline', label: 'Delete reel', danger: true, onPress: () => confirmDelete(reel) },
+                      { icon: 'trash-outline', label: 'Delete reel', caption: 'Delete', danger: true, onPress: () => confirmDelete(reel) },
                     ]}
                   />
                 );
@@ -1321,6 +1322,7 @@ export default function MyWorkScreen() {
                         const acts: CardAction[] = [{
                           icon: game.destinations.length ? 'share-social' : 'share-outline',
                           label: game.destinations.length ? 'Manage sharing' : 'Share',
+                          caption: 'Share',
                           active: game.destinations.length > 0,
                           onPress: () => {
                             // A shared game plays only its finalized videos — nothing ready → nothing to share.
@@ -1333,6 +1335,7 @@ export default function MyWorkScreen() {
                         if (off) acts.push({
                           icon: off.action === 'remove' ? 'cloud-done' : off.action === 'retry' ? 'refresh' : 'cloud-download-outline',
                           label: off.label,
+                          caption: off.action === 'retry' ? 'Retry' : 'Offline',
                           active: off.action === 'remove',
                           busy: off.action === 'inflight',
                           onPress: () => handleOfflineTap(game, off.action),
