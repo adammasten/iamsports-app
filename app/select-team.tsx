@@ -166,7 +166,11 @@ export default function SelectTeamScreen() {
   // signs via sign-media). A game plays its newest video; reels play whole.
   function openItem(fi: FilterableItem) {
     const it = itemsByKey.get(fi.id);
-    if (!it?.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
+    if (!it) return;
+    // A game → the plays-through game-player (same player as the Film Room). Reels/
+    // single videos → the single-video shared-viewer.
+    if (it.kind === 'game') { router.push({ pathname: '/game-player', params: { id: it.contentId, title: it.title } }); return; }
+    if (!it.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
     router.push({ pathname: '/shared-viewer', params: { title: it.title, storagePath: it.storagePath } });
   }
 

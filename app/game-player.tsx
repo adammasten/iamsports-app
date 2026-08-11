@@ -31,7 +31,10 @@ export default function GamePlayerScreen() {
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
   const params = useLocalSearchParams();
-  const gameId = (Array.isArray(params.id) ? params.id[0] : params.id) as string;
+  const gameId = (Array.isArray(params.id) ? params.id[0] : params.id) as string | undefined;
+  // Recipient path (walls): resolve the game's videos RLS-safely by shareId instead
+  // of a direct games/videos query (which a non-member can't read).
+  const shareId = (Array.isArray(params.shareId) ? params.shareId[0] : params.shareId) as string | undefined;
   const title = ((Array.isArray(params.title) ? params.title[0] : params.title) as string) ?? 'Game';
   const startIndex = parseInt((Array.isArray(params.index) ? params.index[0] : params.index) as string, 10) || 0;
 
@@ -53,13 +56,20 @@ export default function GamePlayerScreen() {
   const { duration } = useEvent(player, 'sourceLoad', { duration: 0, videoSource: null, availableVideoTracks: [], availableSubtitleTracks: [], availableAudioTracks: [] });
   const status = useEvent(player, 'statusChange', { status: 'idle' as string, oldStatus: undefined, error: undefined });
 
-  // Load only the game's READY videos, in order (the "game" queue).
+  // Load the game's READY videos in order. Recipient (shareId) → resolve_shared_game
+  // (RLS-safe for non-members); owner/member (gameId) → direct videos query.
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from('videos').select('id, label, url, upload_status').eq('game_id', gameId).eq('upload_status', 'ready').order('sort_order');
-      setVideos((data ?? []).map((v: any) => ({ id: v.id, label: v.label, url: v.url })));
+      if (shareId) {
+        const { data } = await supabase.rpc('resolve_shared_game', { p_share_id: shareId });
+        const rows = ((data ?? []) as any[]).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        setVideos(rows.filter(r => r.storage_path).map(r => ({ id: r.video_id, label: r.title, url: r.storage_path })));
+      } else if (gameId) {
+        const { data } = await supabase.from('videos').select('id, label, url, upload_status').eq('game_id', gameId).eq('upload_status', 'ready').order('sort_order');
+        setVideos((data ?? []).map((v: any) => ({ id: v.id, label: v.label, url: v.url })));
+      }
     })();
-  }, [gameId]);
+  }, [gameId, shareId]);
 
   // Restore portrait when leaving the player (the ⛶ button may have gone landscape).
   useEffect(() => {

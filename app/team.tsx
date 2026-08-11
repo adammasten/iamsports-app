@@ -94,7 +94,7 @@ export default function TeamWallScreen() {
 
   function openShared(item: { shareId: string; contentType: string; title: string; storagePath: string | null; startTime: number | null; endTime: number | null }) {
     if (item.contentType === 'game') {
-      router.push({ pathname: '/shared-game', params: { shareId: item.shareId, title: item.title } });
+      router.push({ pathname: '/game-player', params: { shareId: item.shareId, title: item.title } });
       return;
     }
     if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }

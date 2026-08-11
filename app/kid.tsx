@@ -353,7 +353,7 @@ export default function KidWallScreen() {
     // wall items are the viewer's own posts, so sharedBy stays empty → no report.
     const mod = { contentType: item.contentType, contentId: item.contentId ?? '', shareId: item.shareId, sharedBy: item.sharedBy ?? '' };
     if (item.contentType === 'game') {
-      router.push({ pathname: '/shared-game', params: { title: item.title, ...mod } });
+      router.push({ pathname: '/game-player', params: { title: item.title, ...mod } });
       return;
     }
     if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }

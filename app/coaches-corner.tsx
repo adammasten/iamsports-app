@@ -181,7 +181,7 @@ export default function CoachesCornerScreen() {
   function openShared(item: Post) {
     const mod = { contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedBy: item.sharedByUserId ?? '' };
     if (item.contentType === 'game') {
-      router.push({ pathname: '/shared-game', params: { title: item.title, ...mod } });
+      router.push({ pathname: '/game-player', params: { title: item.title, ...mod } });
       return;
     }
     if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
