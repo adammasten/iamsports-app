@@ -1261,6 +1261,7 @@ export default function MyWorkScreen() {
                       kind: 'reel',
                       title: reel.name,
                       meta: `${formatDuration(reel.durationSeconds)} · ${new Date(reel.createdAt).toLocaleDateString()}`,
+                      typeLabel: 'Reel',
                       thumbnailUri: null,
                     }}
                     onOpen={() => openReel(reel)}
@@ -1297,8 +1298,9 @@ export default function MyWorkScreen() {
                         id: game.id,
                         kind: 'game',
                         title: game.title,
-                        meta: dateStr ?? videoCount,
-                        videoCount: game.videos.length,
+                        meta: dateStr ? `${dateStr} · ${videoCount}` : videoCount,
+                        typeLabel: game.eventType ? game.eventType.charAt(0).toUpperCase() + game.eventType.slice(1) : 'Video',
+                        tagStatus: game.videos.length > 0 && game.videos.every(v => v.taggingComplete) ? 'done' : game.clipCount > 0 ? 'started' : 'none',
                         thumbnailUri: null,
                       }}
                       onOpen={() => router.push({ pathname: '/game-detail', params: { id: game.id, title: game.title } })}

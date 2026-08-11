@@ -11,14 +11,17 @@ const C = {
   surface: '#16161a', surface2: '#1e1e24', line: '#2a2a32', text: '#f4f4f6',
   dim: '#9a9aa5', accent: '#6c5ce7', amberBg: 'rgba(200,116,43,0.9)',
 };
+// Tag-status dot on the type chip: red = never tagged, orange = started, green = done.
+const STATUS: Record<'none' | 'started' | 'done', string> = { none: '#ff453a', started: '#ffd60a', done: '#32d74b' };
 
 export type CardContent = {
   id: string;
   kind: 'game' | 'reel';
   title: string;
   meta: string;
-  thumbnailUri?: string | null;   // null → placeholder icon
-  videoCount?: number;            // games: chip "≡ N videos" when > 1
+  thumbnailUri?: string | null;                // null → placeholder icon
+  typeLabel?: string;                          // top-right chip: "Game"/"Practice"/"Reel"/"Video"
+  tagStatus?: 'none' | 'started' | 'done';     // colored dot on the type chip (Film Room games); omit → no dot
 };
 
 export type CardAction = { icon: string; label: string; onPress: () => void; active?: boolean; busy?: boolean };
@@ -65,10 +68,10 @@ export default function ContentCard({
           : <Ionicons name={isGame ? 'basketball' : 'film'} size={40} color="#3a3f4a" />}
 
         {shareStatus ? <ShareChip status={shareStatus} /> : null}
-        {isGame && (content.videoCount ?? 0) > 1 ? (
-          <View style={[styles.chip, styles.chipRight, styles.chipCount]}>
-            <Ionicons name="reorder-three" size={13} color="#fff" />
-            <Text style={styles.chipText}>{content.videoCount} videos</Text>
+        {content.typeLabel ? (
+          <View style={[styles.chip, styles.chipRight, styles.chipType]}>
+            {content.tagStatus ? <View style={[styles.dot, { backgroundColor: STATUS[content.tagStatus] }]} /> : null}
+            <Text style={styles.chipText}>{content.typeLabel}</Text>
           </View>
         ) : null}
 
@@ -126,9 +129,10 @@ const styles = StyleSheet.create({
   chipLeft: { left: 10 },
   chipRight: { right: 10 },
   chipText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  chipCount: { backgroundColor: 'rgba(0,0,0,0.6)' },
+  chipType: { backgroundColor: 'rgba(0,0,0,0.6)' },
   chipShared: { backgroundColor: 'rgba(108,92,231,0.85)' },
   chipOnlyYou: { backgroundColor: C.amberBg },
+  dot: { width: 7, height: 7, borderRadius: 4 },
 
   playBadge: { width: 58, height: 58, borderRadius: 29, borderWidth: 2, borderColor: 'rgba(255,255,255,0.9)', backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
 
