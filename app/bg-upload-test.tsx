@@ -1,10 +1,12 @@
-// 🧪 DEV-ONLY — Phase 0b background-upload spike harness. Not linked in production
-// UI (reached via a __DEV__ card in Account). Delete after 0b is done.
+// 🧪 DEV-ONLY — Phase 0b background-upload spike harness. Reached via a spike card in
+// Account (SPIKE_SHOW_BG_TEST). Delete after 0b is done.
 //
-// Flow: pick a real video → ask Supabase for a signed upload URL (createSignedUploadUrl,
-// no S3 keys needed, works because you're logged in) → hand it to the native background
-// URLSession module → watch progress. THE TEST: start it, then LOCK the phone or switch
-// apps for a bit, come back — progress should have kept moving. That's background upload.
+// Two tests:
+//   • "Single PUT"  — signed upload URL (createSignedUploadUrl) → background PUT.
+//   • "Multipart"   — multipart-upload Edge Function presigns each part → background
+//                     part uploads → Edge Function finalizes. For the big 2–5 GB games.
+// THE TEST either way: start it, then LOCK the phone / switch apps, come back — progress
+// should have kept climbing.
 import BackgroundUpload from '@/modules/background-upload';
 import { supabase } from '@/supabase';
 import { pickVideo, pendingFileSize } from '@/lib/native/video-upload';
@@ -19,6 +21,8 @@ export default function BgUploadTest() {
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
   const startedAt = useRef<number>(0);
+  // Pending multipart finalize info (key + S3 uploadId), read by the onComplete handler.
+  const mpu = useRef<{ key: string; uploadId: string } | null>(null);
 
   const add = (line: string) =>
     setLog(prev => [`${new Date().toLocaleTimeString()}  ${line}`, ...prev].slice(0, 60));
@@ -26,15 +30,28 @@ export default function BgUploadTest() {
   useEffect(() => {
     const subs = [
       BackgroundUpload.addListener('onProgress', ({ progress }) => setProgress(progress)),
-      BackgroundUpload.addListener('onComplete', ({ status, etag }) => {
+      BackgroundUpload.addListener('onComplete', async (e) => {
         const secs = ((Date.now() - startedAt.current) / 1000).toFixed(0);
-        setBusy(false);
         setProgress(1);
-        add(`✅ COMPLETE — HTTP ${status}, ETag ${etag ?? '(none)'}, ${secs}s`);
+        if (e.parts && mpu.current) {
+          // Multipart: all parts uploaded — finalize server-side.
+          add(`All ${e.parts.length} parts uploaded (${secs}s). Finalizing…`);
+          const { key, uploadId } = mpu.current;
+          const { data, error } = await supabase.functions.invoke('multipart-upload', {
+            body: { action: 'complete', key, uploadId, parts: e.parts },
+          });
+          setBusy(false);
+          mpu.current = null;
+          if (error || data?.error) add(`❌ Finalize FAILED — ${error?.message ?? data?.error}`);
+          else add(`✅ MULTIPART COMPLETE — object assembled (ETag ${data?.etag ?? '?'})`);
+        } else {
+          setBusy(false);
+          add(`✅ COMPLETE — HTTP ${e.status}, ETag ${e.etag ?? '(none)'}, ${secs}s`);
+        }
       }),
       BackgroundUpload.addListener('onError', (e) => {
         setBusy(false);
-        add(`❌ ERROR — ${e.error ?? ''}${e.status ? ` (HTTP ${e.status})` : ''}${e.body ? `\n${String(e.body).slice(0, 300)}` : ''}`);
+        add(`❌ ERROR — ${e.error ?? ''}${e.part ? ` [part ${e.part}]` : ''}${e.status ? ` (HTTP ${e.status})` : ''}${e.body ? `\n${String(e.body).slice(0, 300)}` : ''}`);
       }),
     ];
     return () => subs.forEach(s => s.remove());
@@ -49,30 +66,43 @@ export default function BgUploadTest() {
     }
   }
 
-  async function pickAndUpload() {
+  async function pickSingle() {
     try {
-      setBusy(true);
-      setProgress(0);
-      add('Picking a video…');
+      setBusy(true); setProgress(0);
       const pending = await pickVideo();
-      if (!pending || pending.isWeb) { setBusy(false); add('No video picked (or web).'); return; }
-
+      if (!pending || pending.isWeb) { setBusy(false); add('No video picked.'); return; }
       const bytes = await pendingFileSize(pending);
-      add(`Picked ${(bytes / 1048576).toFixed(0)} MB → ${pending.uri.slice(0, 48)}…`);
-
+      add(`[single] Picked ${(bytes / 1048576).toFixed(0)} MB`);
       const key = `spike/0b-${Date.now()}.mp4`;
-      add('Requesting signed upload URL from Supabase…');
       const { data, error } = await supabase.storage.from('Videos').createSignedUploadUrl(key);
-      if (error || !data?.signedUrl) { setBusy(false); add(`Signed-URL FAILED — ${error?.message ?? 'no url'}`); return; }
-      add(`Got signed URL for ${key}`);
-
+      if (error || !data?.signedUrl) { setBusy(false); add(`Signed-URL FAILED — ${error?.message}`); return; }
       startedAt.current = Date.now();
       await BackgroundUpload.startUpload(key, pending.uri, data.signedUrl, { 'content-type': 'video/mp4' });
-      add('🚀 Enqueued on background session. NOW LOCK THE PHONE / SWITCH APPS, then come back.');
-    } catch (e: any) {
-      setBusy(false);
-      add(`start FAILED — ${e?.message ?? e}`);
-    }
+      add('🚀 [single] Enqueued. NOW LOCK THE PHONE / SWITCH APPS, then come back.');
+    } catch (e: any) { setBusy(false); add(`start FAILED — ${e?.message ?? e}`); }
+  }
+
+  async function pickMultipart() {
+    try {
+      setBusy(true); setProgress(0);
+      const pending = await pickVideo();
+      if (!pending || pending.isWeb) { setBusy(false); add('No video picked.'); return; }
+      const bytes = await pendingFileSize(pending);
+      add(`[multipart] Picked ${(bytes / 1048576).toFixed(0)} MB`);
+
+      const key = `spike/0b-mpu-${Date.now()}.mp4`;
+      add('Asking Edge Function to create multipart + presign parts…');
+      const { data, error } = await supabase.functions.invoke('multipart-upload', {
+        body: { action: 'create', key, fileSize: bytes, partSizeMB: 64 },
+      });
+      if (error || data?.error || !data?.parts) { setBusy(false); add(`Create FAILED — ${error?.message ?? data?.error}`); return; }
+      add(`Got ${data.parts.length} presigned parts (${(data.partSize / 1048576).toFixed(0)} MB each).`);
+
+      mpu.current = { key, uploadId: data.uploadId };
+      startedAt.current = Date.now();
+      await BackgroundUpload.startMultipartUpload(key, pending.uri, data.partSize, data.parts);
+      add('🚀 [multipart] All parts enqueued. NOW LOCK THE PHONE / SWITCH APPS, then come back.');
+    } catch (e: any) { setBusy(false); add(`start FAILED — ${e?.message ?? e}`); }
   }
 
   return (
@@ -80,12 +110,15 @@ export default function BgUploadTest() {
       <TouchableOpacity onPress={goBackOrHome} style={styles.back}><Text style={styles.backTxt}>← Back</Text></TouchableOpacity>
       <Text style={styles.h1}>🧪 BG Upload Test</Text>
 
+      <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={doPing}>
+        <Text style={styles.btnGhostTxt}>Ping module</Text>
+      </TouchableOpacity>
       <View style={styles.row}>
-        <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={doPing}>
-          <Text style={styles.btnGhostTxt}>Ping module</Text>
+        <TouchableOpacity style={[styles.btn, busy && styles.btnDisabled]} onPress={pickSingle} disabled={busy}>
+          <Text style={styles.btnTxt}>{busy ? '…' : 'Single PUT'}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.btn, busy && styles.btnDisabled]} onPress={pickAndUpload} disabled={busy}>
-          <Text style={styles.btnTxt}>{busy ? 'Uploading…' : 'Pick video + upload'}</Text>
+        <TouchableOpacity style={[styles.btn, busy && styles.btnDisabled]} onPress={pickMultipart} disabled={busy}>
+          <Text style={styles.btnTxt}>{busy ? '…' : 'Multipart (big games)'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -94,7 +127,7 @@ export default function BgUploadTest() {
       </View>
       <Text style={styles.pct}>{Math.round(progress * 100)}%</Text>
 
-      <Text style={styles.tip}>The real test: after &quot;Enqueued&quot;, lock the phone or open another app for ~30s, then return. If progress kept climbing, background upload works.</Text>
+      <Text style={styles.tip}>After &quot;Enqueued&quot;, lock the phone or open another app for ~30s, then return. If progress kept climbing, background upload works.</Text>
 
       <ScrollView style={styles.logBox} contentContainerStyle={{ padding: 10 }}>
         {log.map((l, i) => <Text key={i} style={styles.logLine}>{l}</Text>)}
@@ -108,7 +141,7 @@ const styles = StyleSheet.create({
   back: { paddingVertical: 8 },
   backTxt: { color: '#a99cf0', fontSize: 16 },
   h1: { color: '#fff', fontSize: 24, fontWeight: '700', marginBottom: 14 },
-  row: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  row: { flexDirection: 'row', gap: 10, marginTop: 10, marginBottom: 16 },
   btn: { flex: 1, backgroundColor: '#534AB7', borderRadius: 10, padding: 14, alignItems: 'center' },
   btnTxt: { color: '#fff', fontWeight: '700' },
   btnGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#534AB7' },
