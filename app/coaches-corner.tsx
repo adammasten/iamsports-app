@@ -7,8 +7,7 @@ import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import ContentTypeBadge from './components/ContentTypeBadge';
-import { ShareNote } from '@/components/share-note';
+import ContentCard from '@/components/content-card/ContentCard';
 import { ShareComments } from '@/components/share-comments';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
@@ -232,21 +231,18 @@ export default function CoachesCornerScreen() {
             {visiblePosts.map(fi => {
               const item = postsById.get(fi.id);
               if (!item) return null;
+              const isReel = item.contentType === 'reel';
+              const typeLabel = item.contentType.charAt(0).toUpperCase() + item.contentType.slice(1);
               return (
-                <View key={item.shareId} style={styles.card}>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => openShared(item)}
+                <View key={item.shareId}>
+                  <ContentCard
+                    content={{ id: item.contentId, kind: isReel ? 'reel' : 'game', title: item.title, meta: `${item.teamName} · ${relativeTime(item.createdAt)}`, typeLabel, thumbnailUri: null }}
+                    onOpen={() => openShared(item)}
                     onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: true, onChanged: loadCoachesBoard })}
-                  >
-                    <View style={styles.cardTop}>
-                      <Text style={styles.teamPill} numberOfLines={1}>{item.teamName}</Text>
-                      <ContentTypeBadge type={item.contentType} />
-                    </View>
-                    <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                    <Text style={styles.cardMeta}>{relativeTime(item.createdAt)}</Text>
-                    {item.note ? <ShareNote note={item.note} /> : null}
-                  </TouchableOpacity>
+                    showPlayOnThumb
+                    onPlay={() => openShared(item)}
+                    note={item.note ? { text: item.note } : undefined}
+                  />
                   <ShareComments shareId={item.shareId} />
                 </View>
               );
