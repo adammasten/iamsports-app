@@ -15,6 +15,8 @@ import { useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
 
 // pre/post-roll auto-window (basketball: the event happens at the END of a
 // possession, so reach back further than forward).
@@ -74,6 +76,7 @@ export default function TaggingStudioWeb() {
   const [videoReady, setVideoReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const retryRef = useRef(0);
+  const didAutoPlay = useRef(false);
 
   const loadSignedSource = useCallback(async () => {
     if (!remoteUrl) { setLoadError(true); return; }
@@ -86,7 +89,13 @@ export default function TaggingStudioWeb() {
   // signed URL) on error, then a tap-to-retry surface — so a cold-load or bad URL
   // is visible instead of a silent black frame.
   useEffect(() => {
-    if (status.status === 'readyToPlay') { retryRef.current = 0; setVideoReady(true); setLoadError(false); return; }
+    if (status.status === 'readyToPlay') {
+      retryRef.current = 0; setVideoReady(true); setLoadError(false);
+      // WEB: start playback on first ready (a manual play right after replace()
+      // races the load and aborts — same fix game-player uses). Coach pauses with Space.
+      if (!didAutoPlay.current) { didAutoPlay.current = true; try { player.play(); } catch {} }
+      return;
+    }
     if (status.status === 'error') {
       if (retryRef.current < 3) { retryRef.current += 1; const id = setTimeout(() => loadSignedSource(), 2000); return () => clearTimeout(id); }
       setLoadError(true);
@@ -208,6 +217,9 @@ export default function TaggingStudioWeb() {
 
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
   const builtSet = new Set(building.map(b => b.id));
+  const scrub = Gesture.Pan().minDistance(0)
+    .onBegin(e => runOnJS(seekToX)(e.x))
+    .onUpdate(e => runOnJS(seekToX)(e.x));
 
   const tagButton = (t: Tag, cat: string) => {
     const on = builtSet.has(t.id);
@@ -229,7 +241,7 @@ export default function TaggingStudioWeb() {
   );
 
   return (
-    <View style={styles.app}>
+    <GestureHandlerRootView style={styles.app}>
       {/* top bar */}
       <View style={styles.topbar}>
         <Pressable onPress={goBackOrHome} hitSlop={10}><Text style={styles.back}>‹ Back</Text></Pressable>
@@ -255,11 +267,14 @@ export default function TaggingStudioWeb() {
 
           {/* scrubber + transport */}
           <View style={styles.scrubZone}>
-            <Pressable style={styles.scrubTrack} onLayout={e => setBarWidth(e.nativeEvent.layout.width)}
-              onPress={e => seekToX((e.nativeEvent as any).locationX)}>
-              <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
-              <View style={[styles.scrubHead, { left: `${Math.round(progress * 100)}%` }]} />
-            </Pressable>
+            <GestureDetector gesture={scrub}>
+              <View style={styles.scrubTouch} onLayout={e => setBarWidth(e.nativeEvent.layout.width)}>
+                <View style={styles.scrubTrack}>
+                  <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
+                </View>
+                <View style={[styles.scrubHead, { left: `${Math.round(progress * 100)}%` }]} />
+              </View>
+            </GestureDetector>
             <View style={styles.transport}>
               <Pressable style={styles.tBtn} onPress={() => seekBy(-5)}><Text style={styles.tBtnTxt}>−5s</Text></Pressable>
               <Pressable style={[styles.tBtn, styles.tPlay]} onPress={togglePlay}><Text style={styles.tPlayTxt}>{isPlaying ? '❚❚' : '▶'}</Text></Pressable>
@@ -329,7 +344,7 @@ export default function TaggingStudioWeb() {
           </ScrollView>
         </View>
       </View>
-    </View>
+    </GestureHandlerRootView>
   );
 }
 
@@ -351,9 +366,10 @@ const styles = StyleSheet.create({
   overlayTxt: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
   scrubZone: { backgroundColor: C.panel, borderTopWidth: 1, borderTopColor: C.line, paddingHorizontal: 18, paddingTop: 9, paddingBottom: 7 },
-  scrubTrack: { height: 6, backgroundColor: C.line, borderRadius: 3, justifyContent: 'center' },
+  scrubTouch: { height: 18, justifyContent: 'center' },
+  scrubTrack: { height: 6, backgroundColor: C.line, borderRadius: 3 },
   scrubFill: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: C.accent, borderRadius: 3 },
-  scrubHead: { position: 'absolute', width: 15, height: 15, borderRadius: 8, backgroundColor: '#fff', marginLeft: -7, top: -4.5 },
+  scrubHead: { position: 'absolute', width: 15, height: 15, borderRadius: 8, backgroundColor: '#fff', marginLeft: -7, top: '50%', marginTop: -7.5 },
   transport: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
   tBtn: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 8, height: 32, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
   tBtnTxt: { color: C.text, fontSize: 13, fontWeight: '700' },
