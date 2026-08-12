@@ -152,13 +152,18 @@ export default function TaggingOverlayScreen() {
   // sourceLoad fires once when metadata loads — gives us the real duration
   // immediately. Without it, player.duration reads 0 until the first
   // timeUpdate after play() (bad UX: display shows "0:42 / 0:00" initially).
-  const { duration } = useEvent(player, 'sourceLoad', {
+  const { duration: srcDuration } = useEvent(player, 'sourceLoad', {
     videoSource: null,
     duration: 0,
     availableVideoTracks: [],
     availableSubtitleTracks: [],
     availableAudioTracks: [],
   });
+  // WEB: sourceLoad reports duration 0, which zeroes the scrubber + seek math
+  // (all clamp to duration). Fall back to the player's own duration property.
+  // Native reports it in sourceLoad, so this never engages there.
+  const pd = (player as { duration?: number }).duration;
+  const duration = srcDuration || (typeof pd === 'number' && Number.isFinite(pd) ? pd : 0);
 
   // Scrub bar state — dragging drives thumb size + tooltip visibility;
   // barWidth captured via onLayout for pixel→time conversion.

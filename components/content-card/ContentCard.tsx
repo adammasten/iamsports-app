@@ -8,7 +8,7 @@ import type { ShareStatus } from '@/lib/core/shareStatus';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const C = {
   surface: '#16161a', surface2: '#1e1e24', line: '#2a2a32', text: '#f4f4f6',
@@ -139,7 +139,10 @@ export default function ContentCard({
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 16, overflow: 'hidden', marginBottom: 16 },
+  // On web the card would otherwise fill the whole browser width, making its 16:9
+  // poster screen-sized. Cap it and center so it reads like a real card. Native
+  // (and narrow web) is unaffected — full width as before.
+  card: { backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 16, overflow: 'hidden', marginBottom: 16, ...(Platform.OS === 'web' ? { width: '100%' as const, maxWidth: 520, alignSelf: 'center' as const } : null) },
   thumb: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#1c1f26', alignItems: 'center', justifyContent: 'center' },
 
   chip: { position: 'absolute', top: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
