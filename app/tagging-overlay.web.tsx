@@ -32,9 +32,9 @@ const C = {
 const CAT_COLOR: Record<string, string> = {
   players: C.players, offense: C.offense, defense: C.defense, plays: C.plays,
 };
-// Event-tag hotkey pool (players use the number row). Reserved keys (space,
-// arrows, enter, backspace) are never in here.
-const EVENT_KEYS = 'QWERTYUIOPASDFGHJKLZXCVBNM'.split('');
+// Event-tag hotkey pool (players use the number row). Reserved keys — space,
+// arrows, enter, backspace, and I/O (mark In/Out) — are never in here.
+const EVENT_KEYS = 'QWERTYUPASDFGHJKLZXCVBNM'.split('');
 
 type Tag = { id: string; name: string; category: string };
 type Built = { id: string; name: string; category: string };
@@ -60,6 +60,8 @@ export default function TaggingStudioWeb() {
   const [building, setBuilding] = useState<Built[]>([]);
   const [isStar, setIsStar] = useState(false);
   const [isPoe, setIsPoe] = useState(false);
+  const [markIn, setMarkIn] = useState<number | null>(null);
+  const [markOut, setMarkOut] = useState<number | null>(null);
   const [barWidth, setBarWidth] = useState(0);
   const [saving, setSaving] = useState(false);
 
@@ -163,13 +165,17 @@ export default function TaggingStudioWeb() {
   const tapTag = useCallback((t: Tag) => {
     setBuilding(prev => prev.some(b => b.id === t.id) ? prev.filter(b => b.id !== t.id) : [...prev, { id: t.id, name: t.name, category: t.category }]);
   }, []);
-  const clearBuilding = useCallback(() => { setBuilding([]); setIsStar(false); setIsPoe(false); }, []);
+  const clearBuilding = useCallback(() => { setBuilding([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null); }, []);
+  const markInNow = useCallback(() => setMarkIn(player.currentTime || 0), [player]);
+  const markOutNow = useCallback(() => setMarkOut(player.currentTime || 0), [player]);
 
   const commitClip = useCallback(async () => {
     if (building.length === 0 || saving || !userId) return;
     const at = player.currentTime || 0;
-    const start = Math.max(0, at - PRE_ROLL);
-    const end = Math.min(duration || at + POST_ROLL, at + POST_ROLL);
+    // Explicit In/Out wins; otherwise the auto-window around the playhead.
+    const useMarks = markIn != null && markOut != null && markOut > markIn;
+    const start = useMarks ? (markIn as number) : Math.max(0, at - PRE_ROLL);
+    const end = useMarks ? (markOut as number) : Math.min(duration || at + POST_ROLL, at + POST_ROLL);
     setSaving(true);
     const { data: clip, error } = await supabase
       .from('clips')
@@ -184,7 +190,7 @@ export default function TaggingStudioWeb() {
     setSaving(false);
     clearBuilding();
     loadClips();
-  }, [building, saving, userId, player, duration, videoId, teamId, isStar, isPoe, special, clearBuilding, loadClips]);
+  }, [building, saving, userId, player, duration, videoId, teamId, isStar, isPoe, special, markIn, markOut, clearBuilding, loadClips]);
 
   // ── keyboard (web only — this file is .web.tsx) ──
   useEffect(() => {
@@ -199,6 +205,8 @@ export default function TaggingStudioWeb() {
       if (e.key === 'Enter') { e.preventDefault(); commitClip(); return; }
       if (e.key === 'Backspace') { e.preventDefault(); clearBuilding(); return; }
       const k = e.key.toUpperCase();
+      if (k === 'I') { e.preventDefault(); markInNow(); return; }
+      if (k === 'O') { e.preventDefault(); markOutNow(); return; }
       for (const cat of ['players', 'offense', 'defense', 'plays'] as const) {
         const hit = tags[cat].find(t => hotkeys[t.id] === k);
         if (hit) { e.preventDefault(); tapTag(hit); return; }
@@ -206,7 +214,7 @@ export default function TaggingStudioWeb() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [togglePlay, seekBy, commitClip, clearBuilding, tags, hotkeys, tapTag]);
+  }, [togglePlay, seekBy, commitClip, clearBuilding, markInNow, markOutNow, tags, hotkeys, tapTag]);
 
   const toggleFS = useCallback(() => {
     try {
@@ -220,6 +228,11 @@ export default function TaggingStudioWeb() {
   const scrub = Gesture.Pan().minDistance(0)
     .onBegin(e => runOnJS(seekToX)(e.x))
     .onUpdate(e => runOnJS(seekToX)(e.x));
+  const inPct = markIn != null && duration > 0 ? (markIn / duration) * 100 : null;
+  const outPct = markOut != null && duration > 0 ? (markOut / duration) * 100 : null;
+  const windowLabel = (markIn != null || markOut != null)
+    ? `${markIn != null ? fmt(markIn) : '—'} → ${markOut != null ? fmt(markOut) : '—'}`
+    : `auto −${PRE_ROLL}s/+${POST_ROLL}s`;
 
   const tagButton = (t: Tag, cat: string) => {
     const on = builtSet.has(t.id);
@@ -270,7 +283,10 @@ export default function TaggingStudioWeb() {
             <GestureDetector gesture={scrub}>
               <View style={styles.scrubTouch} onLayout={e => setBarWidth(e.nativeEvent.layout.width)}>
                 <View style={styles.scrubTrack}>
+                  {inPct != null && outPct != null ? <View style={[styles.inOutBand, { left: `${inPct}%`, width: `${Math.max(0, outPct - inPct)}%` }]} /> : null}
                   <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
+                  {inPct != null ? <View style={[styles.markTick, { left: `${inPct}%`, backgroundColor: C.made }]} /> : null}
+                  {outPct != null ? <View style={[styles.markTick, { left: `${outPct}%`, backgroundColor: C.poe }]} /> : null}
                 </View>
                 <View style={[styles.scrubHead, { left: `${Math.round(progress * 100)}%` }]} />
               </View>
@@ -279,7 +295,12 @@ export default function TaggingStudioWeb() {
               <Pressable style={styles.tBtn} onPress={() => seekBy(-5)}><Text style={styles.tBtnTxt}>−5s</Text></Pressable>
               <Pressable style={[styles.tBtn, styles.tPlay]} onPress={togglePlay}><Text style={styles.tPlayTxt}>{isPlaying ? '❚❚' : '▶'}</Text></Pressable>
               <Pressable style={styles.tBtn} onPress={() => seekBy(5)}><Text style={styles.tBtnTxt}>+5s</Text></Pressable>
+              <View style={styles.tDivider} />
+              <Pressable style={[styles.tBtn, markIn != null && styles.tBtnOn]} onPress={markInNow}><Text style={styles.tBtnTxt}>⇤ In</Text></Pressable>
+              <Pressable style={[styles.tBtn, markOut != null && styles.tBtnOn]} onPress={markOutNow}><Text style={styles.tBtnTxt}>Out ⇥</Text></Pressable>
               <Text style={styles.tTime}>{fmt(currentTime)} <Text style={styles.tTotal}>/ {fmt(duration)}</Text></Text>
+              <View style={{ flex: 1 }} />
+              <Text style={styles.windowLbl}>Clip: {windowLabel}</Text>
             </View>
           </View>
 
@@ -319,7 +340,7 @@ export default function TaggingStudioWeb() {
           </View>
 
           <View style={styles.shortcuts}>
-            <Text style={styles.scTxt}>Space play/pause · ←→ ±1s · ↑↓ ±5s · number = player · letter = event · ↵ done · ⌫ clear</Text>
+            <Text style={styles.scTxt}>Space play/pause · ←→ ±1s · ↑↓ ±5s · I / O in / out · number = player · letter = event · ↵ done · ⌫ clear</Text>
           </View>
         </View>
 
@@ -370,6 +391,8 @@ const styles = StyleSheet.create({
   scrubTrack: { height: 6, backgroundColor: C.line, borderRadius: 3 },
   scrubFill: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: C.accent, borderRadius: 3 },
   scrubHead: { position: 'absolute', width: 15, height: 15, borderRadius: 8, backgroundColor: '#fff', marginLeft: -7, top: '50%', marginTop: -7.5 },
+  inOutBand: { position: 'absolute', top: 0, bottom: 0, backgroundColor: 'rgba(108,92,231,0.35)', borderRadius: 3 },
+  markTick: { position: 'absolute', width: 3, top: -3, bottom: -3, marginLeft: -1.5, borderRadius: 2 },
   transport: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
   tBtn: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 8, height: 32, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
   tBtnTxt: { color: C.text, fontSize: 13, fontWeight: '700' },
@@ -377,6 +400,9 @@ const styles = StyleSheet.create({
   tPlayTxt: { color: '#000', fontSize: 14, fontWeight: '800' },
   tTime: { color: C.text, fontSize: 13, fontWeight: '700', marginLeft: 4 },
   tTotal: { color: C.faint, fontWeight: '600' },
+  tDivider: { width: 1, height: 22, backgroundColor: C.line, marginHorizontal: 4 },
+  tBtnOn: { borderColor: C.accent, backgroundColor: 'rgba(108,92,231,0.18)' },
+  windowLbl: { color: C.dim, fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
 
   tray: { backgroundColor: C.panel2, borderTopWidth: 1, borderTopColor: C.line, borderBottomWidth: 1, borderBottomColor: C.line, minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 8 },
   trayLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 1, color: C.faint },
