@@ -14,7 +14,7 @@ import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
@@ -82,7 +82,7 @@ export default function GamePlayerScreen() {
     return () => {
       mounted.current = false;
       if (retryTimer.current) clearTimeout(retryTimer.current);
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      if (Platform.OS !== 'web') ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     };
   }, []);
 
@@ -94,7 +94,11 @@ export default function GamePlayerScreen() {
     const src = cached ?? await getSignedVideoUrl(v.url, { forceRefresh: true });
     if (!mounted.current) return;
     if (!src) { setLoadError(true); return; }
-    try { player.replace(src); player.play(); } catch { /* released */ }
+    // NATIVE: replace + play immediately (works, unchanged). WEB: calling play()
+    // before the new source has loaded aborts it ("play() interrupted by a new
+    // load request"), looping forever — so on web we defer play() to the
+    // readyToPlay handler below.
+    try { player.replace(src); if (Platform.OS !== 'web') player.play(); } catch { /* released */ }
   }, [currentIndex, player]);
 
   // On index change (incl. auto-advance): reset load state + load.
@@ -108,7 +112,7 @@ export default function GamePlayerScreen() {
 
   // Status → ready / bounded auto-retry (re-mint signed URL) → tap-to-retry.
   useEffect(() => {
-    if (status.status === 'readyToPlay') { retryRef.current = 0; setVideoReady(true); setLoadError(false); return; }
+    if (status.status === 'readyToPlay') { retryRef.current = 0; setVideoReady(true); setLoadError(false); if (Platform.OS === 'web') { try { player.play(); } catch {} } return; }
     if (status.status === 'error') {
       if (retryRef.current < 3) {
         retryRef.current += 1;
@@ -151,6 +155,7 @@ export default function GamePlayerScreen() {
   }, [player]);
   const togglePlay = useCallback(() => { try { if (isPlaying) player.pause(); else player.play(); } catch {} }, [player, isPlaying]);
   const toggleFullscreen = useCallback(() => {
+    if (Platform.OS === 'web') return;   // web can't lock orientation; ⛶ is a no-op here for now
     ScreenOrientation.lockAsync(isLandscape ? ScreenOrientation.OrientationLock.PORTRAIT_UP : ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
   }, [isLandscape]);
   const retryNow = useCallback(() => { retryRef.current = 0; setLoadError(false); setVideoReady(false); loadCurrent(false); }, [loadCurrent]);
