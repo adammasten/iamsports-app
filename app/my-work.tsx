@@ -70,7 +70,7 @@ type Postable = { contentType: 'reel' | 'clip' | 'video' | 'game'; contentId: st
 // owner column on games. Each Game carries its videos pre-grouped so the inline
 // expand can render without a second query.
 type UploadStatus = 'uploading' | 'ready' | 'failed';
-type GameVideo = { id: string; label: string; url: string; sortOrder: number; taggingComplete: boolean; uploadStatus: UploadStatus };
+type GameVideo = { id: string; label: string; url: string; sortOrder: number; taggingComplete: boolean; uploadStatus: UploadStatus; thumbnailPath?: string | null };
 
 // A "Saved to My Film" bookmark, resolved for display via resolve_shared_content.
 type SavedEntry = {
@@ -354,7 +354,7 @@ export default function MyWorkScreen() {
     if (!userId) { setGames([]); setLooseVideos([]); return; }
     const { data, error } = await supabase
       .from('videos')
-      .select('id, label, url, sort_order, game_id, created_at, tagging_complete, event_type, upload_status, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))')
+      .select('id, label, url, thumbnail_path, sort_order, game_id, created_at, tagging_complete, event_type, upload_status, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))')
       .eq('uploaded_by_user_id', userId);
     if (error) { Alert.alert('Error', error.message); return; }
 
@@ -388,7 +388,7 @@ export default function MyWorkScreen() {
         };
         byId.set(row.game_id, game);
       }
-      game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true, uploadStatus: row.upload_status });
+      game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true, uploadStatus: row.upload_status, thumbnailPath: row.thumbnail_path ?? null });
       // clips(count) embeds as [{ count: N }] on the video row; accumulate per game.
       game.clipCount += row.clips?.[0]?.count ?? 0;
       // First video that carries an event type sets the game's (game.tsx uploads
@@ -1301,7 +1301,7 @@ export default function MyWorkScreen() {
                         meta: dateStr ? `${dateStr} · ${videoCount}` : videoCount,
                         typeLabel: game.eventType ? game.eventType.charAt(0).toUpperCase() + game.eventType.slice(1) : 'Video',
                         tagStatus: game.videos.length > 0 && game.videos.every(v => v.taggingComplete) ? 'done' : game.clipCount > 0 ? 'started' : 'none',
-                        thumbnailUri: null,
+                        thumbnailKey: game.videos.find(v => v.thumbnailPath)?.thumbnailPath ?? null,
                       }}
                       onOpen={() => router.push({ pathname: '/game-detail', params: { id: game.id, title: game.title } })}
                       onLongPress={() => Alert.alert(game.title, undefined, [
