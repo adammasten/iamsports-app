@@ -4,12 +4,12 @@
 // new sport or event type here needs ZERO migration (columns are text). RN-agnostic.
 // ============================================================
 
-export type EventTypeKey = 'game' | 'practice' | 'tournament' | 'scrimmage' | 'skills';
+export type EventTypeKey = 'game' | 'practice' | 'scout' | 'scrimmage' | 'skills';
 
 export const EVENT_TYPES: { value: EventTypeKey; label: string }[] = [
   { value: 'game', label: 'Game' },
   { value: 'practice', label: 'Practice' },
-  { value: 'tournament', label: 'Tournament' },
+  { value: 'scout', label: 'Scout' },
   { value: 'scrimmage', label: 'Scrimmage' },
   { value: 'skills', label: 'Skills' },
 ];
