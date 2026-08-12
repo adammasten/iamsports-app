@@ -8,13 +8,14 @@ import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, AppState, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentCard from '@/components/content-card/ContentCard';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 import FadeRail from './components/FadeRail';
+import WebTopNav from './components/WebTopNav';
 
 // Type + Sort dropdowns for the home content feed's FilterBar (mirrors Film Room).
 const TYPE_OPTIONS: DropdownOption[] = [
@@ -333,23 +334,27 @@ export default function SelectTeamScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.brand}>🏀 IamSports</Text>
-        <View style={styles.headerIcons}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/search')}>
-            <Ionicons name="search-outline" size={22} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/notifications')}>
-            <Ionicons name="notifications-outline" size={22} color="#fff" />
-            {unseenNotif > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{unseenNotif > 99 ? '99+' : unseenNotif}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+      {/* Header — WEB gets a top nav bar; native keeps the phone header. */}
+      {Platform.OS === 'web' ? (
+        <WebTopNav active="home" unseenNotif={unseenNotif} />
+      ) : (
+        <View style={styles.header}>
+          <Text style={styles.brand}>🏀 IamSports</Text>
+          <View style={styles.headerIcons}>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/search')}>
+              <Ionicons name="search-outline" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/notifications')}>
+              <Ionicons name="notifications-outline" size={22} color="#fff" />
+              {unseenNotif > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeText}>{unseenNotif > 99 ? '99+' : unseenNotif}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      )}
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {/* Your kids — always shown so "+ Add kid" is reachable even with zero
@@ -499,7 +504,8 @@ export default function SelectTeamScreen() {
         )}
       </ScrollView>
 
-      {/* Bottom nav */}
+      {/* Bottom nav — native only; web uses the top nav above. */}
+      {Platform.OS !== 'web' ? (
       <View style={[styles.bottomNav, { paddingBottom: insets.bottom + 8 }]}>
         <TouchableOpacity style={styles.navItem}>
           <Ionicons name="home" size={24} color="#fff" />
@@ -517,6 +523,7 @@ export default function SelectTeamScreen() {
           <Ionicons name="clipboard-outline" size={24} color="#888" />
         </TouchableOpacity>
       </View>
+      ) : null}
     </View>
   );
 }
