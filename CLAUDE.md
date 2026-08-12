@@ -395,8 +395,8 @@ closed with a regression test `test_rls_escalation.sql`). Recent work is the
 move / remove loose footage to games, and game/reel editors (`edit-game.tsx` /
 `edit-reel.tsx`).
 
-**Known open gap:** a video *inside* a game has no per-video editor (can't rename
-"Q1"→"Q3") — invariant 2, deferred. **Launch prep** remaining: host the privacy
-page / terms URL, App Store listing assets, NCMEC ESP registration. Don't start
-larger queued items (per-video editor, offline tagging, etc.) without Adam's
-go-ahead.
+Per-video rename ("Q1"→"Q3") is DONE — `game-detail.tsx`'s ⋯ overflow sheet has a
+cross-platform "Rename" (an in-app modal writing `videos.label`; replaced the
+iOS-only `Alert.prompt`). **Launch prep** remaining: host the privacy page / terms
+URL, App Store listing assets, NCMEC ESP registration. Don't start larger queued
+items (offline tagging, etc.) without Adam's go-ahead.

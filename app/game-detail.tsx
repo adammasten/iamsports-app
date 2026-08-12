@@ -13,7 +13,7 @@ import { goBackOrHome } from '@/lib/nav';
 import { supabase } from '@/supabase';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ── design tokens (game-card-prototype.html) ──
@@ -48,6 +48,8 @@ export default function GameDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<'watch' | 'tag'>('watch');
   const [sheetVid, setSheetVid] = useState<Vid | null>(null);
+  const [renameVid, setRenameVid] = useState<Vid | null>(null);
+  const [renameText, setRenameText] = useState('');
 
   const load = useCallback(async () => {
     if (!gameId) { setLoading(false); return; }
@@ -77,14 +79,21 @@ export default function GameDetailScreen() {
   const openTagger = (v: Vid) => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } });
   const viewClips = (v: Vid) => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } });
 
+  // Cross-platform rename via an in-app modal (Alert.prompt is iOS-only and would
+  // silently no-op on web/Android). Optimistic update, reverts on error.
   function renameVideo(v: Vid) {
-    Alert.prompt?.('Rename video', undefined, async (text?: string) => {
-      const next = (text ?? '').trim();
-      if (!next || next === v.label) return;
-      setVideos(prev => prev.map(x => x.id === v.id ? { ...x, label: next } : x));
-      const { error } = await supabase.from('videos').update({ label: next }).eq('id', v.id);
-      if (error) { Alert.alert('Error', error.message); load(); }
-    }, 'plain-text', v.label);
+    setRenameText(v.label);
+    setRenameVid(v);
+  }
+  async function submitRename() {
+    const v = renameVid;
+    if (!v) return;
+    const next = renameText.trim();
+    setRenameVid(null);
+    if (!next || next === v.label) return;
+    setVideos(prev => prev.map(x => x.id === v.id ? { ...x, label: next } : x));
+    const { error } = await supabase.from('videos').update({ label: next }).eq('id', v.id);
+    if (error) { Alert.alert('Error', error.message); load(); }
   }
   function removeFromGame(v: Vid) {
     Alert.alert('Remove from game', `Take “${v.label}” out of this game? It becomes loose footage — not deleted.`, [
@@ -182,6 +191,35 @@ export default function GameDetailScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Rename video (cross-platform — replaces the iOS-only Alert.prompt) */}
+      <Modal visible={!!renameVid} transparent animationType="slide" onRequestClose={() => setRenameVid(null)}>
+        <Pressable style={styles.scrim} onPress={() => setRenameVid(null)}>
+          <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]} onPress={() => {}}>
+            <View style={styles.grip} />
+            <Text style={styles.sheetTitle}>Rename video</Text>
+            <TextInput
+              style={styles.renameInput}
+              value={renameText}
+              onChangeText={setRenameText}
+              placeholder="Video name (e.g. Q1)"
+              placeholderTextColor={C.faint}
+              autoFocus
+              selectTextOnFocus
+              returnKeyType="done"
+              onSubmitEditing={submitRename}
+            />
+            <View style={styles.renameRow}>
+              <TouchableOpacity style={styles.renameBtn} onPress={() => setRenameVid(null)}>
+                <Text style={styles.renameBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.renameBtn, styles.renameBtnPrimary]} onPress={submitRename}>
+                <Text style={[styles.renameBtnText, { color: '#fff' }]}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -223,4 +261,9 @@ const styles = StyleSheet.create({
   sheetTitle: { color: C.dim, fontSize: 13, textAlign: 'center', marginBottom: 8 },
   sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 15, paddingHorizontal: 12, borderRadius: 12 },
   sheetLabel: { color: C.text, fontSize: 16, fontWeight: '500' },
+  renameInput: { backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 10, color: C.text, fontSize: 16, paddingHorizontal: 14, paddingVertical: 12, marginTop: 4, marginBottom: 14 },
+  renameRow: { flexDirection: 'row', gap: 10 },
+  renameBtn: { flex: 1, paddingVertical: 13, borderRadius: 10, alignItems: 'center', backgroundColor: C.surface, borderWidth: 1, borderColor: C.line },
+  renameBtnPrimary: { backgroundColor: C.accent, borderColor: C.accent },
+  renameBtnText: { color: C.text, fontSize: 15, fontWeight: '700' },
 });
