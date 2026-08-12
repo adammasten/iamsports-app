@@ -89,6 +89,13 @@ Deno.serve(async (req) => {
       if (error) return json({ error: 'Not allowed' }, 403);
       authedKey = `thumbnails/${videoId}.jpg`;
       // No transform: thumbnails are generated pre-sized (~640w) at the server.
+    } else if (key.startsWith('reel-thumbnails/')) {
+      // reel-thumbnails/<reelId>.jpg — viewable iff the caller can play the reel.
+      const reelId = key.split('/')[1]?.replace(/\.jpg$/i, '');
+      if (!reelId) return json({ error: 'Bad reel thumb key' }, 400);
+      const { error } = await asUser.rpc('authorize_reel_playback', { p_reel_id: reelId });
+      if (error) return json({ error: 'Not allowed' }, 403);
+      authedKey = `reel-thumbnails/${reelId}.jpg`;
     } else {
       const { data: vid } = await admin.from('videos').select('id').eq('url', key).maybeSingle();
       if (vid?.id) {

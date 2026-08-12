@@ -275,7 +275,7 @@ export async function loadContentFeed(
   {
     const { data, error } = await supabase
       .from('highlight_reels')
-      .select('id, name, storage_path, duration_seconds, created_at, team_id')
+      .select('id, name, storage_path, thumbnail_path, duration_seconds, created_at, team_id')
       .or(rParts.join(','))
       .order('created_at', { ascending: false })
       .limit(FEED_FETCH_LIMIT);
@@ -288,7 +288,7 @@ export async function loadContentFeed(
         teamId: (r.team_id as string) ?? '',
         createdAt: r.created_at,
         storagePath: r.storage_path ?? null,
-        thumbnailPath: null,   // reels get thumbnails from the reel-render job later
+        thumbnailPath: r.thumbnail_path ?? null,
         durationSeconds: r.duration_seconds != null ? Number(r.duration_seconds) : null,
         kidPlayerIds: wallKids(key),
         eventType: null, seasonId: null, seasonName: null, tournamentId: null, tournamentName: null,

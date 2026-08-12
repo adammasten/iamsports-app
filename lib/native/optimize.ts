@@ -26,3 +26,18 @@ export function optimizeVideoInBackground(key: string): void {
     })
     .catch((e) => console.warn(`[optimize] kickoff failed for ${key} (non-fatal):`, e));
 }
+
+// Reels are rendered by /export, not optimized, so they get their poster from a
+// separate step. Fire this right after a highlight_reels row is created — the
+// server grabs a frame from the rendered reel and sets highlight_reels.thumbnail_path.
+// Fire-and-forget + best-effort (same contract as optimize): never blocks or breaks
+// reel creation; a failure just leaves the reel on its placeholder icon.
+export function generateReelThumbnailInBackground(reelId: string): void {
+  fetch(`${SERVER_URL}/reel-thumbnail`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reelId }),
+  })
+    .then((r) => console.log(`[reel-thumbnail] kicked off for reel ${reelId} (HTTP ${r.status})`))
+    .catch((e) => console.warn(`[reel-thumbnail] kickoff failed for ${reelId} (non-fatal):`, e));
+}

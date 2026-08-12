@@ -56,6 +56,7 @@ type Reel = {
   id: string;
   name: string;
   storagePath: string | null;
+  thumbnailPath: string | null;
   durationSeconds: number | null;
   createdAt: string;
   destinations: Destination[];
@@ -289,7 +290,7 @@ export default function MyWorkScreen() {
       ({ data: reelRows, error } = await withTimeout(
         supabase
           .from('highlight_reels')
-          .select('id, name, storage_path, duration_seconds, created_at')
+          .select('id, name, storage_path, thumbnail_path, duration_seconds, created_at')
           .eq('created_by_user_id', userId)
           .order('created_at', { ascending: false }),
       ));
@@ -337,6 +338,7 @@ export default function MyWorkScreen() {
       id: r.id,
       name: r.name,
       storagePath: r.storage_path ?? null,
+      thumbnailPath: r.thumbnail_path ?? null,
       durationSeconds: r.duration_seconds != null ? Number(r.duration_seconds) : null,
       createdAt: r.created_at,
       destinations: destByReel.get(r.id) ?? [],
@@ -1262,7 +1264,7 @@ export default function MyWorkScreen() {
                       title: reel.name,
                       meta: `${formatDuration(reel.durationSeconds)} · ${new Date(reel.createdAt).toLocaleDateString()}`,
                       typeLabel: 'Reel',
-                      thumbnailUri: null,
+                      thumbnailKey: reel.thumbnailPath,
                     }}
                     onOpen={() => openReel(reel)}
                     onLongPress={() => Alert.alert(reel.name, undefined, [

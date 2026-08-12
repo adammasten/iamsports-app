@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { clipMatchesGroup } from '@/lib/core/clip-filtering';
+import { generateReelThumbnailInBackground } from '@/lib/native/optimize';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
@@ -215,6 +216,9 @@ export default function ExportScreen() {
         console.warn('[reel] highlight_reels insert failed:', error?.message || 'no id returned');
         return;
       }
+
+      // Kick off the reel's poster thumbnail (fire-and-forget, best-effort).
+      generateReelThumbnailInBackground(inserted.id);
 
       // Auto-attach: copy the distinct tags from the source clips onto the reel.
       // Tags are already in memory (c.tagIds) — no extra query. Best-effort: a
