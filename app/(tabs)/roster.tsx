@@ -1,8 +1,9 @@
 import { COACH_ROLES, useTeamContext } from '@/context';
+import { confirm } from '@/lib/confirm';
 import { supabase } from '@/supabase';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // The team Roster tab. Coaches manage the roster (hold spots, share the team
@@ -120,37 +121,39 @@ export default function RosterScreen() {
     load();
   }
 
-  function removePlaceholder(p: RosterPlayer) {
+  async function removePlaceholder(p: RosterPlayer) {
     if (!activeTeam) return;
-    Alert.alert('Remove from roster', `Remove “${p.name}” from this team’s roster?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
-        // Guarded RPC: detaches from the team; only hard-deletes a truly blank
-        // placeholder. A kid with guardians/footage keeps everything — history
-        // is never destroyed here.
-        const { error } = await supabase.rpc('remove_roster_placeholder', { p_player_id: p.playerId, p_team_id: activeTeam.id });
-        if (error) { Alert.alert('Error', error.message); return; }
-        load();
-      } },
-    ]);
+    const ok = await confirm({ title: 'Remove from roster', message: `Remove “${p.name}” from this team’s roster?`, confirmText: 'Remove', destructive: true });
+    if (!ok) return;
+    // Guarded RPC: detaches from the team; only hard-deletes a truly blank
+    // placeholder. A kid with guardians/footage keeps everything — history
+    // is never destroyed here.
+    const { error } = await supabase.rpc('remove_roster_placeholder', { p_player_id: p.playerId, p_team_id: activeTeam.id });
+    if (error) { Alert.alert('Error', error.message); return; }
+    load();
   }
 
-  const shareCode = (label: string, code: string) => Share.share({ message: `${label}: ${code}` });
+  const shareCode = async (label: string, code: string) => {
+    if (Platform.OS === 'web') {
+      // Desktop browsers don't reliably support the native share sheet — copy instead.
+      try { await navigator.clipboard.writeText(code); Alert.alert('Copied', `${label}: ${code}`); }
+      catch { Alert.alert(label, code); }
+    } else {
+      Share.share({ message: `${label}: ${code}` });
+    }
+  };
 
-  function resetTeamCode() {
+  async function resetTeamCode() {
     if (!activeTeam) return;
-    Alert.alert(
-      'Reset team code?',
-      'The current code stops working immediately. Anyone who has the old one can’t join until you share the new code.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Reset', style: 'destructive', onPress: async () => {
-          const { data, error } = await supabase.rpc('regenerate_team_code', { p_team_id: activeTeam.id });
-          if (error) { Alert.alert('Reset', error.message); return; }
-          setTeamCode(data as string);
-        } },
-      ],
-    );
+    const ok = await confirm({
+      title: 'Reset team code?',
+      message: 'The current code stops working immediately. Anyone who has the old one can’t join until you share the new code.',
+      confirmText: 'Reset', destructive: true,
+    });
+    if (!ok) return;
+    const { data, error } = await supabase.rpc('regenerate_team_code', { p_team_id: activeTeam.id });
+    if (error) { Alert.alert('Reset', error.message); return; }
+    setTeamCode(data as string);
   }
 
   if (!activeTeam) {
@@ -270,45 +273,45 @@ export default function RosterScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  title: { fontSize: 22, fontWeight: '800', color: '#1a1a1a' },
-  subtitle: { fontSize: 14, fontWeight: '600', color: '#888', marginBottom: 16 },
-  empty: { color: '#888', fontSize: 15, textAlign: 'center', marginTop: 24 },
+  container: { flex: 1, backgroundColor: '#000' },
+  title: { fontSize: 22, fontWeight: '800', color: '#f4f4f6' },
+  subtitle: { fontSize: 14, fontWeight: '600', color: '#9096a3', marginBottom: 16 },
+  empty: { color: '#9096a3', fontSize: 15, textAlign: 'center', marginTop: 24 },
 
-  codeCard: { backgroundColor: '#f5f4fb', borderRadius: 12, padding: 16, marginBottom: 20 },
-  codeCardLabel: { fontSize: 13, fontWeight: '700', color: '#534AB7', textTransform: 'uppercase', letterSpacing: 0.5 },
+  codeCard: { backgroundColor: '#16161a', borderRadius: 12, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#2a2a32' },
+  codeCardLabel: { fontSize: 13, fontWeight: '700', color: '#8b7bff', textTransform: 'uppercase', letterSpacing: 0.5 },
   codeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
-  codeBig: { fontSize: 30, fontWeight: '800', letterSpacing: 4, color: '#1a1a1a' },
+  codeBig: { fontSize: 30, fontWeight: '800', letterSpacing: 4, color: '#f4f4f6' },
   codeBtns: { flexDirection: 'row', gap: 8 },
   shareBtn: { backgroundColor: '#534AB7', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   shareBtnText: { color: '#fff', fontWeight: '700' },
-  resetBtn: { backgroundColor: '#eee', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  resetBtnText: { color: '#555', fontWeight: '700' },
-  hint: { fontSize: 12, color: '#888', marginTop: 8, lineHeight: 16 },
+  resetBtn: { backgroundColor: '#24242c', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#2a2a32' },
+  resetBtnText: { color: '#c9ccd3', fontWeight: '700' },
+  hint: { fontSize: 12, color: '#62626c', marginTop: 8, lineHeight: 16 },
 
-  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e5e5', gap: 12 },
-  jersey: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee', alignItems: 'center', justifyContent: 'center' },
-  jerseyText: { fontWeight: '800', color: '#555' },
-  name: { fontSize: 16, fontWeight: '700', color: '#1a1a1a' },
-  meta: { fontSize: 12, color: '#999', marginTop: 2 },
-  codeSmall: { fontSize: 13, color: '#534AB7', fontWeight: '600', marginTop: 4 },
-  editInput: { fontSize: 16, fontWeight: '700', color: '#1a1a1a', borderBottomWidth: 1, borderBottomColor: '#534AB7', paddingVertical: 2 },
-  action: { color: '#534AB7', fontWeight: '700', fontSize: 14, paddingHorizontal: 4 },
-  danger: { color: '#c0392b' },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#2a2a32', gap: 12 },
+  jersey: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#24242c', alignItems: 'center', justifyContent: 'center' },
+  jerseyText: { fontWeight: '800', color: '#c9ccd3' },
+  name: { fontSize: 16, fontWeight: '700', color: '#f4f4f6' },
+  meta: { fontSize: 12, color: '#62626c', marginTop: 2 },
+  codeSmall: { fontSize: 13, color: '#8b7bff', fontWeight: '600', marginTop: 4 },
+  editInput: { fontSize: 16, fontWeight: '700', color: '#f4f4f6', borderBottomWidth: 1, borderBottomColor: '#6c5ce7', paddingVertical: 2 },
+  action: { color: '#8b7bff', fontWeight: '700', fontSize: 14, paddingHorizontal: 4 },
+  danger: { color: '#e2574a' },
 
-  addBox: { marginTop: 16, backgroundColor: '#fafafa', borderRadius: 12, padding: 14, gap: 10 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: '#1a1a1a' },
+  addBox: { marginTop: 16, backgroundColor: '#16161a', borderRadius: 12, padding: 14, gap: 10, borderWidth: 1, borderColor: '#2a2a32' },
+  input: { borderWidth: 1, borderColor: '#2a2a32', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: '#f4f4f6', backgroundColor: '#1b1e26' },
   addBtns: { flexDirection: 'row', gap: 10 },
-  btn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center', backgroundColor: '#eee' },
-  btnText: { fontWeight: '700', color: '#555' },
+  btn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center', backgroundColor: '#24242c' },
+  btnText: { fontWeight: '700', color: '#c9ccd3' },
   btnPrimary: { backgroundColor: '#534AB7' },
   btnPrimaryText: { fontWeight: '700', color: '#fff' },
   addRow: { marginTop: 16, paddingVertical: 14, borderRadius: 10, borderWidth: 1, borderColor: '#534AB7', borderStyle: 'dashed', alignItems: 'center' },
-  addRowText: { color: '#534AB7', fontWeight: '700', fontSize: 15 },
+  addRowText: { color: '#8b7bff', fontWeight: '700', fontSize: 15 },
 
-  dupeCard: { backgroundColor: '#fff7ed', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#f5c890' },
-  dupeTitle: { color: '#b06a1a', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  dupeCard: { backgroundColor: '#1f1a10', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#4a3a1a' },
+  dupeTitle: { color: '#e0a94a', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
   dupeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
-  dupeText: { color: '#333', fontSize: 15, fontWeight: '600', flex: 1 },
-  dupeMerge: { color: '#534AB7', fontWeight: '800', fontSize: 14 },
+  dupeText: { color: '#e8e8ea', fontSize: 15, fontWeight: '600', flex: 1 },
+  dupeMerge: { color: '#8b7bff', fontWeight: '800', fontSize: 14 },
 });
