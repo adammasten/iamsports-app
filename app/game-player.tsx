@@ -58,7 +58,14 @@ export default function GamePlayerScreen() {
   const player = useVideoPlayer(null, p => { p.timeUpdateEventInterval = 0.25; });
   const { currentTime } = useEvent(player, 'timeUpdate', { currentTime: 0, currentLiveTimestamp: null, currentOffsetFromLive: null, bufferedPosition: 0 });
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: false });
-  const { duration } = useEvent(player, 'sourceLoad', { duration: 0, videoSource: null, availableVideoTracks: [], availableSubtitleTracks: [], availableAudioTracks: [] });
+  const { duration: srcDuration } = useEvent(player, 'sourceLoad', { duration: 0, videoSource: null, availableVideoTracks: [], availableSubtitleTracks: [], availableAudioTracks: [] });
+  // expo-video on WEB often reports duration 0 in sourceLoad, which zeroes the
+  // scrubber + ±5s (all seek math clamps to duration → every seek collapses to 0).
+  // Fall back to the player's own duration property (the <video> element knows it;
+  // re-read on each timeUpdate render). Native reports it in sourceLoad, so this
+  // fallback never engages there — mobile behavior is unchanged.
+  const pd = (player as { duration?: number }).duration;
+  const duration = srcDuration || (typeof pd === 'number' && Number.isFinite(pd) ? pd : 0);
   const status = useEvent(player, 'statusChange', { status: 'idle' as string, oldStatus: undefined, error: undefined });
 
   // Load the game's READY videos in order. Recipient (shareId) → resolve_shared_game
