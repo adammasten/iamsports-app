@@ -14,7 +14,7 @@ import { useEvent } from 'expo';
 import { useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 // pre/post-roll auto-window (basketball: the event happens at the END of a
 // possession, so reach back further than forward).
@@ -69,13 +69,30 @@ export default function TaggingStudioWeb() {
   const { duration: srcDuration } = useEvent(player, 'sourceLoad', { duration: 0, videoSource: null, availableVideoTracks: [], availableSubtitleTracks: [], availableAudioTracks: [] });
   const pd = (player as { duration?: number }).duration;
   const duration = srcDuration || (typeof pd === 'number' && Number.isFinite(pd) ? pd : 0);
+  const status = useEvent(player, 'statusChange', { status: 'idle' as string, oldStatus: undefined, error: undefined });
+
+  const [videoReady, setVideoReady] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const retryRef = useRef(0);
 
   const loadSignedSource = useCallback(async () => {
-    if (!remoteUrl) return;
+    if (!remoteUrl) { setLoadError(true); return; }
     const signed = await getSignedVideoUrl(remoteUrl, { forceRefresh: true });
-    if (signed) { try { player.replace(signed); } catch {} }
+    if (signed) { try { player.replace(signed); } catch {} } else { setLoadError(true); }
   }, [remoteUrl, player]);
   useEffect(() => { if (!cachedPath) loadSignedSource(); /* eslint-disable-next-line */ }, []);
+
+  // Mirror game-player: spinner until readyToPlay, bounded auto-retry (re-mint the
+  // signed URL) on error, then a tap-to-retry surface — so a cold-load or bad URL
+  // is visible instead of a silent black frame.
+  useEffect(() => {
+    if (status.status === 'readyToPlay') { retryRef.current = 0; setVideoReady(true); setLoadError(false); return; }
+    if (status.status === 'error') {
+      if (retryRef.current < 3) { retryRef.current += 1; const id = setTimeout(() => loadSignedSource(), 2000); return () => clearTimeout(id); }
+      setLoadError(true);
+    }
+  }, [status, loadSignedSource]);
+  const retryNow = useCallback(() => { retryRef.current = 0; setLoadError(false); setVideoReady(false); loadSignedSource(); }, [loadSignedSource]);
 
   // ── team + tags + clips ──
   useEffect(() => {
@@ -196,7 +213,7 @@ export default function TaggingStudioWeb() {
     const on = builtSet.has(t.id);
     const col = CAT_COLOR[cat];
     return (
-      <Pressable key={t.id} onPress={() => tapTag(t)} style={[styles.chip, { borderColor: col + '55' }, on && { backgroundColor: col }]}>
+      <Pressable key={t.id} onPress={() => tapTag(t)} style={[styles.chip, { borderColor: on ? col : col + 'aa', backgroundColor: on ? col : col + '1c' }]}>
         {cat === 'players' && hotkeys[t.id] ? <Text style={[styles.chipKey, on && { color: '#1a1030' }]}>{hotkeys[t.id]}</Text> : null}
         <Text style={[styles.chipTxt, { color: on ? '#0a1210' : C.text }]} numberOfLines={1}>{t.name}</Text>
         {cat !== 'players' && hotkeys[t.id] ? <Text style={[styles.chipKey, on && { color: '#1a1030' }]}>{hotkeys[t.id]}</Text> : null}
@@ -226,9 +243,14 @@ export default function TaggingStudioWeb() {
         {/* left stage */}
         <View style={styles.stage}>
           <View style={styles.videoWrap}>
-            <View style={styles.videoFrame}>
-              <VideoView player={player} style={StyleSheet.absoluteFill} nativeControls={false} contentFit="contain" />
-            </View>
+            <VideoView player={player} style={StyleSheet.absoluteFill} nativeControls={false} contentFit="contain" />
+            {!videoReady ? (
+              <Pressable style={styles.videoOverlay} onPress={loadError ? retryNow : undefined}>
+                {loadError
+                  ? <Text style={styles.overlayTxt}>Couldn&apos;t load this video — tap to retry</Text>
+                  : <ActivityIndicator color="#fff" size="large" />}
+              </Pressable>
+            ) : null}
           </View>
 
           {/* scrubber + transport */}
@@ -325,7 +347,8 @@ const styles = StyleSheet.create({
   main: { flex: 1, flexDirection: 'row', minHeight: 0 },
   stage: { flex: 1, minWidth: 0 },
   videoWrap: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', minHeight: 0, overflow: 'hidden' },
-  videoFrame: { aspectRatio: 16 / 9, maxHeight: '100%', maxWidth: '100%', width: '100%', backgroundColor: '#000' },
+  videoOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  overlayTxt: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
   scrubZone: { backgroundColor: C.panel, borderTopWidth: 1, borderTopColor: C.line, paddingHorizontal: 18, paddingTop: 9, paddingBottom: 7 },
   scrubTrack: { height: 6, backgroundColor: C.line, borderRadius: 3, justifyContent: 'center' },
@@ -362,7 +385,7 @@ const styles = StyleSheet.create({
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chip: { borderWidth: 1, backgroundColor: C.panel, borderRadius: 18, paddingHorizontal: 10, paddingVertical: 7, minHeight: 33, flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 88, justifyContent: 'center' },
   chipTxt: { fontSize: 12, fontWeight: '700' },
-  chipKey: { fontSize: 9, color: C.faint, fontWeight: '700' },
+  chipKey: { fontSize: 11, color: C.dim, fontWeight: '800', borderWidth: 1, borderColor: C.line, borderRadius: 4, paddingHorizontal: 4, overflow: 'hidden' },
   vdiv: { width: 1, backgroundColor: C.line, alignSelf: 'stretch' },
 
   shortcuts: { backgroundColor: C.panel, borderTopWidth: 1, borderTopColor: C.line, paddingHorizontal: 18, paddingVertical: 8 },
