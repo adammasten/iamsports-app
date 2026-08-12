@@ -38,7 +38,7 @@ export default function TeamWallScreen() {
   // resolve_shared_content mirrors the same check.
   const [posts, setPosts] = useState<{
     shareId: string; contentType: string; createdAt: string;
-    title: string; storagePath: string | null;
+    title: string; storagePath: string | null; thumbnailPath: string | null;
     startTime: number | null; endTime: number | null; note: string | null;
   }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,6 +62,7 @@ export default function TeamWallScreen() {
         createdAt: r.created_at,
         title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
         storagePath: c?.storage_path ?? null,
+        thumbnailPath: c?.thumbnail_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
         note: (r.note as string) ?? null,
@@ -150,7 +151,7 @@ export default function TeamWallScreen() {
               return (
                 <ContentCard
                   key={item.shareId}
-                  content={{ id: item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: new Date(item.createdAt).toLocaleDateString(), typeLabel, thumbnailUri: null }}
+                  content={{ id: item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: new Date(item.createdAt).toLocaleDateString(), typeLabel, thumbnailKey: item.thumbnailPath }}
                   onOpen={() => openShared(item)}
                   showPlayOnThumb
                   onPlay={() => openShared(item)}

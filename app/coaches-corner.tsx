@@ -53,6 +53,7 @@ type Post = {
   createdAt: string;
   title: string;
   storagePath: string | null;
+  thumbnailPath: string | null;
   startTime: number | null;
   endTime: number | null;
   sharedByUserId: string | null;
@@ -98,6 +99,7 @@ export default function CoachesCornerScreen() {
         // resolve_shared_content 'game' branch; fall back to "Shared game" if absent.
         title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
         storagePath: c?.storage_path ?? null,
+        thumbnailPath: c?.thumbnail_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
         sharedByUserId: r.shared_by_user_id ?? null,
@@ -236,7 +238,7 @@ export default function CoachesCornerScreen() {
               return (
                 <View key={item.shareId}>
                   <ContentCard
-                    content={{ id: item.contentId, kind: isReel ? 'reel' : 'game', title: item.title, meta: `${item.teamName} · ${relativeTime(item.createdAt)}`, typeLabel, thumbnailUri: null }}
+                    content={{ id: item.contentId, kind: isReel ? 'reel' : 'game', title: item.title, meta: `${item.teamName} · ${relativeTime(item.createdAt)}`, typeLabel, thumbnailKey: item.thumbnailPath }}
                     onOpen={() => openShared(item)}
                     onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: true, onChanged: loadCoachesBoard })}
                     showPlayOnThumb

@@ -283,7 +283,7 @@ export default function HomeScreen() {
                   return (
                     <ContentCard
                       key={item.key}
-                      content={{ id: item.contentId, kind: isReel ? 'reel' : 'game', title: item.title, meta: [sources.join(' · '), d].filter(Boolean).join(' · '), typeLabel, thumbnailUri: null }}
+                      content={{ id: item.contentId, kind: isReel ? 'reel' : 'game', title: item.title, meta: [sources.join(' · '), d].filter(Boolean).join(' · '), typeLabel, thumbnailKey: item.thumbnailPath }}
                       onOpen={() => openShared(item)}
                       onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: item.sharedByUserId === userId || isCoach, onChanged: loadHome })}
                       showPlayOnThumb

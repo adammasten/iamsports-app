@@ -57,7 +57,7 @@ export default function KidWallScreen() {
   const [inbox, setInbox] = useState<{
     shareId: string; contentType: string; contentId: string;
     sharedBy: string | null; sharedByName: string | null; createdAt: string; title: string;
-    storagePath: string | null; startTime: number | null; endTime: number | null; note: string | null;
+    storagePath: string | null; thumbnailPath: string | null; startTime: number | null; endTime: number | null; note: string | null;
   }[]>([]);
   const [inboxLoading, setInboxLoading] = useState(false);
   const [inboxError, setInboxError] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export default function KidWallScreen() {
   // (on_wall=true). Family-wide: every linked guardian sees the same wall.
   const [wall, setWall] = useState<{
     shareId: string; contentType: string; audience: string; teamName: string | null;
-    createdAt: string; title: string; storagePath: string | null;
+    createdAt: string; title: string; storagePath: string | null; thumbnailPath: string | null;
     startTime: number | null; endTime: number | null; note: string | null;
   }[]>([]);
   const [wallLoading, setWallLoading] = useState(false);
@@ -244,6 +244,7 @@ export default function KidWallScreen() {
         createdAt: r.created_at,
         title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
         storagePath: c?.storage_path ?? null,
+        thumbnailPath: c?.thumbnail_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
         note: (r.note as string) ?? null,
@@ -319,6 +320,7 @@ export default function KidWallScreen() {
         createdAt: r.created_at,
         title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
         storagePath: c?.storage_path ?? null,
+        thumbnailPath: c?.thumbnail_path ?? null,
         startTime: c?.start_time ?? null,
         endTime: c?.end_time ?? null,
         note: (r.note as string) ?? null,
@@ -720,7 +722,7 @@ export default function KidWallScreen() {
                 return (
                   <View key={item.shareId}>
                     <ContentCard
-                      content={{ id: item.contentId ?? item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: `From ${item.sharedBy === userId ? 'you' : (item.sharedByName ?? 'someone')} · ${new Date(item.createdAt).toLocaleDateString()}`, typeLabel, thumbnailUri: null }}
+                      content={{ id: item.contentId ?? item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: `From ${item.sharedBy === userId ? 'you' : (item.sharedByName ?? 'someone')} · ${new Date(item.createdAt).toLocaleDateString()}`, typeLabel, thumbnailKey: item.thumbnailPath }}
                       onOpen={() => openShared(item)}
                       onLongPress={() => showContentActions({
                         contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedBy,
@@ -755,7 +757,7 @@ export default function KidWallScreen() {
                 return (
                   <ContentCard
                     key={item.shareId}
-                    content={{ id: item.contentId ?? item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: new Date(item.createdAt).toLocaleDateString(), typeLabel, thumbnailUri: null }}
+                    content={{ id: item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: new Date(item.createdAt).toLocaleDateString(), typeLabel, thumbnailKey: item.thumbnailPath }}
                     onOpen={() => openShared(item)}
                     showPlayOnThumb
                     onPlay={() => openShared(item)}

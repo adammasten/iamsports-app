@@ -24,7 +24,7 @@ const SELECT = 'id, content_type, content_id, audience, team_id, target_player_i
 // works — they resolve to the same content); `key` doubles as the FilterBar item id.
 export type WallPost = {
   key: string; shareId: string; contentType: string; contentId: string; createdAt: string;
-  title: string; storagePath: string | null;
+  title: string; storagePath: string | null; thumbnailPath: string | null;
   startTime: number | null; endTime: number | null;
   sources: string[]; teamId: string; teamName: string;
   // Who posted it — drives the block filter + the "Block this person" action.
@@ -68,6 +68,7 @@ async function resolveAndDedup(rows: any[]): Promise<WallPost[]> {
       shareId: r.id, contentType: r.content_type, contentId: r.content_id, createdAt: r.created_at,
       title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
       storagePath: c?.storage_path ?? null,
+      thumbnailPath: c?.thumbnail_path ?? null,
       startTime: c?.start_time ?? null, endTime: c?.end_time ?? null,
       sharedByUserId: (r.shared_by_user_id as string) ?? null,
       note: (r.note as string) ?? null,
@@ -90,6 +91,7 @@ async function resolveAndDedup(rows: any[]): Promise<WallPost[]> {
       byKey.set(key, {
         key, shareId: r.shareId, contentType: r.contentType, contentId: r.contentId,
         createdAt: r.createdAt, title: r.title, storagePath: r.storagePath,
+        thumbnailPath: r.thumbnailPath,
         startTime: r.startTime, endTime: r.endTime,
         sharedByUserId: r.sharedByUserId,
         note: r.note,
