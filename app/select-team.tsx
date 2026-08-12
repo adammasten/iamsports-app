@@ -8,12 +8,13 @@ import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentCard from '@/components/content-card/ContentCard';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
+import FadeRail from './components/FadeRail';
 
 // Type + Sort dropdowns for the home content feed's FilterBar (mirrors Film Room).
 const TYPE_OPTIONS: DropdownOption[] = [
@@ -67,12 +68,21 @@ export default function SelectTeamScreen() {
   const [creatingKid, setCreatingKid] = useState(false);
   // player_id -> signed photo URL, minted from each kid's photo_path.
   const [kidPhotoUris, setKidPhotoUris] = useState<Record<string, string>>({});
-  // Unseen-notification count for the header bell badge. Refetched on every focus
-  // (so it clears after returning from the notifications list, which marks seen).
+  // Unseen-notification count for the header bell badge. Refetched on focus (clears
+  // after returning from the notifications list, which marks seen), then kept live
+  // WHILE sitting on this screen via a light 30s poll + a refetch when the app
+  // returns to the foreground — so a bell that arrives mid-session shows up without
+  // leaving and coming back. (v1: polling, not realtime — no extra infra.)
   const [unseenNotif, setUnseenNotif] = useState(0);
-  useFocusEffect(useCallback(() => {
+  const refreshUnseen = useCallback(() => {
     supabase.rpc('notifications_unseen_count').then(({ data }) => setUnseenNotif((data as number) ?? 0));
-  }, []));
+  }, []);
+  useFocusEffect(useCallback(() => {
+    refreshUnseen();
+    const poll = setInterval(refreshUnseen, 30000);
+    const sub = AppState.addEventListener('change', s => { if (s === 'active') refreshUnseen(); });
+    return () => { clearInterval(poll); sub.remove(); };
+  }, [refreshUnseen]));
 
   // Home content feed: newest games (quarters collapsed to one card), loose
   // videos + reels across ALL my teams + kids, deduped in @/lib/core/homeFeed.
@@ -345,11 +355,7 @@ export default function SelectTeamScreen() {
         {/* Your kids — always shown so "+ Add kid" is reachable even with zero
             kids (mirrors the teams rail's "+ New team"). */}
         <Text style={styles.sectionLabel}>Your kids</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.rail}
-        >
+        <FadeRail contentContainerStyle={styles.rail} fadeColor="#000000">
           {userKids.map(kid => (
             <TouchableOpacity
               key={kid.player_id}
@@ -380,16 +386,12 @@ export default function SelectTeamScreen() {
             </View>
             <Text style={styles.teamName}>Have a code?</Text>
           </TouchableOpacity>
-        </ScrollView>
+        </FadeRail>
 
         <Text style={styles.sectionLabel}>Your teams</Text>
 
         {/* Team rail */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.rail}
-        >
+        <FadeRail contentContainerStyle={styles.rail} fadeColor="#000000">
           {uniqueTeams.map(team => (
             <TouchableOpacity
               key={team.team_id}
@@ -423,7 +425,7 @@ export default function SelectTeamScreen() {
             </View>
             <Text style={styles.teamName}>Join team</Text>
           </TouchableOpacity>
-        </ScrollView>
+        </FadeRail>
 
         {/* Player lens (multi-value) sits above the single-select FilterBar. */}
         <View style={styles.filterWrap}>
@@ -486,7 +488,7 @@ export default function SelectTeamScreen() {
               return (
                 <ContentCard
                   key={`${fi.contentType}:${fi.id}`}
-                  content={{ id: fi.id, kind: isReel ? 'reel' : 'game', title: fi.title, meta, typeLabel, thumbnailUri: null }}
+                  content={{ id: fi.id, kind: isReel ? 'reel' : 'game', title: fi.title, meta, typeLabel, thumbnailKey: it?.thumbnailPath ?? null }}
                   onOpen={() => openItem(fi)}
                   showPlayOnThumb
                   onPlay={() => openItem(fi)}
@@ -502,7 +504,7 @@ export default function SelectTeamScreen() {
         <TouchableOpacity style={styles.navItem}>
           <Ionicons name="home" size={24} color="#fff" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
+        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/search')}>
           <Ionicons name="search" size={24} color="#888" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.navCenter} onPress={() => router.push('/upload')}>

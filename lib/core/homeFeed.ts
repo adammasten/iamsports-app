@@ -156,6 +156,7 @@ export type FeedItem = {
   teamId: string;
   createdAt: string;
   storagePath: string | null;    // playback key (a game's newest video / video url / reel path)
+  thumbnailPath: string | null;  // poster-frame storage key (thumbnails/<id>.jpg), null → placeholder
   durationSeconds: number | null;
   kidPlayerIds: string[];
   eventType: string | null;
@@ -215,7 +216,7 @@ export async function loadContentFeed(
   if (vParts.length) {
     const { data, error } = await supabase
       .from('videos')
-      .select('id, label, url, created_at, event_type, team_id, player_id, game_id, upload_status, games ( title, team_id, season_id, tournament_id, seasons ( name ), tournaments ( name ) )')
+      .select('id, label, url, thumbnail_path, created_at, event_type, team_id, player_id, game_id, upload_status, games ( title, team_id, season_id, tournament_id, seasons ( name ), tournaments ( name ) )')
       .or(vParts.join(','))
       .order('created_at', { ascending: false })
       .limit(FEED_FETCH_LIMIT);
@@ -235,6 +236,7 @@ export async function loadContentFeed(
             title: v.games?.title ?? v.label ?? 'Game',
             teamId, createdAt: v.created_at,
             storagePath: v.url ?? null,   // rows are newest-first → this is the newest quarter
+            thumbnailPath: v.thumbnail_path ?? null,
             durationSeconds: null,
             kidPlayerIds: [...new Set([...(v.player_id ? [v.player_id] : []), ...wallKids(key)])],
             eventType: v.event_type ?? null,
@@ -253,6 +255,7 @@ export async function loadContentFeed(
           title: v.label ?? 'Video',
           teamId, createdAt: v.created_at,
           storagePath: v.url ?? null,
+          thumbnailPath: v.thumbnail_path ?? null,
           durationSeconds: null,
           kidPlayerIds: [...new Set([...(v.player_id ? [v.player_id] : []), ...wallKids(key)])],
           eventType: v.event_type ?? null,
@@ -283,6 +286,7 @@ export async function loadContentFeed(
         teamId: (r.team_id as string) ?? '',
         createdAt: r.created_at,
         storagePath: r.storage_path ?? null,
+        thumbnailPath: null,   // reels get thumbnails from the reel-render job later
         durationSeconds: r.duration_seconds != null ? Number(r.duration_seconds) : null,
         kidPlayerIds: wallKids(key),
         eventType: null, seasonId: null, seasonName: null, tournamentId: null, tournamentName: null,

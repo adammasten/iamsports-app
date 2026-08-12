@@ -78,6 +78,17 @@ Deno.serve(async (req) => {
       if (error) return json({ error: 'Not allowed' }, 403);
       authedKey = data as string;
       isImage = true;
+    } else if (key.startsWith('thumbnails/')) {
+      // thumbnails/<videoId>.jpg — a poster frame. Viewable iff the caller can
+      // play the parent video. We authorize the video id, then sign the thumbnail
+      // key RECONSTRUCTED from that same id (never the raw client string), so a
+      // caller can't authorize video A and sign some other object.
+      const videoId = key.split('/')[1]?.replace(/\.jpg$/i, '');
+      if (!videoId) return json({ error: 'Bad thumb key' }, 400);
+      const { error } = await asUser.rpc('authorize_video_playback', { p_video_id: videoId });
+      if (error) return json({ error: 'Not allowed' }, 403);
+      authedKey = `thumbnails/${videoId}.jpg`;
+      // No transform: thumbnails are generated pre-sized (~640w) at the server.
     } else {
       const { data: vid } = await admin.from('videos').select('id').eq('url', key).maybeSingle();
       if (vid?.id) {

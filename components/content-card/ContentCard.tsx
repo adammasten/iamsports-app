@@ -5,7 +5,10 @@
 // card opens it. Surface-agnostic: play badge / share chip / actions / note are all props.
 import { Ionicons } from '@expo/vector-icons';
 import type { ShareStatus } from '@/lib/core/shareStatus';
-import { Image, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { getSignedVideoUrl } from '@/lib/native/video-url';
+import { Image } from 'expo-image';
+import { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const C = {
   surface: '#16161a', surface2: '#1e1e24', line: '#2a2a32', text: '#f4f4f6',
@@ -19,7 +22,8 @@ export type CardContent = {
   kind: 'game' | 'reel';
   title: string;
   meta: string;
-  thumbnailUri?: string | null;                // null → placeholder icon
+  thumbnailUri?: string | null;                // an already-signed URL (rare); null → try thumbnailKey
+  thumbnailKey?: string | null;                // storage key (e.g. thumbnails/<id>.jpg) — signed + cached here
   typeLabel?: string;                          // top-right chip: "Game"/"Practice"/"Reel"/"Video"
   tagStatus?: 'none' | 'started' | 'done';     // colored dot on the type chip (Film Room games); omit → no dot
 };
@@ -59,12 +63,25 @@ export default function ContentCard({
   content, onOpen, onLongPress, shareStatus, actions, note, showPlayOnThumb, onPlay,
 }: ContentCardProps) {
   const isGame = content.kind === 'game';
+
+  // Poster thumbnail: prefer an explicit signed URL; else sign the storage key
+  // (getSignedVideoUrl caches per-path, so a feed signs each thumb once/session).
+  // Fail-safe: any miss leaves thumbUri null → the placeholder icon (today).
+  const [signedThumb, setSignedThumb] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (content.thumbnailUri || !content.thumbnailKey) { setSignedThumb(null); return; }
+    getSignedVideoUrl(content.thumbnailKey).then(u => { if (!cancelled) setSignedThumb(u); });
+    return () => { cancelled = true; };
+  }, [content.thumbnailKey, content.thumbnailUri]);
+  const thumbUri = content.thumbnailUri ?? signedThumb;
+
   return (
     <Pressable style={styles.card} onPress={onOpen} onLongPress={onLongPress} android_ripple={{ color: '#222' }}>
       {/* Thumbnail */}
       <View style={styles.thumb}>
-        {content.thumbnailUri
-          ? <Image source={{ uri: content.thumbnailUri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        {thumbUri
+          ? <Image source={{ uri: thumbUri }} style={StyleSheet.absoluteFill} contentFit="cover" cachePolicy="memory-disk" transition={120} />
           : <Ionicons name={isGame ? 'basketball' : 'film'} size={40} color="#3a3f4a" />}
 
         {shareStatus ? <ShareChip status={shareStatus} /> : null}

@@ -150,7 +150,7 @@ export default function SearchScreen() {
               {res.games.map(g => (
                 <SearchRow key={g.id} leading={<IconCircle name="basketball" />} title={g.title}
                   subtitle={g.opponent ? `vs ${g.opponent}` : (g.game_date ? new Date(g.game_date).toLocaleDateString() : undefined)}
-                  onPress={() => { remember(); router.push({ pathname: '/game', params: { id: g.id, title: g.title } }); }} />
+                  onPress={() => { remember(); router.push({ pathname: '/game-detail', params: { id: g.id, title: g.title } }); }} />
               ))}
             </Section>
           )}

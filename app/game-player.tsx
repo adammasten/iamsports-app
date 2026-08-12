@@ -16,6 +16,8 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
 
 const C = { accent: '#6c5ce7' };
 type Vid = { id: string; label: string; url: string };
@@ -43,6 +45,9 @@ export default function GamePlayerScreen() {
   const [videoReady, setVideoReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [controls, setControls] = useState(true);
+  const [barWidth, setBarWidth] = useState(0);
+  const [scrubbing, setScrubbing] = useState(false);
+  const wasPlayingRef = useRef(false);
 
   const videosRef = useRef<Vid[]>([]);
   videosRef.current = videos;
@@ -126,6 +131,24 @@ export default function GamePlayerScreen() {
   const seekBy = useCallback((d: number) => {
     try { player.currentTime = Math.max(0, Math.min((duration || 0), (player.currentTime || 0) + d)); } catch {}
   }, [player, duration]);
+  // Drag-to-scrub: map the touch x within the bar to an absolute time. Pause while
+  // dragging (so playback doesn't fight the finger) and resume on release only if
+  // we were playing. Frame-accurate currentTime= is fine here — these are optimized
+  // 720p faststart streams, so precise seeks are cheap.
+  const seekToX = useCallback((x: number) => {
+    if (barWidth <= 0 || duration <= 0) return;
+    const pct = Math.max(0, Math.min(1, x / barWidth));
+    try { player.currentTime = pct * duration; } catch {}
+  }, [barWidth, duration, player]);
+  const onScrubStart = useCallback(() => {
+    wasPlayingRef.current = isPlaying;
+    try { player.pause(); } catch {}
+    setScrubbing(true);
+  }, [isPlaying, player]);
+  const onScrubEnd = useCallback(() => {
+    setScrubbing(false);
+    if (wasPlayingRef.current) { try { player.play(); } catch {} }
+  }, [player]);
   const togglePlay = useCallback(() => { try { if (isPlaying) player.pause(); else player.play(); } catch {} }, [player, isPlaying]);
   const toggleFullscreen = useCallback(() => {
     ScreenOrientation.lockAsync(isLandscape ? ScreenOrientation.OrientationLock.PORTRAIT_UP : ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
@@ -136,8 +159,18 @@ export default function GamePlayerScreen() {
   const cur = videos[currentIndex];
   const next = videos[currentIndex + 1];
 
+  // Pan captures a plain tap too (minDistance 0), so tapping the bar seeks there.
+  // onFinalize covers both a clean end and a cancel, so we always resume playback.
+  const scrub = Gesture.Pan()
+    .minDistance(0)
+    .onBegin(e => { runOnJS(onScrubStart)(); runOnJS(seekToX)(e.x); })
+    .onUpdate(e => { runOnJS(seekToX)(e.x); })
+    .onFinalize(() => { runOnJS(onScrubEnd)(); });
+  const thumbSize = scrubbing ? 18 : 12;
+  const thumbX = barWidth > 0 ? Math.max(0, Math.min(barWidth, progress * barWidth)) : 0;
+
   return (
-    <View style={styles.c}>
+    <GestureHandlerRootView style={styles.c}>
       <Pressable style={StyleSheet.absoluteFill} onPress={() => setControls(v => !v)}>
         <VideoView player={player} style={StyleSheet.absoluteFill} nativeControls={false} contentFit="contain" />
       </Pressable>
@@ -180,7 +213,14 @@ export default function GamePlayerScreen() {
                 </View>
               ))}
             </View>
-            <View style={styles.clipBar}><View style={[styles.clipFill, { width: `${Math.round(progress * 100)}%` }]} /></View>
+            <GestureDetector gesture={scrub}>
+              <View style={styles.scrubZone} onLayout={e => setBarWidth(e.nativeEvent.layout.width)}>
+                <View style={styles.clipBar}>
+                  <View style={[styles.clipFill, { width: `${Math.round(progress * 100)}%` }]} />
+                </View>
+                <View style={[styles.thumb, { left: thumbX - thumbSize / 2, width: thumbSize, height: thumbSize, borderRadius: thumbSize / 2, marginTop: -thumbSize / 2 }]} />
+              </View>
+            </GestureDetector>
 
             <View style={styles.meta}>
               <Text style={styles.metaText}>{fmt(currentTime)}</Text>
@@ -204,7 +244,7 @@ export default function GamePlayerScreen() {
           </View>
         </>
       )}
-    </View>
+    </GestureHandlerRootView>
   );
 }
 
@@ -221,8 +261,10 @@ const styles = StyleSheet.create({
   timeline: { flexDirection: 'row', gap: 4, marginBottom: 8 },
   seg: { flex: 1, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' },
   segFill: { height: '100%', borderRadius: 2 },
-  clipBar: { height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', overflow: 'hidden', marginBottom: 14 },
+  scrubZone: { paddingVertical: 11, marginBottom: 3, justifyContent: 'center' },
+  clipBar: { height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', overflow: 'hidden' },
   clipFill: { height: '100%', backgroundColor: '#fff', borderRadius: 2 },
+  thumb: { position: 'absolute', top: '50%', backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 3, shadowOffset: { width: 0, height: 1 } },
   meta: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, gap: 8 },
   metaText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, flexShrink: 1 },
   transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 22 },
