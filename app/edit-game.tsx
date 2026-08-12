@@ -4,6 +4,7 @@ import {
   type EventTypeKey,
 } from '@/lib/core/upload-meta';
 import { supabase } from '@/supabase';
+import { confirm } from '@/lib/confirm';
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
@@ -220,15 +221,16 @@ export default function EditGameScreen() {
     }
   }
 
-  function onSave() {
+  async function onSave() {
     if (teamChanged) {
       const newName = activeTeam?.name ?? 'the new team';
       const label = opponent.trim() ? `${vsAt} ${opponent.trim()}` : 'this game';
-      Alert.alert(
-        'Move game to another team?',
-        `Move “${label}” and its ${videoCount} video${videoCount === 1 ? '' : 's'} to ${newName}? Its season and tournament will be cleared.`,
-        [{ text: 'Cancel', style: 'cancel' }, { text: 'Move', style: 'destructive', onPress: persist }],
-      );
+      const ok = await confirm({
+        title: 'Move game to another team?',
+        message: `Move “${label}” and its ${videoCount} video${videoCount === 1 ? '' : 's'} to ${newName}? Its season and tournament will be cleared.`,
+        confirmText: 'Move', destructive: true,
+      });
+      if (ok) persist();
     } else {
       persist();
     }

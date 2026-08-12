@@ -2,6 +2,7 @@ import { SUPPORT_EMAIL } from '@/constants/legal';
 import { colors } from '@/constants/theme';
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
+import { confirm } from '@/lib/confirm';
 import { router } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
@@ -53,45 +54,32 @@ export default function AccountScreen() {
     await supabase.auth.signOut(); // AuthGate routes to /login when the session clears.
   }
 
-  function confirmDeactivate() {
-    Alert.alert(
-      'Deactivate account',
-      'Your teams, film, clips, and reels all stay saved — nothing is deleted. You’ll be signed out; log back in anytime to pick up exactly where you left off.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Deactivate',
-          onPress: async () => {
-            setBusy(true);
-            const { error } = await supabase.rpc('deactivate_my_account');
-            if (error) { setBusy(false); Alert.alert('Error', error.message); return; }
-            await supabase.auth.signOut();
-            setBusy(false);
-          },
-        },
-      ],
-    );
+  async function confirmDeactivate() {
+    const ok = await confirm({
+      title: 'Deactivate account',
+      message: 'Your teams, film, clips, and reels all stay saved — nothing is deleted. You’ll be signed out; log back in anytime to pick up exactly where you left off.',
+      confirmText: 'Deactivate',
+    });
+    if (!ok) return;
+    setBusy(true);
+    const { error } = await supabase.rpc('deactivate_my_account');
+    if (error) { setBusy(false); Alert.alert('Error', error.message); return; }
+    await supabase.auth.signOut();
+    setBusy(false);
   }
 
-  function confirmDelete() {
-    Alert.alert(
-      'Delete account?',
-      'This permanently deletes your account and personal data — your login, profile, personal uploads, and reels. It can’t be undone.\n\nFilm you shared with a team stays with the team so other coaches don’t lose it.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete forever',
-          style: 'destructive',
-          onPress: async () => {
-            setBusy(true);
-            const { error } = await supabase.functions.invoke('delete-account');
-            if (error) { setBusy(false); Alert.alert('Couldn’t delete account', error.message); return; }
-            await supabase.auth.signOut();
-            setBusy(false);
-          },
-        },
-      ],
-    );
+  async function confirmDelete() {
+    const ok = await confirm({
+      title: 'Delete account?',
+      message: 'This permanently deletes your account and personal data — your login, profile, personal uploads, and reels. It can’t be undone.\n\nFilm you shared with a team stays with the team so other coaches don’t lose it.',
+      confirmText: 'Delete forever', destructive: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    const { error } = await supabase.functions.invoke('delete-account');
+    if (error) { setBusy(false); Alert.alert('Couldn’t delete account', error.message); return; }
+    await supabase.auth.signOut();
+    setBusy(false);
   }
 
   return (

@@ -1,6 +1,7 @@
 import { useTeamContext } from '@/context';
 import { computeSortOrderUpdates } from '@/lib/core/tag-reorder';
 import { supabase } from '@/supabase';
+import { confirm } from '@/lib/confirm';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -56,13 +57,10 @@ export default function TagsScreen() {
   }
 
   async function deleteTag(id: string, name: string) {
-    Alert.alert(name, 'Delete this tag?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        await supabase.from('tags').delete().eq('id', id);
-        fetchTags();
-      }}
-    ]);
+    const ok = await confirm({ title: name, message: 'Delete this tag?', confirmText: 'Delete', destructive: true });
+    if (!ok) return;
+    await supabase.from('tags').delete().eq('id', id);
+    fetchTags();
   }
 
   async function moveTag(catKey: string, fromIndex: number, toIndex: number) {
