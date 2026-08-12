@@ -8,6 +8,7 @@
 // full Share/Offline row here (those live on the Film Room card for now). Real
 // thumbnails + per-video durations arrive with the optimize pipeline.
 import { Ionicons } from '@expo/vector-icons';
+import SignedThumb from '@/components/content-card/SignedThumb';
 import { goBackOrHome } from '@/lib/nav';
 import { supabase } from '@/supabase';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -22,7 +23,7 @@ const C = {
   accentSoft: 'rgba(108,92,231,0.2)', danger: '#e2574a', plays: '#3ec46d',
 };
 
-type Vid = { id: string; label: string; url: string; taggingComplete: boolean; uploadStatus: 'uploading' | 'ready' | 'failed'; createdAt: string };
+type Vid = { id: string; label: string; url: string; thumbnailPath: string | null; taggingComplete: boolean; uploadStatus: 'uploading' | 'ready' | 'failed'; createdAt: string };
 
 function fmtDate(iso: string | null): string | null {
   if (!iso) return null;
@@ -52,11 +53,11 @@ export default function GameDetailScreen() {
     if (!gameId) { setLoading(false); return; }
     const [{ data: g }, { data: vs }] = await Promise.all([
       supabase.from('games').select('title, game_date, team_score, opponent_score').eq('id', gameId).maybeSingle(),
-      supabase.from('videos').select('id, label, url, tagging_complete, upload_status, created_at').eq('game_id', gameId).order('sort_order'),
+      supabase.from('videos').select('id, label, url, thumbnail_path, tagging_complete, upload_status, created_at').eq('game_id', gameId).order('sort_order'),
     ]);
     if (g?.title) setTitle(g.title);
     const list: Vid[] = (vs ?? []).map((v: any) => ({
-      id: v.id, label: v.label, url: v.url, taggingComplete: v.tagging_complete === true,
+      id: v.id, label: v.label, url: v.url, thumbnailPath: v.thumbnail_path ?? null, taggingComplete: v.tagging_complete === true,
       uploadStatus: v.upload_status, createdAt: v.created_at,
     }));
     setVideos(list);
@@ -135,9 +136,11 @@ export default function GameDetailScreen() {
           ) : videos.map((v) => {
             return (
               <TouchableOpacity key={v.id} style={styles.row} activeOpacity={0.85} onPress={() => mode === 'watch' ? openPlayer(v) : openTagger(v)}>
-                <View style={styles.thumb}>
-                  <Ionicons name="play" size={20} color="rgba(255,255,255,0.85)" />
-                </View>
+                <SignedThumb
+                  thumbnailKey={v.thumbnailPath}
+                  style={styles.thumb}
+                  fallback={<Ionicons name="play" size={20} color="rgba(255,255,255,0.85)" />}
+                />
                 <View style={styles.info}>
                   <Text style={styles.name} numberOfLines={1}>{v.label}</Text>
                   {mode === 'tag'
