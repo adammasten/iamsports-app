@@ -16,6 +16,7 @@ type RosterPlayer = {
   jersey: string | null;
   guardianCount: number;
   isMine: boolean;
+  guardianCode: string | null;
 };
 
 export default function RosterScreen() {
@@ -63,6 +64,14 @@ export default function RosterScreen() {
       });
     }
 
+    // Per-player guardian codes — a coach may read them (player_guardian_codes_read
+    // RLS). This is the code a parent enters under "Have a code?" to claim THAT kid.
+    const codeById = new Map<string, string>();
+    if (ids.length) {
+      const { data: codes } = await supabase.from('player_guardian_codes').select('player_id, code').in('player_id', ids);
+      (codes || []).forEach((c: any) => codeById.set(c.player_id, c.code));
+    }
+
     setPlayers(rows
       .map(r => ({
         playerId: r.player_id,
@@ -70,6 +79,7 @@ export default function RosterScreen() {
         jersey: r.jersey_number ?? null,
         guardianCount: countById.get(r.player_id) ?? 0,
         isMine: mine.has(r.player_id),
+        guardianCode: codeById.get(r.player_id) ?? null,
       }))
       .sort((a, b) => a.name.localeCompare(b.name)));
 
@@ -163,6 +173,12 @@ export default function RosterScreen() {
     setTeamCode(data as string);
   }
 
+  async function getGuardianCode(playerId: string) {
+    const { data, error } = await supabase.rpc('regenerate_guardian_code', { p_player_id: playerId });
+    if (error) { Alert.alert('Error', error.message); return; }
+    setPlayers(prev => prev.map(p => p.playerId === playerId ? { ...p, guardianCode: data as string } : p));
+  }
+
   if (!activeTeam) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
@@ -249,6 +265,16 @@ export default function RosterScreen() {
                     {p.isMine ? ' · yours' : ''}
                   </Text>
                 )}
+
+                {isCoach && (p.guardianCode ? (
+                  <TouchableOpacity onPress={() => shareCode(`${p.name}’s invite code for IamSports`, p.guardianCode!)}>
+                    <Text style={styles.codeSmall}>Code {p.guardianCode} · tap to share</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity onPress={() => getGuardianCode(p.playerId)}>
+                    <Text style={styles.codeSmall}>Get invite code</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
 
               {p.isMine && editingId !== p.playerId && (
