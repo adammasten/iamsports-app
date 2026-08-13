@@ -156,6 +156,13 @@ export default function RosterScreen() {
     setTeamCode(data as string);
   }
 
+  async function generateCode() {
+    if (!activeTeam) return;
+    const { data, error } = await supabase.rpc('regenerate_team_code', { p_team_id: activeTeam.id });
+    if (error) { Alert.alert('Error', error.message); return; }
+    setTeamCode(data as string);
+  }
+
   if (!activeTeam) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
@@ -184,6 +191,16 @@ export default function RosterScreen() {
             </View>
           </View>
           <Text style={styles.hint}>A parent enters this on their kid’s profile to join the team.</Text>
+        </View>
+      )}
+
+      {isCoach && !teamCode && !loading && (
+        <View style={styles.codeCard}>
+          <Text style={styles.codeCardLabel}>Team join code</Text>
+          <Text style={[styles.hint, { marginTop: 6, marginBottom: 12 }]}>This team doesn’t have a join code yet. Generate one to invite players and parents.</Text>
+          <TouchableOpacity style={styles.shareBtn} onPress={generateCode}>
+            <Text style={styles.shareBtnText}>Generate join code</Text>
+          </TouchableOpacity>
         </View>
       )}
 

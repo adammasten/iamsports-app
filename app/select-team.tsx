@@ -226,6 +226,12 @@ export default function SelectTeamScreen() {
       return;
     }
 
+    // New teams need a join code — the original code migration only backfilled
+    // teams that existed then; creation doesn't set one and there's no trigger.
+    // Best-effort (coach membership above satisfies the RPC's is_team_coach gate);
+    // the roster's "Generate join code" button covers a miss.
+    await supabase.rpc('regenerate_team_code', { p_team_id: team.id }).then(() => {}, () => {});
+
     await refreshTeams();
     setActiveTeam(team.id);
     setNewTeamName('');
