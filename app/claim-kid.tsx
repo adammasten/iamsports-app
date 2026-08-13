@@ -24,7 +24,7 @@ export default function ClaimKidScreen() {
     setLoading(true);
     const { data, error } = await supabase.rpc('preview_guardian_code', { p_code: cleanCode() });
     setLoading(false);
-    if (error || !data) { Alert.alert('Code', error?.message ?? 'Invalid code'); return; }
+    if (error || !data) { Alert.alert('Player code not found', 'That didn’t match a player’s invite code.\n\nIf it’s a TEAM join code (to join a whole team), go back and use “Join team” instead.'); return; }
     setPreview(data as Preview);
   }
 

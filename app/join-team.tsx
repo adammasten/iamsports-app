@@ -31,7 +31,7 @@ export default function JoinTeamScreen() {
     setLoading(true);
     const { data, error } = await supabase.rpc('preview_roster_by_code', { p_code: cleanCode() });
     setLoading(false);
-    if (error || !data) { Alert.alert('Team code', error?.message ?? 'Invalid code'); return; }
+    if (error || !data) { Alert.alert('Team code not found', 'That didn’t match a team join code.\n\nIf it’s a PLAYER’S invite code (to be added as a guardian of one kid), go back and use “Have a code?” instead.'); return; }
     setPreview(data as Preview);
   }
 
