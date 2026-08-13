@@ -28,6 +28,10 @@ const CATEGORIES = [
   { key: 'players', label: 'Players', color: '#7d3c98', bg: '#f5eef8' },
 ];
 
+// Right-edge control strip (Tags/Video toggle + ★/POE) width; the tag region
+// reserves this so fullscreen tags never cover it.
+const SIDE_STRIP_W = 64;
+
 function formatTime(seconds: number) {
   // Render '–:–' for NaN / Infinity / negative — happens briefly during video
   // load when player.currentTime / player.duration are indefinite (CMTime).
@@ -84,9 +88,14 @@ export default function TaggingOverlayScreen() {
   // network playback). Routed into the existing error/retry overlay below.
   const [signFailed, setSignFailed] = useState(false);
 
-  const [clipLevelTags, setClipLevelTags] = useState<string[]>([]);
-  const [bundles, setBundles] = useState<string[][]>([]);
-  const [activeSection, setActiveSection] = useState<'clip' | number>('clip');
+  // Add-as-you-go (identical to the web tagger): `building` is the current GROUP
+  // of selected tags. Each Add attaches it as a bundle to the open clip; a new
+  // window (Mark Start/End) starts a fresh clip. Star/POE are clip-level flags.
+  const [building, setBuilding] = useState<string[]>([]);
+  const [openClipId, setOpenClipId] = useState<string | null>(null);
+  const [bundleCount, setBundleCount] = useState(0);
+  const [isStar, setIsStar] = useState(false);
+  const [isPoe, setIsPoe] = useState(false);
   const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [] });
   // Special-category tags ('★ Highlight', 'POE') are looked up by name and
   // surfaced only via dedicated buttons in markGroup — never rendered in the
@@ -419,63 +428,19 @@ export default function TaggingOverlayScreen() {
   }, [tagTeamId]);
 
   function toggleTag(tagId: string) {
-    if (activeSection === 'clip') {
-      setClipLevelTags(prev =>
-        prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]
-      );
-    } else {
-      const idx = activeSection;
-      setBundles(prev => prev.map((bundle, i) => {
-        if (i !== idx) return bundle;
-        return bundle.includes(tagId) ? bundle.filter(id => id !== tagId) : [...bundle, tagId];
-      }));
-    }
+    setBuilding(prev => prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]);
   }
 
-  function addBundle() {
-    const newIdx = bundles.length;
-    setBundles(prev => [...prev, []]);
-    setActiveSection(newIdx);
-  }
+  // Star/POE are clip-level flags on the current clip (added at bundle 0).
+  const highlightLit = isStar;
+  const poeLit = isPoe;
 
-  function removeBundle(idx: number) {
-    const bundle = bundles[idx];
-    const doRemove = () => {
-      setBundles(prev => prev.filter((_, i) => i !== idx));
-      if (activeSection === idx) {
-        setActiveSection('clip');
-      } else if (typeof activeSection === 'number' && activeSection > idx) {
-        setActiveSection(activeSection - 1);
-      }
-    };
-    if (bundle && bundle.length > 0) {
-      Alert.alert(
-        'Remove bundle?',
-        `Bundle ${idx + 1} has ${bundle.length} tag(s). This can't be undone.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: doRemove },
-        ]
-      );
-    } else {
-      doRemove();
-    }
-  }
-
-  const activeTags = activeSection === 'clip'
-    ? clipLevelTags
-    : (bundles[activeSection] ?? []);
-
-  // Derived button states: lit iff the special tag is present in the active
-  // section (clip-level or current bundle), matching how any normal tag chip
-  // shows selected. Falls back to false if specialTagIds haven't loaded.
-  const highlightLit = !!specialTagIds.highlight && activeTags.includes(specialTagIds.highlight);
-  const poeLit = !!specialTagIds.poe && activeTags.includes(specialTagIds.poe);
-
-  const hasClipMarked = startTime !== null && endTime !== null;
   const videoReady = statusEvent.status === 'readyToPlay';
   const retriesExhausted = (statusEvent.status === 'error' && retryCountRef.current >= 3) || signFailed;
-  const canSave = hasClipMarked && !saving && videoReady;
+  // Add-as-you-go: you can Add once the current group has tags AND a clip exists
+  // or a valid Start+End window is marked (no auto-window — an end is required).
+  const hasWindow = startTime !== null && endTime !== null && endTime > startTime;
+  const canSave = building.length > 0 && !saving && videoReady && (openClipId !== null || hasWindow);
 
   // Highlight ★ button scale-pulse — fires only on enable (un-lit → lit).
   // Coaches frequently miss this button, so the pulse + larger size + label
@@ -485,15 +450,14 @@ export default function TaggingOverlayScreen() {
     transform: [{ scale: highlightScale.value }],
   }));
   function toggleHighlight() {
-    const id = specialTagIds.highlight;
-    if (!id) return;
-    if (!highlightLit) {
+    if (!specialTagIds.highlight) return;
+    if (!isStar) {
       highlightScale.value = withSequence(
         withTiming(1.15, { duration: 100 }),
         withTiming(1, { duration: 100 })
       );
     }
-    toggleTag(id);
+    setIsStar(s => !s);
   }
 
   // POE button — red counterpart to ★. Same toggle behavior, same scale-pulse
@@ -503,15 +467,14 @@ export default function TaggingOverlayScreen() {
     transform: [{ scale: poeScale.value }],
   }));
   function togglePOE() {
-    const id = specialTagIds.poe;
-    if (!id) return;
-    if (!poeLit) {
+    if (!specialTagIds.poe) return;
+    if (!isPoe) {
       poeScale.value = withSequence(
         withTiming(1.15, { duration: 100 }),
         withTiming(1, { duration: 100 })
       );
     }
-    toggleTag(id);
+    setIsPoe(p => !p);
   }
 
   // Scrubber drag uses seekBy (keyframe-tolerant, ~10x faster than
@@ -618,99 +581,62 @@ export default function TaggingOverlayScreen() {
   const activeClips = existingClips.filter(c => currentTime >= c.start && currentTime <= c.end);
   const activeTagNames = Array.from(new Set(activeClips.flatMap(c => c.tags.map(t => t.name))));
 
-  // The bundle_number contract
-  // (clip-level = 0, bundles[idx] = idx + 1) is what app/export.tsx's
-  // clipMatchesGroup relies on — off-by-one here silently breaks bundle
-  // attribution in exports. Reset only on the success path (Alert OK).
+  // Add-as-you-go (identical to the web tagger). Each Add attaches the current
+  // GROUP (`building`) as a bundle to the open clip. First Add creates the clip
+  // (group 1); with a Start/End window it stays open so the next Add stacks
+  // group 2, 3… on the SAME clip. No window → auto-window (−8s/+3s), one clip
+  // per Add. The bundle_number contract (clip-level/period/star/POE = 0, groups
+  // = 1,2,3…) is what app/export.tsx's clipMatchesGroup relies on.
   async function saveClip() {
-    if (startTime === null || endTime === null) {
-      Alert.alert('Missing times', 'Please mark a start and end time first.');
+    if (building.length === 0 || saving) return;
+    if (!userId) { Alert.alert('Not signed in'); return; }
+    const useMarks = startTime !== null && endTime !== null && endTime > startTime;
+    // A clip REQUIRES an explicit Start + End window — no auto-window, no clips
+    // without an end time. (Adding another group reuses the open clip's window.)
+    if (openClipId === null && !useMarks) {
+      Alert.alert('Mark the clip', 'Tap Mark Start and Mark End to set the clip first.');
       return;
     }
-    if (endTime <= startTime) {
-      Alert.alert('Invalid clip', 'End time must be after start time.');
-      return;
-    }
-    // V3 requirement: clips.team_id is nullable; omitting it silently misfiles
-    // the clip as a personal upload. Both team_id and created_by_user_id must
-    // be wired on every team-context save.
-    if (!userId) {
-      Alert.alert('Not signed in');
-      return;
-    }
+    const groupTagIds = [...building];
     setSaving(true);
 
-    const { data: clip, error: clipError } = await supabase
-      .from('clips')
-      .insert({
-        video_id: videoId,
-        team_id: tagTeamId,
-        created_by_user_id: userId,
-        start_time: startTime,
-        end_time: endTime,
-        note: '',
-      })
-      .select()
-      .single();
-
-    if (clipError) {
-      Alert.alert('Error saving clip', clipError.message);
-      setSaving(false);
-      return;
+    let targetId = openClipId;
+    let bundleNum: number;
+    if (targetId === null) {
+      const { data: clip, error: clipError } = await supabase
+        .from('clips')
+        .insert({ video_id: videoId, team_id: tagTeamId, created_by_user_id: userId, start_time: startTime as number, end_time: endTime as number, note: '' })
+        .select().single();
+      if (clipError || !clip) { Alert.alert('Error saving clip', clipError?.message ?? 'Could not save clip'); setSaving(false); return; }
+      targetId = clip.id;
+      setOpenClipId(clip.id); // keep the windowed clip open for more groups
+      bundleNum = 1;
+      setBundleCount(1);
+    } else {
+      bundleNum = bundleCount + 1;
+      setBundleCount(bundleNum);
     }
 
-    const rows: any[] = [];
-    // Sticky game-period stamp: the active period (if any) rides along as a
-    // clip-level tag so every saved clip carries "1st/2nd/…" with no per-clip
-    // fiddling. Dedup guards the rare case it's already in clipLevelTags.
-    const clipLevelIds = activePeriod && !clipLevelTags.includes(activePeriod)
-      ? [...clipLevelTags, activePeriod]
-      : clipLevelTags;
-    for (const tagId of clipLevelIds) {
-      rows.push({ clip_id: clip.id, tag_id: tagId, bundle_number: 0 });
+    // The built tags become one group at bundle N. Clip-level items (bundle 0) —
+    // the sticky game period + star + POE — ride along once, with the first group.
+    const rows: any[] = groupTagIds.map(tag_id => ({ clip_id: targetId, tag_id, bundle_number: bundleNum }));
+    if (bundleNum === 1) {
+      if (activePeriod) rows.push({ clip_id: targetId, tag_id: activePeriod, bundle_number: 0 });
+      if (isStar && specialTagIds.highlight) rows.push({ clip_id: targetId, tag_id: specialTagIds.highlight, bundle_number: 0 });
+      if (isPoe && specialTagIds.poe) rows.push({ clip_id: targetId, tag_id: specialTagIds.poe, bundle_number: 0 });
     }
-    bundles.forEach((bundle, idx) => {
-      const bundleNum = idx + 1;
-      for (const tagId of bundle) {
-        rows.push({ clip_id: clip.id, tag_id: tagId, bundle_number: bundleNum });
-      }
-    });
-
     if (rows.length > 0) {
       const { error: tagError } = await supabase.from('clip_tags').insert(rows);
-      if (tagError) {
-        Alert.alert('Error saving tags', tagError.message);
-        setSaving(false);
-        return;
-      }
+      if (tagError) { Alert.alert('Error saving tags', tagError.message); setSaving(false); return; }
     }
 
-    const clipLevelCount = clipLevelIds.length;
-    const bundledCount = rows.length - clipLevelCount;
-    const nonEmptyBundles = bundles.filter(b => b.length > 0).length;
-    const bundlesWord = nonEmptyBundles === 1 ? 'bundle' : 'bundles';
-    let message: string;
-    if (clipLevelCount > 0 && bundledCount > 0) {
-      message = `${clipLevelCount} clip-wide + ${bundledCount} ${bundledCount === 1 ? 'tag' : 'tags'} across ${nonEmptyBundles} ${bundlesWord} (${rows.length} total).`;
-    } else if (clipLevelCount > 0) {
-      message = `${clipLevelCount} clip-wide ${clipLevelCount === 1 ? 'tag' : 'tags'}.`;
-    } else if (bundledCount > 0) {
-      message = `${bundledCount} ${bundledCount === 1 ? 'tag' : 'tags'} across ${nonEmptyBundles} ${bundlesWord}.`;
-    } else {
-      message = 'Clip saved with no tags.';
-    }
-
-    // Reset state synchronously on save success — tag chips (incl. ★ / POE
-    // via clipLevelTags + bundles) visually clear immediately, not on Alert
-    // dismissal.
-    setStartTime(null);
-    setEndTime(null);
-    setClipLevelTags([]);
-    setBundles([]);
-    setActiveSection('clip');
+    // Keep the Start/End window + open clip so the next Add stacks another group.
+    // Clear only the current group + star/POE. A new window / Mark Start/End
+    // starts a fresh clip.
+    setBuilding([]);
+    setIsStar(false);
+    setIsPoe(false);
     loadExistingClips(); // refresh the marker strip with the just-saved clip
-
-    Alert.alert('Saved!', message);
     setSaving(false);
   }
 
@@ -788,7 +714,7 @@ export default function TaggingOverlayScreen() {
                 disabled={!canSave}
                 onPress={saveClip}
               >
-                <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Clip'}</Text>
+                <Text style={styles.saveBtnText}>{saving ? 'Adding…' : openClipId ? 'Add group' : 'Add clip'}</Text>
               </TouchableOpacity>
             )}
             {/* "Now tagged" readout — what's tagged at the current playhead, so a
@@ -826,40 +752,41 @@ export default function TaggingOverlayScreen() {
           </View>
         </LinearGradient>
 
-        {/* Right-edge bundle strip — Clip pill + dynamic numbered pills + add pill.
-            Same in both tag modes. Hidden in watch mode. */}
+        {/* Right-edge control strip — the fullscreen Tags/Video toggle + ★/POE.
+            Lives here (not the crowded bottom row) so all three stay visible,
+            and it stays tappable in fullscreen because the tag region reserves
+            this width — same slot the old bundle strip used. */}
         {!isWatch && (
         <View
-          style={[
-            styles.bundleStripContainer,
-            { top: insets.top + 60, bottom: insets.bottom + 80, right: insets.right + 8 },
-          ]}
+          style={[styles.sideStrip, { top: insets.top + 60, bottom: insets.bottom + 76, right: insets.right + 8 }]}
           pointerEvents="box-none"
         >
-          <ScrollView
-            contentContainerStyle={styles.bundleStripContent}
-            showsVerticalScrollIndicator={false}
+          <TouchableOpacity
+            style={styles.toggleBtn}
+            onPress={() => setTagMode(m => (m === 'compact' ? 'fullscreen' : 'compact'))}
           >
+            <Text style={styles.toggleBtnText}>{tagMode === 'compact' ? 'Tags' : 'Video'}</Text>
+          </TouchableOpacity>
+          <Animated.View style={[!videoReady && styles.disabledBtn, highlightAnimatedStyle]}>
             <TouchableOpacity
-              style={[styles.pill, activeSection === 'clip' ? styles.pillActive : styles.pillInactive]}
-              onPress={() => setActiveSection('clip')}
+              style={[styles.highlightBtn, highlightLit && styles.highlightBtnActive]}
+              onPress={toggleHighlight}
+              hitSlop={8}
+              disabled={!videoReady}
             >
-              <Text style={styles.pillTextActive}>Clip</Text>
+              <Text style={styles.highlightStar}>{highlightLit ? '★' : '☆'}</Text>
             </TouchableOpacity>
-            {bundles.map((_, idx) => (
-              <TouchableOpacity
-                key={idx}
-                style={[styles.pill, activeSection === idx ? styles.pillActive : styles.pillInactive]}
-                onPress={() => setActiveSection(idx)}
-                onLongPress={() => removeBundle(idx)}
-              >
-                <Text style={styles.pillTextInactive}>{idx + 1}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={[styles.pill, styles.pillAdd]} onPress={addBundle}>
-              <Text style={styles.pillTextAdd}>+</Text>
+          </Animated.View>
+          <Animated.View style={[!videoReady && styles.disabledBtn, poeAnimatedStyle]}>
+            <TouchableOpacity
+              style={[styles.poeBtn, poeLit && styles.poeBtnActive]}
+              onPress={togglePOE}
+              hitSlop={8}
+              disabled={!videoReady}
+            >
+              <Text style={[styles.poeText, poeLit && styles.poeTextActive]}>!</Text>
             </TouchableOpacity>
-          </ScrollView>
+          </Animated.View>
         </View>
         )}
 
@@ -876,7 +803,7 @@ export default function TaggingOverlayScreen() {
               // Same bottom in both modes — keeps the scrub bar + controls row visible.
               bottom: insets.bottom + 56 + 8 + 24 + 8,
               left: insets.left + 12,
-              right: insets.right + PILL_SIZE + 8 + 12,
+              right: insets.right + SIDE_STRIP_W + 16,
             },
             tagMode === 'fullscreen' && { top: insets.top + 60 },
           ]}
@@ -888,7 +815,7 @@ export default function TaggingOverlayScreen() {
               <ScrollView showsVerticalScrollIndicator={false}>
                 <View style={styles.chipsWrap}>
                   {tags[cat.key].map(tag => {
-                    const selected = activeTags.includes(tag.id);
+                    const selected = building.includes(tag.id);
                     return (
                       <TouchableOpacity
                         key={tag.id}
@@ -1037,7 +964,7 @@ export default function TaggingOverlayScreen() {
             <View style={styles.markGroup}>
               <TouchableOpacity
                 style={[styles.markBtn, styles.markStartBtn, !videoReady && styles.disabledBtn]}
-                onPress={() => setStartTime(player.currentTime)}
+                onPress={() => { setStartTime(player.currentTime); setOpenClipId(null); setBundleCount(0); }}
                 disabled={!videoReady}
               >
                 <Text style={styles.markBtnText}>
@@ -1046,46 +973,14 @@ export default function TaggingOverlayScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.markBtn, styles.markEndBtn, !videoReady && styles.disabledBtn]}
-                onPress={() => setEndTime(player.currentTime)}
+                onPress={() => { setEndTime(player.currentTime); setOpenClipId(null); setBundleCount(0); }}
                 disabled={!videoReady}
               >
                 <Text style={styles.markBtnText}>
                   {endTime !== null ? `End ${formatTime(endTime)}` : 'Mark End'}
                 </Text>
               </TouchableOpacity>
-              {/* Highlight ★ — relocated into markGroup adjacent to Mark End so
-                  the natural flow is "just marked the end → star this clip?". */}
-              <Animated.View style={[!videoReady && styles.disabledBtn, highlightAnimatedStyle]}>
-                <TouchableOpacity
-                  style={[styles.highlightBtn, highlightLit && styles.highlightBtnActive]}
-                  onPress={toggleHighlight}
-                  hitSlop={8}
-                  disabled={!videoReady}
-                >
-                  <Text style={styles.highlightStar}>{highlightLit ? '★' : '☆'}</Text>
-                </TouchableOpacity>
-              </Animated.View>
-              {/* POE ! — red counterpart to ★, sits next to Highlight. */}
-              <Animated.View style={[!videoReady && styles.disabledBtn, poeAnimatedStyle]}>
-                <TouchableOpacity
-                  style={[styles.poeBtn, poeLit && styles.poeBtnActive]}
-                  onPress={togglePOE}
-                  hitSlop={8}
-                  disabled={!videoReady}
-                >
-                  <Text style={[styles.poeText, poeLit && styles.poeTextActive]}>!</Text>
-                </TouchableOpacity>
-              </Animated.View>
             </View>
-            )}
-
-            {!isWatch && (
-            <TouchableOpacity
-              style={styles.toggleBtn}
-              onPress={() => setTagMode(m => (m === 'compact' ? 'fullscreen' : 'compact'))}
-            >
-              <Text style={styles.toggleBtnText}>{tagMode === 'compact' ? 'Tags' : 'Video'}</Text>
-            </TouchableOpacity>
             )}
           </View>
         </LinearGradient>
@@ -1093,9 +988,6 @@ export default function TaggingOverlayScreen() {
     </GestureHandlerRootView>
   );
 }
-
-const PILL_SIZE = 44;
-const PILL_SPACING = 4;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
@@ -1151,39 +1043,6 @@ const styles = StyleSheet.create({
   saveBtnDisabled: { opacity: 0.5 },
   saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
-  bundleStripContainer: {
-    position: 'absolute',
-    width: PILL_SIZE,
-  },
-  bundleStripContent: {
-    gap: PILL_SPACING,
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  pill: {
-    width: PILL_SIZE,
-    height: PILL_SIZE,
-    borderRadius: PILL_SIZE / 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pillActive: {
-    backgroundColor: '#534AB7',
-  },
-  pillInactive: {
-    backgroundColor: 'rgba(83, 74, 183, 0.4)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  pillAdd: {
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-    borderStyle: 'dashed',
-  },
-  pillTextActive: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  pillTextInactive: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  pillTextAdd: { color: 'rgba(255, 255, 255, 0.7)', fontSize: 22, fontWeight: '300' },
 
   tagRegion: {
     position: 'absolute',
@@ -1278,6 +1137,13 @@ const styles = StyleSheet.create({
   markGroup: {
     flexDirection: 'row',
     gap: 8,
+  },
+  sideStrip: {
+    position: 'absolute',
+    width: SIDE_STRIP_W,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 12,
   },
   markBtn: {
     paddingHorizontal: 14,

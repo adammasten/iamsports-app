@@ -5,9 +5,9 @@ import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -51,7 +51,10 @@ export default function KidWallScreen() {
   const [attaching, setAttaching] = useState(false);
   const [guardians, setGuardians] = useState<{ user_id: string; name: string; relationship: string; is_you: boolean }[]>([]);
   const [guardianCode, setGuardianCode] = useState<string | null>(null);
+  const [codeLastUsed, setCodeLastUsed] = useState<string | null>(null);
   const [guardiansOpen, setGuardiansOpen] = useState(false); // collapsed by default so the wall gets the room
+  // Team side of "who can see this kid" — coaches per active team (kid_team_audience).
+  const [teamAudience, setTeamAudience] = useState<{ team_id: string; team_name: string; member_count: number; coaches: { user_id: string; name: string; role: string; is_you: boolean }[] }[]>([]);
   // "Shared with you" — player-audience shares to this kid that a guardian
   // hasn't put on the wall yet (on_wall=false). Family-wide (any guardian sees).
   const [inbox, setInbox] = useState<{
@@ -110,7 +113,11 @@ export default function KidWallScreen() {
   }, [playerId]);
 
   // Load the kid's current teams (player_teams → teams). The team NAME is gated
-  // by teams_read RLS, so teams the viewer can't read are filtered out.
+  // by teams_read RLS. Every join/claim path grants the guardian a team
+  // membership, so the name is normally readable. But we must NEVER silently
+  // drop a linked team just because the name query came back null — that's the
+  // "fail safe by swallowing" anti-pattern that made a joined team invisible.
+  // Keep the row and show a placeholder name instead, so the link always shows.
   async function loadTeams() {
     if (!playerId) return;
     const { data } = await supabase
@@ -118,8 +125,7 @@ export default function KidWallScreen() {
       .select('team_id, jersey_number, left_at, teams ( name, logo_path )')
       .eq('player_id', playerId);
     const rows = (data || [])
-      .filter((r: any) => r.teams)
-      .map((r: any) => ({ team_id: r.team_id, name: r.teams.name, jersey_number: r.jersey_number ?? null, left_at: r.left_at ?? null, logo_path: r.teams.logo_path ?? null }));
+      .map((r: any) => ({ team_id: r.team_id, name: r.teams?.name ?? 'Team', jersey_number: r.jersey_number ?? null, left_at: r.left_at ?? null, logo_path: r.teams?.logo_path ?? null }));
     setKidTeams(rows.filter((r: any) => !r.left_at));   // current roster
     setPastTeams(rows.filter((r: any) => r.left_at));   // teams left → frozen archive
   }
@@ -142,10 +148,20 @@ export default function KidWallScreen() {
     if (!playerId) return;
     const [{ data: g }, { data: c }] = await Promise.all([
       supabase.rpc('kid_guardians', { p_player_id: playerId }),
-      supabase.from('player_guardian_codes').select('code').eq('player_id', playerId).maybeSingle(),
+      supabase.from('player_guardian_codes').select('code, last_used_at').eq('player_id', playerId).maybeSingle(),
     ]);
     setGuardians((g as any[]) ?? []);
     setGuardianCode(c?.code ?? null);
+    setCodeLastUsed(c?.last_used_at ?? null);
+  }
+
+  // The TEAM side of "who can see this kid": the coaches on each team the kid is
+  // on can view team/coaches content involving them. Same authorization as
+  // kid_guardians (linked parent / super admin / team coach) — read-only.
+  async function loadTeamAudience() {
+    if (!playerId) return;
+    const { data } = await supabase.rpc('kid_team_audience', { p_player_id: playerId });
+    setTeamAudience((data as any[]) ?? []);
   }
 
   function shareGuardianCode() {
@@ -184,13 +200,21 @@ export default function KidWallScreen() {
   }
 
   const amPrimary = guardians.some(g => g.is_you && g.relationship === 'parent');
+  const totalCoaches = teamAudience.reduce((n, t) => n + (t.coaches?.length ?? 0), 0);
 
-  useEffect(() => { loadGuardians(); }, [playerId]);
-
-  useEffect(() => {
-    loadTeams();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playerId]);
+  // Refresh teams + guardians on every FOCUS, not just on mount. A parent can
+  // join/claim a team on another screen (join-team, claim-kid, roster) and then
+  // return here; a mount-only effect would show a stale roster until a full
+  // reload. Focus-refresh means a just-joined team always appears — for every
+  // user, without a manual reload.
+  useFocusEffect(
+    useCallback(() => {
+      loadGuardians();
+      loadTeams();
+      loadTeamAudience();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [playerId]),
+  );
 
   // Attach the kid to the selected team (coach/admin only — enforced by the
   // attach_kid_to_team RPC). Idempotent: re-attaching updates the jersey.
@@ -636,14 +660,17 @@ export default function KidWallScreen() {
       {guardians.length > 0 && (
         <View style={styles.guardiansBlock}>
           <TouchableOpacity style={styles.guardiansCard} onPress={() => setGuardiansOpen(o => !o)} activeOpacity={0.7}>
-            <View style={styles.guardiansIcon}><Ionicons name="people" size={18} color="#b9b1e8" /></View>
+            <View style={styles.guardiansIcon}><Ionicons name="shield-checkmark" size={18} color="#b9b1e8" /></View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.guardiansCardTitle}>Share with family</Text>
-              <Text style={styles.guardiansCardSub} numberOfLines={1}>Invite family with a sign-up code · {guardians.length} of 4</Text>
+              <Text style={styles.guardiansCardTitle}>Who can see {name || 'this kid'}</Text>
+              <Text style={styles.guardiansCardSub} numberOfLines={1}>
+                {guardians.length} family{totalCoaches > 0 ? ` · ${totalCoaches} coach${totalCoaches === 1 ? '' : 'es'}` : ''} · tap to review
+              </Text>
             </View>
             <Ionicons name={guardiansOpen ? 'chevron-up' : 'chevron-down'} size={18} color="#888" />
           </TouchableOpacity>
           {guardiansOpen && <>
+          <Text style={styles.audienceLabel}>Family</Text>
           {guardians.map(g => (
             <View key={g.user_id} style={styles.guardianRow}>
               <Text style={styles.guardianName} numberOfLines={1}>
@@ -675,6 +702,11 @@ export default function KidWallScreen() {
                 </TouchableOpacity>
               </View>
               <Text style={styles.gHint}>Share with a co-parent or grandparents so they can see {name || 'your kid'}’s film. Up to 4 guardians.</Text>
+              <Text style={[styles.gHint, { color: codeLastUsed ? '#7cc47c' : '#c9a24b', marginTop: 6 }]}>
+                {codeLastUsed
+                  ? `Last redeemed ${new Date(codeLastUsed).toLocaleDateString()}`
+                  : 'Not redeemed yet — safe to share, or reset if it went to the wrong person.'}
+              </Text>
               <TouchableOpacity onPress={resetGuardianCode} hitSlop={6}>
                 <Text style={styles.gReset}>Reset code</Text>
               </TouchableOpacity>
@@ -682,6 +714,42 @@ export default function KidWallScreen() {
           ) : guardians.length >= 4 ? (
             <Text style={styles.gHint}>Guardian limit reached (4).</Text>
           ) : null}
+
+          {/* TEAM side — coaches on each team the kid is on can see team/coaches
+              content involving them. Read-only audit; leaving a team is via the
+              team chip long-press above. */}
+          {teamAudience.length > 0 && (
+            <>
+              <Text style={[styles.audienceLabel, { marginTop: 16 }]}>Coaches on {name || 'this kid'}’s teams</Text>
+              {teamAudience.map(t => (
+                <View key={t.team_id} style={styles.audTeamBlock}>
+                  <Text style={styles.audTeamName}>{t.team_name}</Text>
+                  {t.coaches.length > 0 ? (
+                    t.coaches.map(c => (
+                      <View key={c.user_id} style={styles.guardianRow}>
+                        <Text style={styles.guardianName} numberOfLines={1}>
+                          {c.name}{c.is_you ? ' (you)' : ''}
+                        </Text>
+                        <Text style={styles.audRole}>
+                          {c.role === 'head_coach' ? 'head coach' : c.role === 'admin' ? 'admin' : 'coach'}
+                        </Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={styles.gHint}>No coaches on this team yet.</Text>
+                  )}
+                  {t.member_count > t.coaches.length && (
+                    <Text style={styles.gHint}>
+                      + {t.member_count - t.coaches.length} other {t.member_count - t.coaches.length === 1 ? 'member' : 'members'} on {t.team_name} (team posts only)
+                    </Text>
+                  )}
+                </View>
+              ))}
+              <Text style={[styles.gHint, { marginTop: 10 }]}>
+                Coaches see film shared to the team. To remove {name || 'your kid'} from a team, long-press its chip above.
+              </Text>
+            </>
+          )}
           </>}
         </View>
       )}
@@ -863,6 +931,10 @@ const styles = StyleSheet.create({
   gShareText: { color: '#fff', fontWeight: '700' },
   gHint: { color: '#888', fontSize: 12, lineHeight: 16, marginTop: 8 },
   gReset: { color: '#8b83e6', fontWeight: '700', fontSize: 13, marginTop: 10 },
+  audienceLabel: { color: '#8b83e6', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 12, marginBottom: 2 },
+  audTeamBlock: { marginTop: 8 },
+  audTeamName: { color: '#ccc', fontSize: 13, fontWeight: '700', marginTop: 6, marginBottom: 2 },
+  audRole: { color: '#888', fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
   pastBlock: { marginTop: 20, alignSelf: 'stretch' },
   pastTitle: { color: '#888', fontSize: 13, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 10 },
   pastRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },

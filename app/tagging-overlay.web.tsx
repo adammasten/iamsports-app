@@ -18,11 +18,6 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 
-// pre/post-roll auto-window (basketball: the event happens at the END of a
-// possession, so reach back further than forward).
-const PRE_ROLL = 8;
-const POST_ROLL = 3;
-
 const C = {
   bg: '#0b0c10', panel: '#14161c', panel2: '#1b1e26', line: '#262a34',
   text: '#f2f3f6', dim: '#9096a3', faint: '#5b616e', accent: '#6c5ce7',
@@ -38,7 +33,7 @@ const EVENT_KEYS = 'QWERTYUPASDFGHJKLZXCVBNM'.split('');
 
 type Tag = { id: string; name: string; category: string };
 type Built = { id: string; name: string; category: string };
-type ClipRow = { id: string; start: number; end: number; tags: { name: string; category: string }[]; starred: boolean; poe: boolean };
+type ClipRow = { id: string; start: number; end: number; groups: { name: string; category: string }[][]; starred: boolean; poe: boolean; editTags: { id: string; name: string; category: string }[] };
 
 function fmt(s: number) {
   if (!isFinite(s) || s < 0) s = 0;
@@ -62,8 +57,22 @@ export default function TaggingStudioWeb() {
   const [isPoe, setIsPoe] = useState(false);
   const [markIn, setMarkIn] = useState<number | null>(null);
   const [markOut, setMarkOut] = useState<number | null>(null);
+  // While a Start/End window is open, successive Adds append tag GROUPS (bundles)
+  // to the SAME clip — matching the phone tagger + export's bundle model — instead
+  // of making a new clip each time. Cleared when the window changes.
+  const [openClipId, setOpenClipId] = useState<string | null>(null);
+  const [bundleCount, setBundleCount] = useState(0);
+  // When set, the board is EDITING an already-committed clip (loaded back in)
+  // rather than building a new one. Save writes changes; Cancel exits.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [barWidth, setBarWidth] = useState(0);
+  // Measured pixel size of the video box. On web, expo-video's <video> uses a
+  // percentage height that won't resolve against a flex-computed box, so
+  // contentFit can't letterbox and the frame stretches. Feeding explicit px
+  // dimensions gives it a real box → contentFit="contain" works.
+  const [vbox, setVbox] = useState({ w: 0, h: 0 });
   const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false); // brief "Saved ✓" after each clip commits
 
   // ── player ──
   const cachedPath = videoId ? getCachedPathSync(videoId) : null;
@@ -134,15 +143,29 @@ export default function TaggingStudioWeb() {
   const loadClips = useCallback(async () => {
     const { data } = await supabase
       .from('clips')
-      .select('id, start_time, end_time, is_starred, is_point_of_emphasis, clip_tags ( tags ( name, category ) )')
+      .select('id, start_time, end_time, clip_tags ( bundle_number, tags ( id, name, category ) )')
       .eq('video_id', videoId)
       .order('start_time', { ascending: false });
-    setClips((data || []).map((c: any) => ({
-      id: c.id, start: c.start_time, end: c.end_time,
-      starred: c.is_starred === true, poe: c.is_point_of_emphasis === true,
-      tags: (c.clip_tags || []).map((ct: any) => ct.tags).filter(Boolean).map((t: any) => ({ name: t.name, category: t.category })),
-    })));
-  }, [videoId]);
+    setClips((data || []).map((c: any) => {
+      const allTags = (c.clip_tags || []).map((ct: any) => ct.tags).filter(Boolean);
+      // Star/POE come from the special tags actually on the clip (the old
+      // is_starred columns are dead), so the ★/POE badge finally reflects reality.
+      const starred = special.highlight ? allTags.some((t: any) => t.id === special.highlight) : false;
+      const poe = special.poe ? allTags.some((t: any) => t.id === special.poe) : false;
+      // Display groups by bundle — excluding the special star/POE tags (shown as a foot).
+      const byBundle = new Map<number, { name: string; category: string }[]>();
+      for (const ct of (c.clip_tags || [])) {
+        if (!ct.tags || ct.tags.category === 'special') continue;
+        const bn = ct.bundle_number ?? 0;
+        if (!byBundle.has(bn)) byBundle.set(bn, []);
+        byBundle.get(bn)!.push({ name: ct.tags.name, category: ct.tags.category });
+      }
+      const groups = [...byBundle.entries()].sort((a, b) => a[0] - b[0]).map(([, t]) => t);
+      // Non-special tags, to reload into the board when editing this clip.
+      const editTags = allTags.filter((t: any) => t.category !== 'special').map((t: any) => ({ id: t.id, name: t.name, category: t.category }));
+      return { id: c.id, start: c.start_time, end: c.end_time, starred, poe, groups, editTags };
+    }));
+  }, [videoId, special]);
   useEffect(() => { loadClips(); }, [loadClips]);
 
   // ── hotkey assignment (players → number row; events → letter pool) ──
@@ -165,36 +188,117 @@ export default function TaggingStudioWeb() {
   const tapTag = useCallback((t: Tag) => {
     setBuilding(prev => prev.some(b => b.id === t.id) ? prev.filter(b => b.id !== t.id) : [...prev, { id: t.id, name: t.name, category: t.category }]);
   }, []);
-  const clearBuilding = useCallback(() => { setBuilding([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null); }, []);
-  const markInNow = useCallback(() => setMarkIn(player.currentTime || 0), [player]);
-  const markOutNow = useCallback(() => setMarkOut(player.currentTime || 0), [player]);
+  const clearBuilding = useCallback(() => { setBuilding([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null); setOpenClipId(null); setBundleCount(0); }, []);
+  // After committing a group, clear only the tags/flags — KEEP the Start/End
+  // window and the open clip so the next Add stacks another GROUP on the SAME
+  // clip (e.g. Neo steal, then Neo fouled). A new window / Clear / Backspace
+  // starts a fresh clip.
+  const clearTagsOnly = useCallback(() => { setBuilding([]); setIsStar(false); setIsPoe(false); }, []);
+  // Setting a new Start or End begins a new window → a new clip.
+  const markInNow = useCallback(() => { setMarkIn(player.currentTime || 0); setOpenClipId(null); setBundleCount(0); }, [player]);
+  const markOutNow = useCallback(() => { setMarkOut(player.currentTime || 0); setOpenClipId(null); setBundleCount(0); }, [player]);
+  // Tap a saved clip on the right → jump the video to its start and play.
+  const jumpToClip = useCallback((startSec: number) => {
+    try { player.currentTime = Math.max(0, startSec); player.play(); } catch {}
+  }, [player]);
+
+  // Edit a committed clip: reload it into the board (tags lit, window set,
+  // ★/POE reflected). Note: this flattens a multi-group clip into one group.
+  const startEditClip = useCallback((c: ClipRow) => {
+    setEditingId(c.id);
+    setBuilding(c.editTags.map(t => ({ id: t.id, name: t.name, category: t.category })));
+    setMarkIn(c.start); setMarkOut(c.end);
+    setIsStar(c.starred); setIsPoe(c.poe);
+    setOpenClipId(null); setBundleCount(0);
+    try { player.currentTime = Math.max(0, c.start); } catch {}
+  }, [player]);
+  const cancelEdit = useCallback(() => {
+    setEditingId(null); setBuilding([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null);
+  }, []);
+  const deleteClipRow = useCallback(async (id: string) => {
+    if (typeof window !== 'undefined' && !window.confirm('Delete this clip? This can’t be undone.')) return;
+    await supabase.from('clip_tags').delete().eq('clip_id', id);
+    await supabase.from('clips').delete().eq('id', id);
+    if (editingId === id) cancelEdit();
+    loadClips();
+  }, [editingId, cancelEdit, loadClips]);
 
   const commitClip = useCallback(async () => {
     if (building.length === 0 || saving || !userId) return;
-    const at = player.currentTime || 0;
-    // Explicit In/Out wins; otherwise the auto-window around the playhead.
     const useMarks = markIn != null && markOut != null && markOut > markIn;
-    const start = useMarks ? (markIn as number) : Math.max(0, at - PRE_ROLL);
-    const end = useMarks ? (markOut as number) : Math.min(duration || at + POST_ROLL, at + POST_ROLL);
+
+    // EDIT MODE: overwrite the existing clip's window + tags (star/POE/period at
+    // bundle 0, the rest as one group). Replaces all clip_tags for the clip.
+    if (editingId) {
+      if (!useMarks) return;
+      setSaving(true);
+      await supabase.from('clips').update({ start_time: markIn as number, end_time: markOut as number }).eq('id', editingId);
+      await supabase.from('clip_tags').delete().eq('clip_id', editingId);
+      const rows: { clip_id: string; tag_id: string; bundle_number: number }[] = building.map(b => ({ clip_id: editingId, tag_id: b.id, bundle_number: 1 }));
+      if (isStar && special.highlight) rows.push({ clip_id: editingId, tag_id: special.highlight, bundle_number: 0 });
+      if (isPoe && special.poe) rows.push({ clip_id: editingId, tag_id: special.poe, bundle_number: 0 });
+      if (rows.length) await supabase.from('clip_tags').insert(rows);
+      setSaving(false);
+      setEditingId(null);
+      setBuilding([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null);
+      loadClips();
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1600);
+      return;
+    }
+
+    // A clip REQUIRES an explicit Start + End window — no auto-window, no clips
+    // without an end time. (Adding another group reuses the open clip's window.)
+    if (openClipId == null && !useMarks) return;
+    const groupTagIds = building.map(b => b.id);
     setSaving(true);
-    const { data: clip, error } = await supabase
-      .from('clips')
-      .insert({ video_id: videoId, team_id: teamId, created_by_user_id: userId, start_time: start, end_time: end, note: '' })
-      .select().single();
-    if (error || !clip) { setSaving(false); return; }
-    const tagIds = [...building.map(b => b.id)];
-    if (isStar && special.highlight) tagIds.push(special.highlight);
-    if (isPoe && special.poe) tagIds.push(special.poe);
-    const rows = tagIds.map(tag_id => ({ clip_id: clip.id, tag_id, bundle_number: 0 }));
+
+    // With an open windowed clip, this Add is another GROUP (bundle) on it.
+    // Otherwise create a fresh clip (bundle 1 = the first group).
+    let targetId = openClipId;
+    let bundleNum: number;
+    if (targetId == null) {
+      const { data: clip, error } = await supabase
+        .from('clips')
+        .insert({ video_id: videoId, team_id: teamId, created_by_user_id: userId, start_time: markIn as number, end_time: markOut as number, note: '' })
+        .select().single();
+      if (error || !clip) { setSaving(false); return; }
+      targetId = clip.id;
+      setOpenClipId(clip.id); // keep the clip open for more groups
+      bundleNum = 1;
+      setBundleCount(1);
+    } else {
+      bundleNum = bundleCount + 1;
+      setBundleCount(bundleNum);
+    }
+
+    // The built tags become one group at bundle N (1,2,3…). Star/POE apply to the
+    // whole clip → bundle 0, added once (with the first group).
+    const rows = groupTagIds.map(tag_id => ({ clip_id: targetId as string, tag_id, bundle_number: bundleNum }));
+    if (bundleNum === 1) {
+      if (isStar && special.highlight) rows.push({ clip_id: targetId as string, tag_id: special.highlight, bundle_number: 0 });
+      if (isPoe && special.poe) rows.push({ clip_id: targetId as string, tag_id: special.poe, bundle_number: 0 });
+    }
     if (rows.length) await supabase.from('clip_tags').insert(rows);
     setSaving(false);
-    clearBuilding();
+    clearTagsOnly();
     loadClips();
-  }, [building, saving, userId, player, duration, videoId, teamId, isStar, isPoe, special, markIn, markOut, clearBuilding, loadClips]);
+    setSavedFlash(true);
+    setTimeout(() => setSavedFlash(false), 1600);
+  }, [building, saving, userId, videoId, teamId, isStar, isPoe, special, markIn, markOut, openClipId, bundleCount, editingId, clearTagsOnly, loadClips]);
+
+  // Latest-commit ref, assigned DURING RENDER (not in an effect). Space/arrows
+  // worked because they only touch the stable `player`; Enter called a stale
+  // commitClip frozen at the empty-startup state, so it saw building.length===0
+  // and bailed. A ref written during render is immune to that + to React
+  // Compiler memoization, so Enter always runs the CURRENT commitClip.
+  const commitRef = useRef(commitClip);
+  commitRef.current = commitClip;
 
   // ── keyboard (web only — this file is .web.tsx) ──
+  const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    onKeyRef.current = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
       if (e.key === ' ') { e.preventDefault(); togglePlay(); return; }
@@ -202,7 +306,7 @@ export default function TaggingStudioWeb() {
       if (e.key === 'ArrowRight') { e.preventDefault(); seekBy(1); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); seekBy(5); return; }
       if (e.key === 'ArrowDown') { e.preventDefault(); seekBy(-5); return; }
-      if (e.key === 'Enter') { e.preventDefault(); commitClip(); return; }
+      if (e.key === 'Enter') { e.preventDefault(); commitRef.current(); return; }
       if (e.key === 'Backspace') { e.preventDefault(); clearBuilding(); return; }
       const k = e.key.toUpperCase();
       if (k === 'I') { e.preventDefault(); markInNow(); return; }
@@ -212,9 +316,14 @@ export default function TaggingStudioWeb() {
         if (hit) { e.preventDefault(); tapTag(hit); return; }
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [togglePlay, seekBy, commitClip, clearBuilding, markInNow, markOutNow, tags, hotkeys, tapTag]);
+  });
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onKeyRef.current(e);
+    // CAPTURE phase: run before any focused element (a Pressable/button) can
+    // handle Enter first and swallow it — that's why Enter wasn't committing.
+    window.addEventListener('keydown', listener, true);
+    return () => window.removeEventListener('keydown', listener, true);
+  }, []);
 
   const toggleFS = useCallback(() => {
     try {
@@ -230,15 +339,17 @@ export default function TaggingStudioWeb() {
     .onUpdate(e => runOnJS(seekToX)(e.x));
   const inPct = markIn != null && duration > 0 ? (markIn / duration) * 100 : null;
   const outPct = markOut != null && duration > 0 ? (markOut / duration) * 100 : null;
+  const hasWindow = markIn != null && markOut != null && markOut > markIn;
+  const canAdd = building.length > 0 && !saving && (openClipId != null || hasWindow);
   const windowLabel = (markIn != null || markOut != null)
     ? `${markIn != null ? fmt(markIn) : '—'} → ${markOut != null ? fmt(markOut) : '—'}`
-    : `auto −${PRE_ROLL}s/+${POST_ROLL}s`;
+    : 'Mark Start + End';
 
   const tagButton = (t: Tag, cat: string) => {
     const on = builtSet.has(t.id);
     const col = CAT_COLOR[cat];
     return (
-      <Pressable key={t.id} onPress={() => tapTag(t)} style={[styles.chip, { borderColor: on ? col : col + 'aa', backgroundColor: on ? col : col + '1c' }]}>
+      <Pressable key={t.id} focusable={false} onPress={() => tapTag(t)} style={[styles.chip, { borderColor: on ? col : col + 'aa', backgroundColor: on ? col : col + '1c' }]}>
         {cat === 'players' && hotkeys[t.id] ? <Text style={[styles.chipKey, on && { color: '#1a1030' }]}>{hotkeys[t.id]}</Text> : null}
         <Text style={[styles.chipTxt, { color: on ? '#0a1210' : C.text }]} numberOfLines={1}>{t.name}</Text>
         {cat !== 'players' && hotkeys[t.id] ? <Text style={[styles.chipKey, on && { color: '#1a1030' }]}>{hotkeys[t.id]}</Text> : null}
@@ -261,14 +372,20 @@ export default function TaggingStudioWeb() {
         <Text style={styles.gameLabel} numberOfLines={1}>{label}</Text>
         <View style={{ flex: 1 }} />
         <Pressable onPress={toggleFS} style={styles.modeBtn}><Text style={styles.modeTxt}>⛶ Full screen</Text></Pressable>
-        <View style={styles.autosave}><View style={styles.saveDot} /><Text style={styles.autosaveTxt}>Autosaved</Text></View>
+        <View style={styles.autosave}><View style={styles.saveDot} /><Text style={styles.autosaveTxt}>{saving ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Auto-saves each clip'}</Text></View>
       </View>
 
       <View style={styles.main}>
         {/* left stage */}
         <View style={styles.stage}>
-          <View style={styles.videoWrap}>
-            <VideoView player={player} style={StyleSheet.absoluteFill} nativeControls={false} contentFit="contain" />
+          <View
+            style={styles.videoWrap}
+            onLayout={e => setVbox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
+          >
+            {/* Explicit measured px size (not absoluteFill) so the <video> gets a
+                real box on web and contentFit="contain" letterboxes instead of
+                stretching to this wide/short area. */}
+            <VideoView player={player} style={{ width: vbox.w, height: vbox.h }} nativeControls={false} contentFit="contain" />
             {!videoReady ? (
               <Pressable style={styles.videoOverlay} onPress={loadError ? retryNow : undefined}>
                 {loadError
@@ -292,21 +409,33 @@ export default function TaggingStudioWeb() {
               </View>
             </GestureDetector>
             <View style={styles.transport}>
-              <Pressable style={styles.tBtn} onPress={() => seekBy(-5)}><Text style={styles.tBtnTxt}>−5s</Text></Pressable>
-              <Pressable style={[styles.tBtn, styles.tPlay]} onPress={togglePlay}><Text style={styles.tPlayTxt}>{isPlaying ? '❚❚' : '▶'}</Text></Pressable>
-              <Pressable style={styles.tBtn} onPress={() => seekBy(5)}><Text style={styles.tBtnTxt}>+5s</Text></Pressable>
+              <Pressable focusable={false} style={styles.tBtn} onPress={() => seekBy(-5)}><Text style={styles.tBtnTxt}>−5s</Text></Pressable>
+              <Pressable focusable={false} style={[styles.tBtn, styles.tPlay]} onPress={togglePlay}><Text style={styles.tPlayTxt}>{isPlaying ? '❚❚' : '▶'}</Text></Pressable>
+              <Pressable focusable={false} style={styles.tBtn} onPress={() => seekBy(5)}><Text style={styles.tBtnTxt}>+5s</Text></Pressable>
               <View style={styles.tDivider} />
-              <Pressable style={[styles.tBtn, markIn != null && styles.tBtnOn]} onPress={markInNow}><Text style={styles.tBtnTxt}>⇤ In</Text></Pressable>
-              <Pressable style={[styles.tBtn, markOut != null && styles.tBtnOn]} onPress={markOutNow}><Text style={styles.tBtnTxt}>Out ⇥</Text></Pressable>
+              {/* Clip trim points — the most-used action. Big, plain-language,
+                  color-matched to the green/orange scrubber ticks so it's clear
+                  these two set where the clip begins and ends. */}
+              <Pressable focusable={false} style={[styles.markBtn, styles.markStart, markIn != null && styles.markStartOn]} onPress={markInNow}>
+                <Text style={[styles.markTxt, { color: C.made }]}>⇤ {markIn != null ? `Start ${fmt(markIn)}` : 'Start'}</Text>
+              </Pressable>
+              <Pressable focusable={false} style={[styles.markBtn, styles.markEnd, markOut != null && styles.markEndOn]} onPress={markOutNow}>
+                <Text style={[styles.markTxt, { color: C.poe }]}>{markOut != null ? `End ${fmt(markOut)}` : 'End'} ⇥</Text>
+              </Pressable>
               <Text style={styles.tTime}>{fmt(currentTime)} <Text style={styles.tTotal}>/ {fmt(duration)}</Text></Text>
               <View style={{ flex: 1 }} />
               <Text style={styles.windowLbl}>Clip: {windowLabel}</Text>
+              {(markIn != null || markOut != null) ? (
+                <Pressable focusable={false} onPress={() => { setMarkIn(null); setMarkOut(null); setOpenClipId(null); setBundleCount(0); }} hitSlop={6}>
+                  <Text style={styles.clearWindow}>✕ clear</Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
 
           {/* build tray */}
           <View style={[styles.tray, building.length > 0 && { borderTopColor: C.accent }]}>
-            <Text style={styles.trayLabel}>BUILDING CLIP</Text>
+            <Text style={styles.trayLabel}>{editingId ? 'EDITING CLIP' : openClipId ? `ADDING GROUP ${bundleCount + 1} · SAME CLIP` : 'BUILDING CLIP'}</Text>
             <View style={styles.trayChips}>
               {building.length === 0
                 ? <Text style={styles.trayHint}>Tap an event, then a player — stack as many as you want</Text>
@@ -320,17 +449,18 @@ export default function TaggingStudioWeb() {
                   </View>
                 ))}
             </View>
-            <Pressable onPress={() => setIsStar(s => !s)} style={[styles.flag, isStar && { borderColor: C.star }]}><Text style={{ color: isStar ? C.star : C.faint, fontWeight: '800' }}>★</Text></Pressable>
-            <Pressable onPress={() => setIsPoe(p => !p)} style={[styles.flag, isPoe && { borderColor: C.poe }]}><Text style={{ color: isPoe ? C.poe : C.faint, fontWeight: '800' }}>◎ POE</Text></Pressable>
-            {building.length > 0 ? <Pressable onPress={clearBuilding} style={styles.clearBtn}><Text style={styles.clearTxt}>Clear</Text></Pressable> : null}
-            <Pressable onPress={commitClip} disabled={building.length === 0 || saving} style={[styles.doneBtn, (building.length === 0 || saving) && { opacity: 0.35 }]}>
-              <Text style={styles.doneTxt}>Done ↵</Text>
+            <Pressable focusable={false} onPress={() => setIsStar(s => !s)} style={[styles.flag, isStar && { borderColor: C.star }]}><Text style={{ color: isStar ? C.star : C.faint, fontWeight: '800' }}>★</Text></Pressable>
+            <Pressable focusable={false} onPress={() => setIsPoe(p => !p)} style={[styles.flag, isPoe && { borderColor: C.poe }]}><Text style={{ color: isPoe ? C.poe : C.faint, fontWeight: '800' }}>◎ POE</Text></Pressable>
+            {editingId ? <Pressable focusable={false} onPress={cancelEdit} style={styles.clearBtn}><Text style={styles.clearTxt}>Cancel</Text></Pressable>
+              : building.length > 0 ? <Pressable focusable={false} onPress={clearBuilding} style={styles.clearBtn}><Text style={styles.clearTxt}>Clear</Text></Pressable> : null}
+            <Pressable focusable={false} onPress={commitClip} disabled={!canAdd} style={[styles.doneBtn, !canAdd && { opacity: 0.35 }]}>
+              <Text style={styles.doneTxt}>{saving ? 'Saving…' : editingId ? 'Save changes ↵' : openClipId ? 'Add group ↵' : 'Add clip ↵'}</Text>
             </Pressable>
           </View>
 
           {/* tag board */}
           <View style={styles.board}>
-            {category('players', 'Players')}
+            {category('players', 'Players', true)}
             <View style={styles.vdiv} />
             {category('offense', 'Offense', true)}
             <View style={styles.vdiv} />
@@ -340,7 +470,7 @@ export default function TaggingStudioWeb() {
           </View>
 
           <View style={styles.shortcuts}>
-            <Text style={styles.scTxt}>Space play/pause · ←→ ±1s · ↑↓ ±5s · I / O in / out · number = player · letter = event · ↵ done · ⌫ clear</Text>
+            <Text style={styles.scTxt}>Space play/pause · ←→ ±1s · ↑↓ ±5s · I / O = clip start / end · number = player · letter = event · ↵ done · ⌫ clear</Text>
           </View>
         </View>
 
@@ -349,15 +479,32 @@ export default function TaggingStudioWeb() {
           <View style={styles.clipsHead}><Text style={styles.clipsTitle}>CLIPS</Text><Text style={styles.clipsCount}>{clips.length} saved</Text></View>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
             {clips.map(c => (
-              <View key={c.id} style={styles.clipCard}>
-                <Text style={styles.clipTime}>{fmt(c.start)}</Text>
-                <View style={styles.clipTags}>
-                  {c.tags.map((t, i) => (
-                    <View key={i} style={[styles.miniTag, { backgroundColor: CAT_COLOR[t.category] ?? C.dim }]}>
-                      <Text style={styles.miniTxt}>{t.name}</Text>
-                    </View>
-                  ))}
+              <View key={c.id} style={[styles.clipCard, editingId === c.id && styles.clipCardEditing]}>
+                <View style={styles.clipCardTop}>
+                  <Pressable focusable={false} onPress={() => jumpToClip(c.start)}>
+                    <Text style={styles.clipTime}>▶ {fmt(c.start)}</Text>
+                  </Pressable>
+                  <View style={styles.clipActions}>
+                    <Pressable focusable={false} onPress={() => startEditClip(c)}>
+                      <Text style={styles.clipEdit}>{editingId === c.id ? 'Editing…' : 'Edit'}</Text>
+                    </Pressable>
+                    <Pressable focusable={false} onPress={() => deleteClipRow(c.id)}>
+                      <Text style={styles.clipDelete}>✕</Text>
+                    </Pressable>
+                  </View>
                 </View>
+                {c.groups.map((g, gi) => (
+                  <View key={gi} style={styles.clipGroup}>
+                    {c.groups.length > 1 ? <Text style={styles.clipGroupNum}>{gi + 1}</Text> : null}
+                    <View style={styles.clipTags}>
+                      {g.map((t, i) => (
+                        <View key={i} style={[styles.miniTag, { backgroundColor: CAT_COLOR[t.category] ?? C.dim }]}>
+                          <Text style={styles.miniTxt}>{t.name}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ))}
                 {c.starred || c.poe ? <Text style={styles.clipFoot}>{c.starred ? '★ Highlight  ' : ''}{c.poe ? '◎ POE' : ''}</Text> : null}
               </View>
             ))}
@@ -382,7 +529,7 @@ const styles = StyleSheet.create({
 
   main: { flex: 1, flexDirection: 'row', minHeight: 0 },
   stage: { flex: 1, minWidth: 0 },
-  videoWrap: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', minHeight: 0, overflow: 'hidden' },
+  videoWrap: { flex: 1, backgroundColor: '#000', minHeight: 0, overflow: 'hidden' },
   videoOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 10 },
   overlayTxt: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
@@ -402,7 +549,14 @@ const styles = StyleSheet.create({
   tTotal: { color: C.faint, fontWeight: '600' },
   tDivider: { width: 1, height: 22, backgroundColor: C.line, marginHorizontal: 4 },
   tBtnOn: { borderColor: C.accent, backgroundColor: 'rgba(108,92,231,0.18)' },
+  markBtn: { height: 36, paddingHorizontal: 14, borderRadius: 9, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', minWidth: 66 },
+  markTxt: { fontSize: 13.5, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  markStart: { borderColor: C.made, backgroundColor: 'rgba(62,196,109,0.10)' },
+  markStartOn: { backgroundColor: 'rgba(62,196,109,0.30)' },
+  markEnd: { borderColor: C.poe, backgroundColor: 'rgba(255,159,67,0.10)' },
+  markEndOn: { backgroundColor: 'rgba(255,159,67,0.30)' },
   windowLbl: { color: C.dim, fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  clearWindow: { color: C.poe, fontSize: 12, fontWeight: '800', marginLeft: 8 },
 
   tray: { backgroundColor: C.panel2, borderTopWidth: 1, borderTopColor: C.line, borderBottomWidth: 1, borderBottomColor: C.line, minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 8 },
   trayLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 1, color: C.faint },
@@ -420,7 +574,7 @@ const styles = StyleSheet.create({
   doneTxt: { color: '#fff', fontSize: 13, fontWeight: '800' },
 
   board: { backgroundColor: C.bg, flexDirection: 'row', gap: 14, paddingHorizontal: 18, paddingTop: 11, paddingBottom: 13 },
-  catCol: {},
+  catCol: { minWidth: 0 },
   catHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   cdot: { width: 8, height: 8, borderRadius: 4 },
   catTitle: { fontSize: 10, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
@@ -438,8 +592,15 @@ const styles = StyleSheet.create({
   clipsTitle: { fontSize: 11, fontWeight: '800', letterSpacing: 1, color: C.faint },
   clipsCount: { fontSize: 11, color: C.dim },
   clipCard: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 11, padding: 11, marginBottom: 9 },
+  clipCardEditing: { borderColor: C.accent, backgroundColor: '#211f34' },
+  clipCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  clipActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  clipEdit: { color: C.players, fontSize: 12, fontWeight: '800' },
+  clipDelete: { color: C.defense, fontSize: 14, fontWeight: '800' },
   clipTime: { fontSize: 11, fontWeight: '700', color: C.dim },
-  clipTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7, alignItems: 'center' },
+  clipGroup: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+  clipGroupNum: { color: C.faint, fontSize: 11, fontWeight: '800', marginTop: 9, minWidth: 10 },
+  clipTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7, alignItems: 'center', flex: 1 },
   miniTag: { paddingHorizontal: 9, paddingVertical: 3, borderRadius: 12 },
   miniTxt: { fontSize: 11, fontWeight: '700', color: '#12100a' },
   clipFoot: { marginTop: 7, fontSize: 10, fontWeight: '700', color: C.star },
