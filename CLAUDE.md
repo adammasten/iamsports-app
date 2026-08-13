@@ -237,6 +237,29 @@ If a change trades speed for quality (resolution, bitrate, fidelity), **say so
 explicitly and let Adam decide — never silently.** Never ship a media-path change
 without stating what it costs.
 
+## Every viewable video MUST be faststart (web-playable) — NON-NEGOTIABLE
+
+Web browsers refuse to STREAM a non-faststart MP4 (the `moov` index atom sits at
+the END, so the browser would have to download the whole file first). Native
+players tolerate it; **the web does not** — a non-faststart video simply won't play
+in a browser. So **anything a user can view must be served faststart.**
+
+This is NOT per-content-type. `practice` / `scout` / `scrimmage` / `skills` / `game`
+are just an `event_type` **label on a video** — there is ONE video pipeline, and it
+already faststarts every upload regardless of label. The producing paths, all of
+which MUST end faststart:
+
+- **Uploaded videos (any `event_type`):** auto-optimize on upload → 720p H.264
+  yuv420p **faststart** (`-movflags +faststart`); `videos.url` repoints to that copy.
+- **Rendered reels (`/export`):** the concat step includes `-movflags +faststart`
+  (a `-c copy` concat drops the per-clip faststart otherwise).
+
+**RULE: any NEW flow that produces a viewable video is not "done" until its output
+is faststart** — add `-movflags +faststart` (or a `-c copy` faststart pass). When in
+doubt, faststart it. Backfills exist to repair pre-existing non-faststart assets
+(`/optimize-all` for videos, `/reel-faststart-backfill` for reels) — run them after
+shipping a fix, don't leave old assets unplayable on web.
+
 ## Events require a team
 
 A `games` row is an **event** container and `games.team_id` is NOT NULL
