@@ -7,7 +7,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { showContentActions } from './moderationActions';
 
@@ -99,6 +99,16 @@ export default function SharedViewerScreen() {
       try { player.currentTime = startTime; } catch (e) { console.warn('[shared-viewer] seek skipped:', e); }
     }
   }, [status, startTime, player]);
+
+  // WEB: auto-start on first ready. A manual play right after replace() races the
+  // load and aborts on web (same fix game-player uses). Native keeps its controls.
+  const didAutoPlayRef = useRef(false);
+  useEffect(() => {
+    if (status === 'readyToPlay' && Platform.OS === 'web' && !didAutoPlayRef.current) {
+      didAutoPlayRef.current = true;
+      try { player.play(); } catch { /* released */ }
+    }
+  }, [status, player]);
 
   // Clip: stop at end_time.
   const { currentTime } = useEvent(player, 'timeUpdate', {
