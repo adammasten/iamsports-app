@@ -20,6 +20,7 @@ import WebTopNav from './components/WebTopNav';
 // Type + Sort dropdowns for the home content feed's FilterBar (mirrors Film Room).
 const TYPE_OPTIONS: DropdownOption[] = [
   { value: 'all', label: 'All' },
+  { value: 'game', label: 'Games' },
   { value: 'video', label: 'Videos' },
   { value: 'reel', label: 'Reels' },
 ];
@@ -160,12 +161,13 @@ export default function SelectTeamScreen() {
     return out;
   }, [scopedItems]);
 
-  // Player-scoped items → FilterableItem for FilterBar. game/loose-video → 'video'
-  // for the Type filter; reels → 'reel'. itemsByKey recovers the row on tap.
+  // Player-scoped items → FilterableItem for FilterBar. game (video attached to a
+  // game) → 'game', loose video → 'video', reels → 'reel' — so the Type filter can
+  // tell games apart (matches Film Room). itemsByKey recovers the row on tap.
   const filterItems = useMemo<FilterableItem[]>(
     () => scopedItems.map(it => ({
       id: it.key, teamId: it.teamId, teamName: teamNameById.get(it.teamId) ?? '',
-      contentType: it.kind === 'reel' ? 'reel' : 'video',
+      contentType: it.kind === 'reel' ? 'reel' : it.kind === 'game' ? 'game' : 'video',
       title: it.title, createdAt: it.createdAt, durationSeconds: it.durationSeconds,
       extra: { year: new Date(it.createdAt).getFullYear().toString(), eventType: it.eventType ?? '', seasonId: it.seasonId ?? '', tournamentId: it.tournamentId ?? '' },
     })),
@@ -495,7 +497,9 @@ export default function SelectTeamScreen() {
               const d = new Date(fi.createdAt).toLocaleDateString();
               const dur = it?.durationSeconds ? `${Math.floor(it.durationSeconds / 60)}:${String(Math.floor(it.durationSeconds % 60)).padStart(2, '0')}` : null;
               const meta = isReel ? [dur, d].filter(Boolean).join(' · ') : (fi.teamName ? `${fi.teamName} · ${d}` : d);
-              const typeLabel = isReel ? 'Reel' : (it?.eventType ? it.eventType.charAt(0).toUpperCase() + it.eventType.slice(1) : 'Video');
+              // reel → Reel; explicit event type → that (Game/Practice/Scrimmage/…);
+              // else a game-attached item → Game (matches Film Room); else loose → Video.
+              const typeLabel = isReel ? 'Reel' : (it?.eventType ? it.eventType.charAt(0).toUpperCase() + it.eventType.slice(1) : (it?.kind === 'game' ? 'Game' : 'Video'));
               // Layout-only: on web each card sits in a grid cell; native keeps the
               // single-column list. The card + all its actions are unchanged.
               return (
