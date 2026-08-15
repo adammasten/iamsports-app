@@ -1176,7 +1176,7 @@ export default function MyWorkScreen() {
         ) : reels.length === 0 && games.length === 0 && looseVideos.length === 0 && savedItems.length === 0 ? (
           <Text style={styles.empty}>Nothing here yet. Export a reel or upload game film to see it.</Text>
         ) : (
-          <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+          <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             {/* Unsorted footage — loose uploads (game_id null). Distinct list,
                 always shown when present, independent of the reels/games filter. */}
             {looseVideos.length > 0 && (

@@ -234,7 +234,7 @@ export default function CoachesCornerScreen() {
         ) : visiblePosts.length === 0 ? (
           <Text style={styles.empty}>No posts match your filters.</Text>
         ) : (
-          <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }}>
+          <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
             <View style={Platform.OS === 'web' ? styles.feedGrid : undefined}>
             {visiblePosts.map(fi => {
               const item = postsById.get(fi.id);
