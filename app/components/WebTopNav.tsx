@@ -51,8 +51,8 @@ export default function WebTopNav({ active, unseenNotif = 0 }: { active?: Dest; 
           ) : null}
         </Pressable>
         <Pressable onPress={() => router.push('/upload')} style={styles.cta}>
-          <Ionicons name="add" size={17} color="#fff" />
-          <Text style={styles.ctaTxt}>New</Text>
+          <Ionicons name="cloud-upload-outline" size={16} color="#fff" />
+          <Text style={styles.ctaTxt}>Upload film</Text>
         </Pressable>
         <Pressable onPress={() => router.push('/account')} style={styles.avatar} hitSlop={6}>
           <Ionicons name="person-outline" size={17} color={C.dim} />
@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
   iconBtn: { padding: 6 },
   badge: { position: 'absolute', top: 0, right: 0, minWidth: 15, height: 15, borderRadius: 8, backgroundColor: C.badge, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
   badgeTxt: { color: '#fff', fontSize: 9, fontWeight: '800' },
-  cta: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.accent, paddingHorizontal: 14, height: 34, borderRadius: 9 },
-  ctaTxt: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  cta: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: C.accent, paddingHorizontal: 18, height: 38, borderRadius: 10 },
+  ctaTxt: { color: '#fff', fontSize: 14, fontWeight: '800' },
   avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1b1e26', borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center' },
 });

@@ -260,6 +260,22 @@ doubt, faststart it. Backfills exist to repair pre-existing non-faststart assets
 (`/optimize-all` for videos, `/reel-faststart-backfill` for reels) — run them after
 shipping a fix, don't leave old assets unplayable on web.
 
+## Every video plays the same way (fill + center + fullscreen) — except tagging
+
+Every video surface must behave consistently: **fill + center** the frame at the
+correct aspect (`contentFit="contain"`), a **centered max-width layout on web**
+(no full-bleed sprawl), and a **fullscreen** affordance. This covers ALL upload
+categories (Game/Practice/Scout/Scrimmage/Skills — event type is just a label,
+all play through `app/game-player.tsx`), **reels + shared content**
+(`app/shared-viewer.tsx`), and any future video. **WEB gotcha:** expo-video's
+`VideoView` + `StyleSheet.absoluteFill` renders small/top-left — feed it **explicit
+measured px dims** (`onLayout`) or a definite-`aspectRatio` box. For custom-control
+players, wire the browser Fullscreen API to a `⛶` button. **THE ONE EXCEPTION: the
+tagging studio** (`app/tagging-overlay.tsx` / `.web.tsx`) is a deliberate
+full-bleed immersive tagger — **leave it untouched.** Full spec + surface table:
+`docs/VIDEO_PLAYBACK_STANDARD.md`. Any NEW video screen isn't done until it meets
+this (add it to that table).
+
 ## Events require a team
 
 A `games` row is an **event** container and `games.team_id` is NOT NULL

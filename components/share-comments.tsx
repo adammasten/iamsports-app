@@ -4,6 +4,7 @@
 // "Coach Masten") with no forced prefix. Collapsed by default with a count;
 // expands to the thread + a post box. Author can long-press their own to delete.
 import { useTeamContext } from '@/context';
+import { confirm } from '@/lib/confirm';
 import { supabase } from '@/supabase';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -78,14 +79,13 @@ export function ShareComments({ shareId }: { shareId: string }) {
     load();
   }
 
-  function remove(id: string) {
-    Alert.alert('Delete comment', 'Remove your comment?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: async () => {
-        const { error } = await supabase.from('share_comments').delete().eq('id', id);
-        if (error) Alert.alert('Error', error.message); else load();
-      } },
-    ]);
+  // Web-safe: Alert.alert's buttons never fire on RN Web, so deleting a comment
+  // in the browser was impossible. confirm() maps to window.confirm on web.
+  async function remove(id: string) {
+    const ok = await confirm({ title: 'Delete comment', message: 'Remove your comment?', confirmText: 'Delete', destructive: true });
+    if (!ok) return;
+    const { error } = await supabase.from('share_comments').delete().eq('id', id);
+    if (error) Alert.alert('Error', error.message); else load();
   }
 
   return (
@@ -102,12 +102,19 @@ export function ShareComments({ shareId }: { shareId: string }) {
             <ActivityIndicator color="#534AB7" style={{ marginVertical: 8 }} />
           ) : (
             comments.map(c => (
-              <TouchableOpacity key={c.id} activeOpacity={1} onLongPress={() => c.isMine && remove(c.id)} style={styles.comment}>
-                <Text style={styles.meta}>
-                  <Text style={styles.author}>{c.authorName}{c.isMine ? ' (you)' : ''}</Text>{`  ·  ${ago(c.createdAt)}`}
-                </Text>
+              <View key={c.id} style={styles.comment}>
+                <View style={styles.commentHead}>
+                  <Text style={styles.meta}>
+                    <Text style={styles.author}>{c.authorName}{c.isMine ? ' (you)' : ''}</Text>{`  ·  ${ago(c.createdAt)}`}
+                  </Text>
+                  {c.isMine ? (
+                    <TouchableOpacity onPress={() => remove(c.id)} hitSlop={8}>
+                      <Text style={styles.deleteLink}>Delete</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
                 <Text style={styles.body}>{c.body}</Text>
-              </TouchableOpacity>
+              </View>
             ))
           )}
           <View style={styles.inputRow}>
@@ -136,6 +143,8 @@ const styles = StyleSheet.create({
   toggle: { color: '#a99cf0', fontSize: 13, fontWeight: '700' },
   thread: { marginTop: 8, gap: 8 },
   comment: { backgroundColor: '#141414', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#262626' },
+  commentHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  deleteLink: { color: '#c0392b', fontSize: 11, fontWeight: '700' },
   meta: { fontSize: 11, color: '#888', marginBottom: 3 },
   author: { color: '#cbd0ff', fontWeight: '700' },
   body: { color: '#eee', fontSize: 14, lineHeight: 19 },

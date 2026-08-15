@@ -41,6 +41,11 @@ export default function GamePlayerScreen() {
   const startIndex = parseInt((Array.isArray(params.index) ? params.index[0] : params.index) as string, 10) || 0;
 
   const [videos, setVideos] = useState<Vid[]>([]);
+  // WEB: measured player size so the <video> gets explicit px dims — expo-video's
+  // absoluteFill doesn't resolve reliably on web, leaving the frame small/top-left
+  // instead of filling + centering. Also track browser-fullscreen state.
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  const [webFs, setWebFs] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(startIndex);
   const [videoReady, setVideoReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -162,9 +167,25 @@ export default function GamePlayerScreen() {
   }, [player]);
   const togglePlay = useCallback(() => { try { if (isPlaying) player.pause(); else player.play(); } catch {} }, [player, isPlaying]);
   const toggleFullscreen = useCallback(() => {
-    if (Platform.OS === 'web') return;   // web can't lock orientation; ⛶ is a no-op here for now
+    if (Platform.OS === 'web') {
+      // Real browser fullscreen (the page IS the player), not orientation lock.
+      try {
+        const doc: any = typeof document !== 'undefined' ? document : null;
+        if (!doc) return;
+        if (!doc.fullscreenElement) doc.documentElement?.requestFullscreen?.();
+        else doc.exitFullscreen?.();
+      } catch { /* fullscreen denied */ }
+      return;
+    }
     ScreenOrientation.lockAsync(isLandscape ? ScreenOrientation.OrientationLock.PORTRAIT_UP : ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
   }, [isLandscape]);
+  // Keep the ⛶/⤡ icon in sync with the browser's actual fullscreen state.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const onFs = () => setWebFs(!!(document as any).fullscreenElement);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
   const retryNow = useCallback(() => { retryRef.current = 0; setLoadError(false); setVideoReady(false); loadCurrent(false); }, [loadCurrent]);
 
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
@@ -182,9 +203,9 @@ export default function GamePlayerScreen() {
   const thumbX = barWidth > 0 ? Math.max(0, Math.min(barWidth, progress * barWidth)) : 0;
 
   return (
-    <GestureHandlerRootView style={styles.c}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={() => setControls(v => !v)}>
-        <VideoView player={player} style={StyleSheet.absoluteFill} nativeControls={false} contentFit="contain" />
+    <GestureHandlerRootView style={styles.c} onLayout={e => setBox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}>
+      <Pressable style={[StyleSheet.absoluteFill, styles.videoCenter]} onPress={() => setControls(v => !v)}>
+        <VideoView player={player} style={Platform.OS === 'web' ? { width: box.w, height: box.h } : StyleSheet.absoluteFill} nativeControls={false} contentFit="contain" />
       </Pressable>
 
       {/* Loading / error overlay */}
@@ -210,7 +231,7 @@ export default function GamePlayerScreen() {
               <Text style={styles.topSub} numberOfLines={1}>{cur ? `${cur.label} · video ${currentIndex + 1} of ${videos.length}` : ''}</Text>
             </View>
             <Pressable onPress={toggleFullscreen} hitSlop={12}>
-              <Ionicons name={isLandscape ? 'contract' : 'expand'} size={22} color="#fff" />
+              <Ionicons name={(Platform.OS === 'web' ? webFs : isLandscape) ? 'contract' : 'expand'} size={22} color="#fff" />
             </Pressable>
           </View>
 
@@ -262,6 +283,7 @@ export default function GamePlayerScreen() {
 
 const styles = StyleSheet.create({
   c: { flex: 1, backgroundColor: '#000' },
+  videoCenter: { alignItems: 'center', justifyContent: 'center' },
   loading: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 12 },
   loadingText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   top: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 14 },

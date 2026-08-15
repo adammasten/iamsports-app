@@ -362,7 +362,7 @@ export default function SelectTeamScreen() {
         </View>
       )}
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={Platform.OS === 'web' ? [styles.body, styles.bodyWeb] : styles.body} showsVerticalScrollIndicator={false}>
         {/* Your kids — always shown so "+ Add kid" is reachable even with zero
             kids (mirrors the teams rail's "+ New team"). */}
         <Text style={styles.sectionLabel}>Your kids</Text>
@@ -488,7 +488,7 @@ export default function SelectTeamScreen() {
             </Text>
           </View>
         ) : (
-          <View style={styles.feed}>
+          <View style={Platform.OS === 'web' ? styles.feedGrid : styles.feed}>
             {visible.map(fi => {
               const it = itemsByKey.get(fi.id);
               const isReel = (it?.kind ?? 'video') === 'reel';
@@ -496,14 +496,17 @@ export default function SelectTeamScreen() {
               const dur = it?.durationSeconds ? `${Math.floor(it.durationSeconds / 60)}:${String(Math.floor(it.durationSeconds % 60)).padStart(2, '0')}` : null;
               const meta = isReel ? [dur, d].filter(Boolean).join(' · ') : (fi.teamName ? `${fi.teamName} · ${d}` : d);
               const typeLabel = isReel ? 'Reel' : (it?.eventType ? it.eventType.charAt(0).toUpperCase() + it.eventType.slice(1) : 'Video');
+              // Layout-only: on web each card sits in a grid cell; native keeps the
+              // single-column list. The card + all its actions are unchanged.
               return (
-                <ContentCard
-                  key={`${fi.contentType}:${fi.id}`}
-                  content={{ id: fi.id, kind: isReel ? 'reel' : 'game', title: fi.title, meta, typeLabel, thumbnailKey: it?.thumbnailPath ?? null }}
-                  onOpen={() => openItem(fi)}
-                  showPlayOnThumb
-                  onPlay={() => openItem(fi)}
-                />
+                <View key={`${fi.contentType}:${fi.id}`} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
+                  <ContentCard
+                    content={{ id: fi.id, kind: isReel ? 'reel' : 'game', title: fi.title, meta, typeLabel, thumbnailKey: it?.thumbnailPath ?? null }}
+                    onOpen={() => openItem(fi)}
+                    showPlayOnThumb
+                    onPlay={() => openItem(fi)}
+                  />
+                </View>
               );
             })}
           </View>
@@ -550,6 +553,11 @@ const styles = StyleSheet.create({
   notifBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
 
   body: { paddingHorizontal: 20, paddingBottom: 24 },
+  // Web: one centered max-width column so rails, filters, and feed all align.
+  bodyWeb: { maxWidth: 1180, width: '100%', alignSelf: 'center' },
+  // Web: the feed becomes a responsive card grid instead of a single column.
+  feedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, paddingTop: 4 },
+  gridCell: { flexGrow: 1, flexBasis: 300, maxWidth: 400 },
   sectionLabel: {
     color: '#aaa', fontSize: 13, fontWeight: '600',
     textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 8, marginBottom: 14,

@@ -449,8 +449,8 @@ export default function TaggingStudioWeb() {
                   </View>
                 ))}
             </View>
-            <Pressable focusable={false} onPress={() => setIsStar(s => !s)} style={[styles.flag, isStar && { borderColor: C.star }]}><Text style={{ color: isStar ? C.star : C.faint, fontWeight: '800' }}>★</Text></Pressable>
-            <Pressable focusable={false} onPress={() => setIsPoe(p => !p)} style={[styles.flag, isPoe && { borderColor: C.poe }]}><Text style={{ color: isPoe ? C.poe : C.faint, fontWeight: '800' }}>◎ POE</Text></Pressable>
+            <Pressable focusable={false} onPress={() => setIsStar(s => !s)} style={[styles.flag, { borderColor: C.star, backgroundColor: isStar ? C.star : C.star + '22' }]}><Text style={{ color: isStar ? '#1a1030' : C.star, fontWeight: '800' }}>★ Highlight</Text></Pressable>
+            <Pressable focusable={false} onPress={() => setIsPoe(p => !p)} style={[styles.flag, { borderColor: '#dc3545', backgroundColor: isPoe ? '#dc3545' : '#dc354522' }]}><Text style={{ color: isPoe ? '#fff' : '#dc3545', fontWeight: '800' }}>◎ POE</Text></Pressable>
             {editingId ? <Pressable focusable={false} onPress={cancelEdit} style={styles.clearBtn}><Text style={styles.clearTxt}>Cancel</Text></Pressable>
               : building.length > 0 ? <Pressable focusable={false} onPress={clearBuilding} style={styles.clearBtn}><Text style={styles.clearTxt}>Clear</Text></Pressable> : null}
             <Pressable focusable={false} onPress={commitClip} disabled={!canAdd} style={[styles.doneBtn, !canAdd && { opacity: 0.35 }]}>

@@ -5,10 +5,11 @@ import { showContentActions } from './moderationActions';
 import { router } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentCard from '@/components/content-card/ContentCard';
 import { ShareComments } from '@/components/share-comments';
+import WebTopNav from './components/WebTopNav';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 
@@ -200,12 +201,16 @@ export default function CoachesCornerScreen() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.topRow}>
-        <TouchableOpacity onPress={goBackOrHome} style={styles.back}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-      </View>
+    <View style={[styles.container, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
+      {Platform.OS === 'web' ? <WebTopNav active="coaches" /> : null}
+      <View style={Platform.OS === 'web' ? [styles.pageWrap, styles.pageWrapWeb] : styles.pageWrap}>
+      {Platform.OS === 'web' ? null : (
+        <View style={styles.topRow}>
+          <TouchableOpacity onPress={goBackOrHome} style={styles.back}>
+            <Text style={styles.backText}>← Back</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <Text style={styles.title}>Coaches&apos; Corner</Text>
       <Text style={styles.subtitle}>Coaches only. A private board for your staff — players and families never see this.</Text>
@@ -230,13 +235,14 @@ export default function CoachesCornerScreen() {
           <Text style={styles.empty}>No posts match your filters.</Text>
         ) : (
           <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 20 }}>
+            <View style={Platform.OS === 'web' ? styles.feedGrid : undefined}>
             {visiblePosts.map(fi => {
               const item = postsById.get(fi.id);
               if (!item) return null;
               const isReel = item.contentType === 'reel';
               const typeLabel = item.contentType.charAt(0).toUpperCase() + item.contentType.slice(1);
               return (
-                <View key={item.shareId}>
+                <View key={item.shareId} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
                   <ContentCard
                     content={{ id: item.contentId, kind: isReel ? 'reel' : 'game', title: item.title, meta: `${item.teamName} · ${relativeTime(item.createdAt)}`, typeLabel, thumbnailKey: item.thumbnailPath }}
                     onOpen={() => openShared(item)}
@@ -249,15 +255,23 @@ export default function CoachesCornerScreen() {
                 </View>
               );
             })}
+            </View>
           </ScrollView>
         )}
       </View>
+      </View>{/* pageWrap */}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000', paddingHorizontal: 20 },
+  container: { flex: 1, backgroundColor: '#000' },
+  pageWrap: { flex: 1, paddingHorizontal: 20 },
+  pageWrapWeb: { maxWidth: 1180, width: '100%', alignSelf: 'center' },
+  // Grid like Home/Film Room, but 2-across (wider cells) so each post's comment
+  // thread has room to read + type.
+  feedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' },
+  gridCell: { flexGrow: 1, flexBasis: 420, maxWidth: 640 },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   back: { paddingVertical: 8 },
   backText: { color: '#534AB7', fontSize: 16 },

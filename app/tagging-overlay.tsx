@@ -774,7 +774,7 @@ export default function TaggingOverlayScreen() {
               hitSlop={8}
               disabled={!videoReady}
             >
-              <Text style={styles.highlightStar}>{highlightLit ? '★' : '☆'}</Text>
+              <Text style={[styles.highlightStar, highlightLit && styles.highlightStarActive]}>{highlightLit ? '★' : '☆'}</Text>
             </TouchableOpacity>
           </Animated.View>
           <Animated.View style={[!videoReady && styles.disabledBtn, poeAnimatedStyle]}>
@@ -1162,18 +1162,18 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     borderWidth: 1.5,
-    borderColor: '#EF9F27',
+    borderColor: '#f5c518',
     backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  // Star is always gold (#EF9F27); the ☆ → ★ glyph swap + subtle gold-tinted
-  // backdrop convey the active state. Avoids gray, keeps gold as the constant
-  // visual identity of the highlight concept.
+  // Yellow Highlight = counterpart to the red POE. Inactive = outlined yellow on
+  // dark; active = solid bright-yellow fill with a dark ★ (mirrors POE's red fill).
   highlightBtnActive: {
-    backgroundColor: 'rgba(239, 159, 39, 0.25)',
+    backgroundColor: '#f5c518',
   },
-  highlightStar: { color: '#EF9F27', fontSize: 22, fontWeight: '700' },
+  highlightStar: { color: '#f5c518', fontSize: 22, fontWeight: '700' },
+  highlightStarActive: { color: '#1a1030' },
 
   // POE button — red counterpart to the gold Highlight star. Same dimensions
   // and toggle pattern; only the color changes. Inactive = outlined red on

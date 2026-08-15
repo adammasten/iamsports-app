@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
 import { downloadMedia } from '@/lib/native/download-media';
@@ -25,6 +25,8 @@ import { requirePermission } from './permissionGuard';
 import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 import ContentCard, { type CardAction } from '@/components/content-card/ContentCard';
+import { confirm } from '@/lib/confirm';
+import WebTopNav from './components/WebTopNav';
 import { deriveShareStatus } from '@/lib/core/shareStatus';
 
 // "My Work" — lists the current user's highlight reels (highlight_reels rows
@@ -1115,32 +1117,44 @@ export default function MyWorkScreen() {
     });
   }
 
-  function confirmDelete(reel: Reel) {
-    Alert.alert('Delete reel', `Delete “${reel.name}”? This can’t be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive', onPress: async () => {
-          const { error } = await supabase.from('highlight_reels').delete().eq('id', reel.id);
-          if (error) { Alert.alert('Error', error.message); return; }
-          setReels(prev => prev.filter(r => r.id !== reel.id));
-        },
-      },
-    ]);
+  // Web-safe: Alert.alert's buttons never fire on RN Web, so the reel delete was
+  // impossible in the browser. confirm() maps to window.confirm on web.
+  async function confirmDelete(reel: Reel) {
+    const ok = await confirm({ title: 'Delete reel', message: `Delete “${reel.name}”? This can’t be undone.`, confirmText: 'Delete', destructive: true });
+    if (!ok) return;
+    const { error } = await supabase.from('highlight_reels').delete().eq('id', reel.id);
+    if (error) { Alert.alert('Error', error.message); return; }
+    setReels(prev => prev.filter(r => r.id !== reel.id));
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.topRow}>
-        <TouchableOpacity onPress={goBackOrHome} style={styles.back}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.push('/export')} style={styles.makeReelBtn}>
-          <Text style={styles.makeReelText}>＋ Make a reel</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.title}>Film Room</Text>
-      <Text style={styles.subtitle}>Your workbench — tag film, build reels, and share them out.</Text>
+    <View style={[styles.container, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
+      {Platform.OS === 'web' ? <WebTopNav active="filmroom" /> : null}
+      <View style={Platform.OS === 'web' ? [styles.pageWrap, styles.pageWrapWeb] : styles.pageWrap}>
+      {Platform.OS === 'web' ? (
+        <View style={styles.titleRowWeb}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title}>Film Room</Text>
+            <Text style={styles.subtitle}>Your workbench — tag film, build reels, and share them out.</Text>
+          </View>
+          <TouchableOpacity onPress={() => router.push('/export')} style={styles.makeReelBtn}>
+            <Text style={styles.makeReelText}>＋ Make a reel</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          <View style={styles.topRow}>
+            <TouchableOpacity onPress={goBackOrHome} style={styles.back}>
+              <Text style={styles.backText}>← Back</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/export')} style={styles.makeReelBtn}>
+              <Text style={styles.makeReelText}>＋ Make a reel</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.title}>Film Room</Text>
+          <Text style={styles.subtitle}>Your workbench — tag film, build reels, and share them out.</Text>
+        </>
+      )}
 
       <FilterBar
         items={items}
@@ -1251,13 +1265,14 @@ export default function MyWorkScreen() {
               <Text style={styles.emptyInline}>Nothing matches your filters.</Text>
             )}
 
+            <View style={Platform.OS === 'web' ? styles.feedGrid : undefined}>
             {visibleReels.map(fi => {
               if (fi.contentType === 'reel') {
                 const reel = reelsById.get(fi.id);
                 if (!reel) return null;
                 return (
+                  <View key={`reel:${reel.id}`} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
                   <ContentCard
-                    key={`reel:${reel.id}`}
                     content={{
                       id: reel.id,
                       kind: 'reel',
@@ -1284,8 +1299,11 @@ export default function MyWorkScreen() {
                         },
                       },
                       { icon: 'download-outline', label: 'Download', busy: downloadingId === reel.id, onPress: () => downloadReel(reel) },
+                      { icon: 'create-outline', label: 'Rename', onPress: () => router.push({ pathname: '/edit-reel', params: { id: reel.id } }) },
+                      { icon: 'trash-outline', label: 'Delete', onPress: () => confirmDelete(reel) },
                     ]}
                   />
+                  </View>
                 );
               }
               if (fi.contentType === 'game') {
@@ -1294,8 +1312,8 @@ export default function MyWorkScreen() {
                 const dateStr = formatGameDate(game.gameDate);
                 const videoCount = `${game.videos.length} video${game.videos.length === 1 ? '' : 's'}`;
                 return (
+                    <View key={`game:${game.id}`} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
                     <ContentCard
-                      key={`game:${game.id}`}
                       content={{
                         id: game.id,
                         kind: 'game',
@@ -1337,13 +1355,16 @@ export default function MyWorkScreen() {
                         return acts;
                       })()}
                     />
+                    </View>
                 );
               }
               return null;
             })}
+            </View>
           </ScrollView>
         )}
       </View>
+      </View>{/* pageWrap */}
 
       {/* Attach a loose video to a game, or move an in-game video to another. */}
       {attachTarget && (
@@ -1512,7 +1533,12 @@ export default function MyWorkScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000', paddingHorizontal: 20 },
+  container: { flex: 1, backgroundColor: '#000' },
+  // Content sits in a padded column; on web it's centered at a max width so the
+  // page stops sprawling edge-to-edge (WebTopNav stays full-bleed above it).
+  pageWrap: { flex: 1, paddingHorizontal: 20 },
+  pageWrapWeb: { maxWidth: 1180, width: '100%', alignSelf: 'center' },
+  titleRowWeb: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 18 },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   back: { paddingVertical: 8 },
   backText: { color: '#534AB7', fontSize: 16 },
@@ -1522,6 +1548,9 @@ const styles = StyleSheet.create({
   subtitle: { color: '#888', fontSize: 13, lineHeight: 18, marginBottom: 16 },
 
   content: { flex: 1, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
+  // Web: reels + game cards fill the column as a responsive grid (like Home).
+  feedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 18 },
+  gridCell: { flexGrow: 1, flexBasis: 300, maxWidth: 400 },
   contentTop: { alignItems: 'stretch', justifyContent: 'flex-start' },
   empty: { color: '#555', fontSize: 15, textAlign: 'center', paddingHorizontal: 20 },
   list: { alignSelf: 'stretch' },
