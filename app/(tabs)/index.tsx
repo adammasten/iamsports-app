@@ -2,18 +2,18 @@ import { COACH_ROLES, useTeamContext } from '@/context';
 import { TeamLogo } from '@/components/team-logo';
 import { LoadError } from '@/components/load-error';
 import { SkeletonCards } from '@/components/skeleton-cards';
-import { DebugPanel } from '@/components/debug-panel';
 import { withTimeout } from '@/lib/withTimeout';
 import { pickAndUploadTeamLogo } from '@/lib/native/team-logo-upload';
 import { supabase } from '@/supabase';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { loadTeamWall, type WallPost } from '@/lib/core/homeFeed';
 import { showContentActions } from '../moderationActions';
 import ContentCard from '@/components/content-card/ContentCard';
 import { type DropdownOption } from '../components/Dropdown';
 import FilterBar, { type FilterableItem } from '../components/FilterBar';
+import WebTopNav from '../components/WebTopNav';
 
 // Home feed filter/sort. TYPE/SORT are static; the Team dropdown options are
 // derived from the teams actually present in the merged feed (see teamOptions).
@@ -58,17 +58,6 @@ export default function HomeScreen() {
   const [wallLoading, setWallLoading] = useState(true);
   const [wallError, setWallError] = useState<string | null>(null);
   const [visiblePosts, setVisiblePosts] = useState<FilterableItem[]>([]);
-
-  // TEMP diagnostic panel (verify-on-device, remove after). Surfaces per-stage
-  // COUNTS *and* the previously-swallowed Postgres errors — a blank feed is
-  // otherwise indistinguishable from an errored one. This is the error-visibility
-  // fix in miniature: if Query 1 hits an RLS/recursion error, you SEE it here
-  // instead of a blank screen.
-  const [debug, setDebug] = useState<{
-    q1Rows: number; q1Err: string | null;
-    q2Rows: number; q2Err: string | null;
-    ptErr: string | null; final: number;
-  } | null>(null);
 
   // Batch-loaded tag data for the feed: each post's tag set (by contentId) and
   // tag metadata (id → name/category). Three queries total, no N+1 (see effect).
@@ -121,14 +110,13 @@ export default function HomeScreen() {
   }, [posts]);
 
   async function loadHome() {
-    if (!activeTeam) { setPosts([]); setDebug(null); setWallError(null); setWallLoading(false); return; }
+    if (!activeTeam) { setPosts([]); setWallError(null); setWallLoading(false); return; }
     setWallLoading(true);
     setWallError(null);
     // ONLY this team's own wall — scoped in @/lib/core/homeFeed (single source of
     // truth). No merge; the merged cross-team feed is the app-home screen's job.
     try {
       const { posts: wall, debug: dbg } = await withTimeout(loadTeamWall(activeTeam.id));
-      setDebug(dbg);
       if (dbg?.q1Err) { setWallError('Couldn’t load the wall. ' + dbg.q1Err); setPosts([]); }
       else setPosts(wall);
     } catch (e: any) {
@@ -184,72 +172,70 @@ export default function HomeScreen() {
     });
   }
 
-
-  // TEMP diagnostic — rendered in BOTH the no-team gate and the feed so the
-  // numbers show regardless of whether activeTeam resolved. Remove after verify.
-  const debugPanel = debug ? (
-    <DebugPanel
-      title={`SCREEN: (tabs)/index.tsx — TEAM page (${activeTeam?.name ?? '—'})`}
-      lines={[
-        `team wall rows: ${debug.q1Rows}${debug.q1Err ? `  ⛔ ${debug.q1Err}` : ''}`,
-        `final after dedup: ${debug.final}`,
-      ]}
-    />
-  ) : null;
-
   if (!activeTeam) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <View />
-          <TouchableOpacity onPress={() => router.push('/account')}><Text style={styles.signOut}>Account</Text></TouchableOpacity>
+        {Platform.OS === 'web' ? <WebTopNav /> : null}
+        <View style={[styles.body, Platform.OS === 'web' ? styles.bodyWeb : styles.bodyNative]}>
+          {Platform.OS === 'web' ? null : (
+            <View style={styles.header}>
+              <View />
+              <TouchableOpacity onPress={() => router.push('/account')}><Text style={styles.signOut}>Account</Text></TouchableOpacity>
+            </View>
+          )}
+          <Text style={styles.heading}>No team selected</Text>
+          <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/select-team')}>
+            <Text style={styles.primaryBtnText}>Pick a team</Text>
+          </TouchableOpacity>
         </View>
-        {debugPanel}
-        <Text style={styles.heading}>No team selected</Text>
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/select-team')}>
-          <Text style={styles.primaryBtnText}>Pick a team</Text>
-        </TouchableOpacity>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.replace('/select-team')}>
-          <Text style={styles.switchBtn}>← Back</Text>
-        </TouchableOpacity>
-        <View style={styles.headerRight}>
-          {isCoach ? (
-            <TouchableOpacity onPress={() => router.push({ pathname: '/team-permissions', params: { teamId: activeTeam.id } })}>
-              <Text style={styles.manageBtn}>Permissions</Text>
+      {Platform.OS === 'web' ? <WebTopNav /> : null}
+      <View style={[styles.body, Platform.OS === 'web' ? styles.bodyWeb : styles.bodyNative]}>
+        {Platform.OS === 'web' ? null : (
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => router.replace('/select-team')}>
+              <Text style={styles.switchBtn}>← Back</Text>
             </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity onPress={() => router.push('/account')}><Text style={styles.signOut}>Account</Text></TouchableOpacity>
-        </View>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.teamBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      <View style={styles.teamHeadingRow}>
-        {isCoach ? (
-          <TouchableOpacity onPress={changeLogo} disabled={logoBusy} activeOpacity={0.7} hitSlop={8}>
-            {logoBusy
-              ? <ActivityIndicator color="#b9b1e8" style={{ width: 40, height: 40 }} />
-              : <TeamLogo logoPath={activeTeam.logo_path} name={activeTeam.name} size={40} />}
-          </TouchableOpacity>
-        ) : (
-          <TeamLogo logoPath={activeTeam.logo_path} name={activeTeam.name} size={40} />
+            <View style={styles.headerRight}>
+              {isCoach ? (
+                <TouchableOpacity onPress={() => router.push({ pathname: '/team-permissions', params: { teamId: activeTeam.id } })}>
+                  <Text style={styles.manageBtn}>Permissions</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity onPress={() => router.push('/account')}><Text style={styles.signOut}>Account</Text></TouchableOpacity>
+            </View>
+          </View>
         )}
-        <Text style={[styles.heading, { flexShrink: 1, marginBottom: 0 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{activeTeam.name}</Text>
-      </View>
 
-      {debugPanel}
+        <ScrollView contentContainerStyle={styles.teamBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <View style={styles.teamHeadingRow}>
+            {isCoach ? (
+              <TouchableOpacity onPress={changeLogo} disabled={logoBusy} activeOpacity={0.7} hitSlop={8}>
+                {logoBusy
+                  ? <ActivityIndicator color="#b9b1e8" style={{ width: 40, height: 40 }} />
+                  : <TeamLogo logoPath={activeTeam.logo_path} name={activeTeam.name} size={40} />}
+              </TouchableOpacity>
+            ) : (
+              <TeamLogo logoPath={activeTeam.logo_path} name={activeTeam.name} size={40} />
+            )}
+            <Text style={[styles.heading, { flexShrink: 1, marginBottom: 0 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{activeTeam.name}</Text>
+            {/* On web the mobile header is hidden, so Permissions lives beside the team name. */}
+            {Platform.OS === 'web' && isCoach ? (
+              <TouchableOpacity style={styles.headingAction} onPress={() => router.push({ pathname: '/team-permissions', params: { teamId: activeTeam.id } })}>
+                <Text style={styles.manageBtn}>Permissions</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
 
-      <Text style={styles.subtitle}>The published team feed — watch-only. Make &amp; post from the Film Room.</Text>
+          <Text style={styles.subtitle}>The published team feed — watch-only. Make &amp; post from the Film Room.</Text>
 
-      {/* Watch-only wall. Create a game via + (upload); manage games & make
-          reels in the Film Room. */}
-      <>
+          {/* Watch-only wall. Create a game via + (upload); manage games & make
+              reels in the Film Room. */}
           <FilterBar
             items={items}
             tagsById={tagsById}
@@ -271,7 +257,7 @@ export default function HomeScreen() {
             ) : visiblePosts.length === 0 ? (
               <Text style={styles.empty}>Nothing matches your filters.</Text>
             ) : (
-              <View style={styles.list}>
+              <View style={Platform.OS === 'web' ? styles.feedGrid : styles.list}>
                 {visiblePosts.map(fi => {
                   const item = postsById.get(fi.id);
                   if (!item) return null;
@@ -281,28 +267,34 @@ export default function HomeScreen() {
                   const typeLabel = item.contentType.charAt(0).toUpperCase() + item.contentType.slice(1);
                   const d = new Date(item.createdAt).toLocaleDateString();
                   return (
-                    <ContentCard
-                      key={item.key}
-                      content={{ id: item.contentId, kind: isReel ? 'reel' : 'game', title: item.title, meta: [sources.join(' · '), d].filter(Boolean).join(' · '), typeLabel, thumbnailKey: item.thumbnailPath }}
-                      onOpen={() => openShared(item)}
-                      onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: item.sharedByUserId === userId || isCoach, onChanged: loadHome })}
-                      showPlayOnThumb
-                      onPlay={() => openShared(item)}
-                      note={item.note ? { text: item.note } : undefined}
-                    />
+                    <View key={item.key} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
+                      <ContentCard
+                        content={{ id: item.contentId, kind: isReel ? 'reel' : 'game', title: item.title, meta: [sources.join(' · '), d].filter(Boolean).join(' · '), typeLabel, thumbnailKey: item.thumbnailPath }}
+                        onOpen={() => openShared(item)}
+                        onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: item.sharedByUserId === userId || isCoach, onChanged: loadHome })}
+                        showPlayOnThumb
+                        onPlay={() => openShared(item)}
+                        note={item.note ? { text: item.note } : undefined}
+                      />
+                    </View>
                   );
                 })}
               </View>
             )}
           </View>
-        </>
-      </ScrollView>
+        </ScrollView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingTop: 60, backgroundColor: '#000' },
+  container: { flex: 1, backgroundColor: '#000' },
+  // Centered, max-width column on web; full-width with a status-bar gap on native.
+  body: { flex: 1, paddingHorizontal: 20 },
+  bodyNative: { paddingTop: 60 },
+  bodyWeb: { maxWidth: 1180, width: '100%', alignSelf: 'center', paddingTop: 16 },
+
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   switchBtn: { color: '#534AB7', fontSize: 14, fontWeight: '600' },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 16 },
@@ -311,6 +303,7 @@ const styles = StyleSheet.create({
 
   heading: { color: '#fff', fontSize: 28, fontWeight: '700', letterSpacing: -0.3 },
   teamHeadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headingAction: { marginLeft: 'auto' },
   subtitle: { color: '#888', fontSize: 13, lineHeight: 18, textAlign: 'center', marginBottom: 14 },
 
   primaryBtn: { backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 16 },
@@ -322,16 +315,7 @@ const styles = StyleSheet.create({
   empty: { color: '#555', fontSize: 15, textAlign: 'center', lineHeight: 22 },
   list: { alignSelf: 'stretch' },
 
-  // wall cards
-  card: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#333' },
-  typeBadgeWrap: { marginBottom: 6 },
-  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' },
-  sourcePill: {
-    color: '#ddd', fontSize: 11, fontWeight: '700',
-    backgroundColor: '#2a2740', borderColor: '#534AB7', borderWidth: 1,
-    borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, maxWidth: 160,
-  },
-  cardTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  cardMeta: { color: '#888', fontSize: 12, marginTop: 4 },
-
+  // Web feed grid — 3-across, matching Home + Film Room.
+  feedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' },
+  gridCell: { flexGrow: 1, flexBasis: 300, maxWidth: 400 },
 });

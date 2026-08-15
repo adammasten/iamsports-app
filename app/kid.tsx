@@ -8,7 +8,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
@@ -18,6 +18,7 @@ import { withTimeout } from '@/lib/withTimeout';
 import ContentCard from '@/components/content-card/ContentCard';
 import { showContentActions } from './moderationActions';
 import { initials, teamColor } from './select-team';
+import WebTopNav from './components/WebTopNav';
 
 // Wall filter tabs — placeholders for now (selecting just highlights).
 const TABS = [
@@ -576,7 +577,9 @@ export default function KidWallScreen() {
 
   // Wall.
   return (
-    <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
+    <View style={styles.pageRoot}>
+      {Platform.OS === 'web' ? <WebTopNav /> : null}
+      <View style={[styles.body, Platform.OS === 'web' ? styles.bodyWeb : { paddingTop: insets.top + 12 }]}>
       <View style={styles.topRow}>
         <TouchableOpacity onPress={goBackOrHome} style={styles.back}>
           <Text style={styles.backText}>← Back</Text>
@@ -783,12 +786,12 @@ export default function KidWallScreen() {
           ) : inbox.length === 0 ? (
             <Text style={styles.empty}>Nothing shared yet</Text>
           ) : (
-            <View style={styles.inboxList}>
+            <View style={Platform.OS === 'web' ? styles.feedGrid : styles.inboxList}>
               {inbox.map(item => {
                 const isReel = item.contentType === 'reel';
                 const typeLabel = item.contentType.charAt(0).toUpperCase() + item.contentType.slice(1);
                 return (
-                  <View key={item.shareId}>
+                  <View key={item.shareId} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
                     <ContentCard
                       content={{ id: item.contentId ?? item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: `From ${item.sharedBy === userId ? 'you' : (item.sharedByName ?? 'someone')} · ${new Date(item.createdAt).toLocaleDateString()}`, typeLabel, thumbnailKey: item.thumbnailPath }}
                       onOpen={() => openShared(item)}
@@ -818,20 +821,21 @@ export default function KidWallScreen() {
           ) : wall.length === 0 ? (
             <Text style={styles.empty}>Nothing on the wall yet</Text>
           ) : (
-            <View style={styles.inboxList}>
+            <View style={Platform.OS === 'web' ? styles.feedGrid : styles.inboxList}>
               {wall.map(item => {
                 const isReel = item.contentType === 'reel';
                 const typeLabel = item.contentType.charAt(0).toUpperCase() + item.contentType.slice(1);
                 return (
-                  <ContentCard
-                    key={item.shareId}
-                    content={{ id: item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: new Date(item.createdAt).toLocaleDateString(), typeLabel, thumbnailKey: item.thumbnailPath }}
-                    onOpen={() => openShared(item)}
-                    showPlayOnThumb
-                    onPlay={() => openShared(item)}
-                    note={item.note ? { text: item.note } : undefined}
-                    actions={[{ icon: 'trash-outline', label: 'Take off wall', onPress: () => takeOffWall(item.shareId, item.title) }]}
-                  />
+                  <View key={item.shareId} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
+                    <ContentCard
+                      content={{ id: item.shareId, kind: isReel ? 'reel' : 'game', title: item.title, meta: new Date(item.createdAt).toLocaleDateString(), typeLabel, thumbnailKey: item.thumbnailPath }}
+                      onOpen={() => openShared(item)}
+                      showPlayOnThumb
+                      onPlay={() => openShared(item)}
+                      note={item.note ? { text: item.note } : undefined}
+                      actions={[{ icon: 'trash-outline', label: 'Take off wall', onPress: () => takeOffWall(item.shareId, item.title) }]}
+                    />
+                  </View>
                 );
               })}
             </View>
@@ -841,6 +845,7 @@ export default function KidWallScreen() {
         )}
       </View>
       </ScrollView>
+      </View>
     </View>
   );
 }
@@ -848,6 +853,16 @@ export default function KidWallScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000', paddingHorizontal: 20 },
   center: { alignItems: 'center', justifyContent: 'center' },
+
+  // Web shell — full-bleed nav bar on top, a centered max-width column below,
+  // matching Home / Film Room / Coaches' Corner. On native, `body` just carries
+  // the horizontal padding + a status-bar top gap (applied inline).
+  pageRoot: { flex: 1, backgroundColor: '#000' },
+  body: { flex: 1, paddingHorizontal: 20 },
+  bodyWeb: { maxWidth: 1180, width: '100%', alignSelf: 'center', paddingTop: 16 },
+  // Web feed grid — 3-across, matching the other pages.
+  feedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' },
+  gridCell: { flexGrow: 1, flexBasis: 300, maxWidth: 400 },
 
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   back: { paddingVertical: 8 },
