@@ -4,7 +4,7 @@ import { supabase } from '@/supabase';
 import { useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 
 type Player = { player_id: string; name: string };
 // Per-player overrides: player_id -> (permission -> allowed). Absent = inherit.
@@ -13,6 +13,7 @@ type TeamData = {
   players: Player[];
   defaults: Partial<Record<PermissionKey, boolean>>;   // team_permission_defaults
   overrides: Overrides;                                 // team_player_permissions
+  requirePin: boolean;                                  // teams.require_coaches_pin
   loading: boolean;
 };
 
@@ -22,6 +23,10 @@ export default function TeamPermissionsScreen() {
 
   const coachTeams = Array.from(
     new Map(userTeams.filter(t => COACH_ROLES.includes(t.role)).map(t => [t.team_id, t])).values(),
+  );
+  // Only a team admin / head coach may require a PIN (a team-wide setting).
+  const adminTeamIds = new Set(
+    userTeams.filter(t => t.role === 'admin' || t.role === 'head_coach').map(t => t.team_id),
   );
 
   const [data, setData] = useState<Record<string, TeamData>>({});
@@ -35,11 +40,12 @@ export default function TeamPermissionsScreen() {
   }, [userTeams]);
 
   async function loadTeam(teamId: string) {
-    setData(d => ({ ...d, [teamId]: { players: [], defaults: {}, overrides: {}, loading: true } }));
-    const [{ data: pt }, { data: def }, { data: ov }] = await Promise.all([
+    setData(d => ({ ...d, [teamId]: { players: [], defaults: {}, overrides: {}, requirePin: false, loading: true } }));
+    const [{ data: pt }, { data: def }, { data: ov }, { data: teamRow }] = await Promise.all([
       supabase.from('player_teams').select('player_id, players ( id, name )').eq('team_id', teamId),
       supabase.from('team_permission_defaults').select('permission, allowed').eq('team_id', teamId),
       supabase.from('team_player_permissions').select('player_id, permission, allowed').eq('team_id', teamId),
+      supabase.from('teams').select('require_coaches_pin').eq('id', teamId).maybeSingle(),
     ]);
     const players: Player[] = (pt || [])
       .map((r: any) => ({ player_id: r.player_id, name: r.players?.name ?? 'Unnamed player' }))
@@ -50,7 +56,19 @@ export default function TeamPermissionsScreen() {
     (ov || []).forEach((r: any) => {
       (overrides[r.player_id] ??= {})[r.permission as PermissionKey] = r.allowed;
     });
-    setData(d => ({ ...d, [teamId]: { players, defaults, overrides, loading: false } }));
+    setData(d => ({ ...d, [teamId]: { players, defaults, overrides, requirePin: !!(teamRow as any)?.require_coaches_pin, loading: false } }));
+  }
+
+  // Team admin/head coach toggles whether Coaches' Corner requires a PIN for this
+  // team. Optimistic; reverts on error. The per-coach PIN itself is set at the
+  // Coaches' Corner lock screen, not here.
+  async function toggleRequirePin(teamId: string, next: boolean) {
+    setData(d => (d[teamId] ? { ...d, [teamId]: { ...d[teamId], requirePin: next } } : d));
+    const { error } = await supabase.rpc('set_team_coaches_pin_required', { p_team_id: teamId, p_required: next });
+    if (error) {
+      setData(d => (d[teamId] ? { ...d, [teamId]: { ...d[teamId], requirePin: !next } } : d));
+      Alert.alert('Could not save', error.message);
+    }
   }
 
   function toggleExpanded(teamId: string) {
@@ -252,7 +270,25 @@ export default function TeamPermissionsScreen() {
                   <Text style={styles.sectionTitle}>{t.name}</Text>
                   <Text style={styles.chevron}>{open ? '▾' : '▸'}</Text>
                 </TouchableOpacity>
-                {open ? <TeamGrid teamId={t.team_id} /> : null}
+                {open ? (
+                  <>
+                    {adminTeamIds.has(t.team_id) ? (
+                      <View style={styles.pinRow}>
+                        <View style={{ flex: 1, paddingRight: 12 }}>
+                          <Text style={styles.pinTitle}>🔒 Require a PIN for Coaches&apos; Corner</Text>
+                          <Text style={styles.pinSub}>Coaches must enter their own PIN to open Coaches&apos; Corner. A casual lock for shared phones — the board is already coaches-only.</Text>
+                        </View>
+                        <Switch
+                          value={!!data[t.team_id]?.requirePin}
+                          onValueChange={v => toggleRequirePin(t.team_id, v)}
+                          trackColor={{ true: '#534AB7', false: '#333' }}
+                          thumbColor="#fff"
+                        />
+                      </View>
+                    ) : null}
+                    <TeamGrid teamId={t.team_id} />
+                  </>
+                ) : null}
               </View>
             );
           })
@@ -277,6 +313,10 @@ const styles = StyleSheet.create({
   sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1a1a1a', padding: 14 },
   sectionTitle: { color: '#fff', fontSize: 17, fontWeight: '700' },
   chevron: { color: '#888', fontSize: 16 },
+
+  pinRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#222', backgroundColor: '#0f0f14' },
+  pinTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  pinSub: { color: '#888', fontSize: 12, lineHeight: 16, marginTop: 3 },
 
   legend: { paddingHorizontal: 14, paddingTop: 12, gap: 4 },
   legendItem: { color: '#aaa', fontSize: 12, lineHeight: 17 },

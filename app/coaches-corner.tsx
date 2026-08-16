@@ -5,7 +5,7 @@ import { showContentActions } from './moderationActions';
 import { router } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentCard from '@/components/content-card/ContentCard';
 import { ShareComments } from '@/components/share-comments';
@@ -61,11 +61,22 @@ type Post = {
   note: string | null;
 };
 
+// Whether the Coaches' Corner PIN has been entered this app session (module-level
+// so navigating away and back doesn't re-prompt until the app is relaunched).
+let CORNER_UNLOCKED = false;
+
 export default function CoachesCornerScreen() {
   const insets = useSafeAreaInsets();
   const { userTeams } = useTeamContext();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // PIN gate: 'checking' → status pending; 'set' → a team requires it but I have no
+  // PIN yet; 'enter' → I have a PIN to enter; 'ok' → unlocked (or not required).
+  const [pinGate, setPinGate] = useState<'checking' | 'set' | 'enter' | 'ok'>(CORNER_UNLOCKED ? 'ok' : 'checking');
+  const [pin, setPin] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinErr, setPinErr] = useState<string | null>(null);
 
   // Filtered+sorted items, produced by FilterBar (a FilterableItem subset; the
   // full Post is recovered via postsById for the card render).
@@ -115,6 +126,38 @@ export default function CoachesCornerScreen() {
     loadCoachesBoard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Does this coach need to enter a PIN before seeing the board?
+  useEffect(() => {
+    if (CORNER_UNLOCKED) return;
+    (async () => {
+      const { data, error } = await supabase.rpc('coaches_pin_status');
+      const st = (data as { required?: boolean; has_pin?: boolean } | null) ?? null;
+      // Fail OPEN on error — the board is already coaches-only via RLS; the PIN is a
+      // casual lock, so a transient error shouldn't strand a coach out of it.
+      if (error || !st || !st.required) { CORNER_UNLOCKED = true; setPinGate('ok'); return; }
+      setPinGate(st.has_pin ? 'enter' : 'set');
+    })();
+  }, []);
+
+  async function submitSetPin() {
+    if (!/^[0-9]{4,8}$/.test(pin)) { setPinErr('Pick a 4–8 digit PIN.'); return; }
+    setPinBusy(true);
+    const { error } = await supabase.rpc('set_coaches_pin', { p_pin: pin });
+    setPinBusy(false);
+    if (error) { setPinErr(error.message); return; }
+    CORNER_UNLOCKED = true; setPin(''); setPinErr(null); setPinGate('ok');
+  }
+
+  async function submitEnterPin() {
+    if (!pin) return;
+    setPinBusy(true);
+    const { data, error } = await supabase.rpc('verify_coaches_pin', { p_pin: pin });
+    setPinBusy(false);
+    if (error) { setPinErr(error.message); return; }
+    if (data === true) { CORNER_UNLOCKED = true; setPin(''); setPinErr(null); setPinGate('ok'); }
+    else setPinErr('Incorrect PIN. Try again.');
+  }
 
   // Batch-load tags for the whole feed whenever posts change. Bucket content ids
   // by type (reel → reel_tags, clip → clip_tags; video/game have no tags), load
@@ -200,6 +243,52 @@ export default function CoachesCornerScreen() {
     });
   }
 
+  if (pinGate !== 'ok') {
+    return (
+      <View style={[styles.container, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
+        {Platform.OS === 'web' ? <WebTopNav active="coaches" /> : null}
+        <View style={Platform.OS === 'web' ? [styles.pageWrap, styles.pageWrapWeb] : styles.pageWrap}>
+          <View style={styles.lockWrap}>
+            {pinGate === 'checking' ? (
+              <ActivityIndicator size="large" color="#534AB7" />
+            ) : (
+              <>
+                <Text style={styles.lockIcon}>🔒</Text>
+                <Text style={styles.lockTitle}>{pinGate === 'set' ? 'Set a Coaches’ Corner PIN' : 'Enter your PIN'}</Text>
+                <Text style={styles.lockSub}>
+                  {pinGate === 'set'
+                    ? 'Your team requires a PIN to open Coaches’ Corner. Pick a 4–8 digit PIN you’ll remember — you’ll use it to unlock this board.'
+                    : 'Coaches’ Corner is locked. Enter your PIN to continue.'}
+                </Text>
+                <TextInput
+                  style={styles.lockInput}
+                  value={pin}
+                  onChangeText={t => { setPin(t.replace(/[^0-9]/g, '')); setPinErr(null); }}
+                  placeholder="PIN"
+                  placeholderTextColor="#666"
+                  keyboardType="number-pad"
+                  secureTextEntry
+                  maxLength={8}
+                  autoFocus
+                  onSubmitEditing={pinGate === 'set' ? submitSetPin : submitEnterPin}
+                />
+                {pinErr ? <Text style={styles.lockErr}>{pinErr}</Text> : null}
+                <TouchableOpacity style={styles.lockBtn} onPress={pinGate === 'set' ? submitSetPin : submitEnterPin} disabled={pinBusy}>
+                  <Text style={styles.lockBtnText}>{pinBusy ? 'Please wait…' : pinGate === 'set' ? 'Set PIN & open' : 'Unlock'}</Text>
+                </TouchableOpacity>
+                {pinGate === 'enter' ? (
+                  <TouchableOpacity onPress={() => { setPin(''); setPinErr(null); setPinGate('set'); }} style={{ marginTop: 14 }}>
+                    <Text style={styles.lockLink}>Forgot PIN? Set a new one</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </>
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
       {Platform.OS === 'web' ? <WebTopNav active="coaches" /> : null}
@@ -268,6 +357,17 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   pageWrap: { flex: 1, paddingHorizontal: 20 },
   pageWrapWeb: { maxWidth: 1180, width: '100%', alignSelf: 'center' },
+
+  // Coaches' Corner PIN lock screen
+  lockWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, maxWidth: 420, width: '100%', alignSelf: 'center' },
+  lockIcon: { fontSize: 40 },
+  lockTitle: { color: '#fff', fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  lockSub: { color: '#888', fontSize: 14, lineHeight: 20, textAlign: 'center', marginBottom: 6 },
+  lockInput: { backgroundColor: '#17171d', color: '#fff', fontSize: 24, fontWeight: '800', letterSpacing: 8, textAlign: 'center', borderRadius: 12, paddingVertical: 14, width: '100%' },
+  lockErr: { color: '#EF5350', fontSize: 13, fontWeight: '600' },
+  lockBtn: { backgroundColor: '#534AB7', borderRadius: 12, paddingVertical: 15, alignItems: 'center', width: '100%', marginTop: 4 },
+  lockBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  lockLink: { color: '#8b83e6', fontWeight: '700', fontSize: 14 },
   // Grid like Home/Film Room, but 2-across (wider cells) so each post's comment
   // thread has room to read + type.
   feedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' },
