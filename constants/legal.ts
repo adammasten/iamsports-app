@@ -60,3 +60,59 @@ You are responsible for the content you upload. You represent that you have the 
     body: `Questions, concerns, or reports of objectionable content or behavior: ${SUPPORT_EMAIL}.`,
   },
 ];
+
+export const PRIVACY_EFFECTIVE = 'August 12, 2026';
+
+// Privacy Policy — shown in app/privacy.tsx, linked from the landing footer + the
+// Account screen. Same content as the public /privacy page. NOT LEGAL ADVICE; have
+// a lawyer review before public launch (esp. the minors + AI-training sections).
+export const PRIVACY: TermsSection[] = [
+  {
+    heading: 'The short version',
+    body: `You are an adult (a coach, parent, or guardian). You upload sports video and tag moments in it. We store that video securely and show it only to the people you share it with. We may use tagged video to improve and train the AI features that power the app. You can delete your content and your account at any time.`,
+  },
+  {
+    heading: '1. Who can use IamSports',
+    body: `IamSports is intended for adults aged 18 or older — coaches, parents, and guardians. Accounts must be created and controlled by an adult. IamSports is not directed to children, and children may not create accounts or use the service directly.`,
+  },
+  {
+    heading: '2. Video of minors, and your responsibility',
+    body: `Because IamSports is a youth-sports product, the video you upload will often depict minors. When you upload video, you represent that you are an adult with authority to record, upload, and share that footage; that you have the right and any necessary consent to upload video depicting the minors shown in it; and that you will only share it with people who have a legitimate reason to see it. By default your uploads are private to you until you choose to share them.`,
+  },
+  {
+    heading: '3. Information we collect',
+    body: `Account information (your name and email, to create and secure your account); content you upload (video files, tags, clips, highlights, team and player information, notes, and comments); and basic usage information needed to operate the app and fix problems. We do not sell your personal information.`,
+  },
+  {
+    heading: '4. How we use your information',
+    body: `To provide the core service — storing, organizing, playing back, and sharing your video and tags; to secure your account and enforce who can access what; to operate and improve the app, diagnose problems, and build new features; and to communicate with you about your account and the service.`,
+  },
+  {
+    heading: '5. AI features and training',
+    body: `A core part of IamSports is helping coaches and parents tag and analyze film. The moments you tag — for example, marking a made shot, a steal, or an assist — may be used to develop, train, and improve the artificial-intelligence features that power the app, including automated tagging and analysis. Future versions of the app will offer clearer per-account controls over whether your content contributes to AI training.`,
+  },
+  {
+    heading: '6. How we share information',
+    body: `We share your content only as you direct — with the people and teams you choose inside the app. We also use trusted service providers (for example, cloud hosting and video processing) that process data on our behalf and may not use it for their own purposes. We may disclose information if required by law.`,
+  },
+  {
+    heading: '7. How we protect your information',
+    body: `Your uploaded video is stored privately and is accessible only to your account and the people you share it with. We use access controls at the database level so users cannot see content that does not belong to them or that has not been shared with them. No system is perfectly secure, but protecting your family's video is a priority we take seriously.`,
+  },
+  {
+    heading: '8. Your choices and your rights',
+    body: `You can delete videos, clips, and other content you've created at any time. You can delete your account, which removes your associated data. You can contact us with questions about the data we hold about you.`,
+  },
+  {
+    heading: '9. Data retention',
+    body: `We keep your content for as long as your account is active or as needed to provide the service. When you delete content or your account, we remove the associated data, subject to reasonable backup and legal-retention periods.`,
+  },
+  {
+    heading: '10. Changes to this policy',
+    body: `We'll update this policy as IamSports grows, especially as we move from limited pre-launch to general availability. When we make material changes, we'll take reasonable steps to let you know.`,
+  },
+  {
+    heading: '11. Contact',
+    body: `Questions about this policy or your data: ${SUPPORT_EMAIL}.`,
+  },
+];

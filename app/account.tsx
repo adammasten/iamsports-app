@@ -147,6 +147,9 @@ export default function AccountScreen() {
           <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/terms')}>
             <Text style={styles.linkText}>Terms of Use</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.linkRow} onPress={() => router.push('/privacy')}>
+            <Text style={styles.linkText}>Privacy Policy</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Permanent — clearly the serious one, at the bottom. */}

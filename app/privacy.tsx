@@ -1,30 +1,30 @@
 import { colors } from '@/constants/theme';
-import { SUPPORT_EMAIL, TERMS, TERMS_EFFECTIVE } from '@/constants/legal';
+import { PRIVACY, PRIVACY_EFFECTIVE, SUPPORT_EMAIL } from '@/constants/legal';
 import { goBackOrHome } from '@/lib/nav';
 import { Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// Standalone Terms / EULA reader (linked from the Account screen). The same
-// TERMS content is shown in the acceptance gate on first login.
-export default function TermsScreen() {
+// Standalone Privacy Policy reader — linked from the landing footer + the Account
+// screen. Same content as the public /privacy page (constants/legal.ts PRIVACY).
+export default function PrivacyScreen() {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
       <View style={Platform.OS === 'web' ? styles.webWrap : styles.nativeWrap}>
-      <TouchableOpacity onPress={goBackOrHome} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
-      <Text style={styles.title}>Terms of Use</Text>
-      <Text style={styles.effective}>Effective {TERMS_EFFECTIVE}</Text>
-      <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
-        {TERMS.map(s => (
-          <View key={s.heading} style={styles.section}>
-            <Text style={styles.heading}>{s.heading}</Text>
-            <Text style={styles.body}>{s.body}</Text>
-          </View>
-        ))}
-        <TouchableOpacity onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}>
-          <Text style={styles.mail}>{SUPPORT_EMAIL}</Text>
-        </TouchableOpacity>
-      </ScrollView>
+        <TouchableOpacity onPress={goBackOrHome} style={styles.back}><Text style={styles.backText}>← Back</Text></TouchableOpacity>
+        <Text style={styles.title}>Privacy Policy</Text>
+        <Text style={styles.effective}>Last updated {PRIVACY_EFFECTIVE}</Text>
+        <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+          {PRIVACY.map(s => (
+            <View key={s.heading} style={styles.section}>
+              <Text style={styles.heading}>{s.heading}</Text>
+              <Text style={styles.body}>{s.body}</Text>
+            </View>
+          ))}
+          <TouchableOpacity onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}>
+            <Text style={styles.mail}>{SUPPORT_EMAIL}</Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
     </View>
   );

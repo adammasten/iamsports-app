@@ -183,6 +183,10 @@ export default function Landing() {
               <Wordmark size={18} light />
               <View style={styles.footLinks}>
                 <Text style={styles.footDim}>© 2026 IamSports LLC</Text>
+                <Text style={styles.footDim}>·</Text>
+                <Pressable onPress={() => router.push('/terms')}><Text style={styles.footLink}>Terms</Text></Pressable>
+                <Text style={styles.footDim}>·</Text>
+                <Pressable onPress={() => router.push('/privacy')}><Text style={styles.footLink}>Privacy</Text></Pressable>
               </View>
             </View>
           </View>
@@ -256,6 +260,7 @@ const styles = StyleSheet.create({
 
   footer: { borderTopWidth: 1, borderTopColor: '#22334b', width: '100%' },
   footerInner: { paddingVertical: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  footLinks: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  footLinks: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   footDim: { fontFamily: BODY, fontSize: 12, color: C.footDim },
+  footLink: { fontFamily: BODY, fontSize: 12, fontWeight: '700', color: C.panelBlue, textDecorationLine: 'underline' },
 });

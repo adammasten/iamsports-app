@@ -4,7 +4,7 @@ import { reconcilePendingUploads } from '@/lib/native/upload-reconcile';
 import { reconcile as reconcileVideoCache } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack, router, useRootNavigationState } from 'expo-router';
+import { Stack, router, useRootNavigationState, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, StyleSheet, View } from 'react-native';
@@ -24,6 +24,7 @@ export const unstable_settings = {
 function AuthGate() {
   const { sessionResolved, userId, membershipsLoaded, userTeams } = useTeamContext();
   const navState = useRootNavigationState();
+  const pathname = usePathname();
   const colorScheme = useColorScheme();
   const [booted, setBooted] = useState(false);
   // Which user we've already routed for — so we DON'T re-route on later
@@ -37,11 +38,16 @@ function AuthGate() {
 
     // Logged OUT (or just logged out).
     if (!userId) {
+      // Public web pages a logged-out visitor is allowed to sit on (don't yank them
+      // to the landing): the landing itself, login, and the legal pages.
+      const onPublic = ['/landing', '/login', '/terms', '/privacy'].some(r => pathname === r || pathname.startsWith(r + '/'));
       if (decidedForUserRef.current !== null) {
         decidedForUserRef.current = null;
         // Web gets the marketing landing as the front door; native goes straight
-        // to login (app-store users don't need the marketing page).
-        router.replace(Platform.OS === 'web' ? '/landing' : '/login');
+        // to login. But never bounce a logged-out visitor off a public web page.
+        if (!(Platform.OS === 'web' && onPublic)) {
+          router.replace(Platform.OS === 'web' ? '/landing' : '/login');
+        }
       }
       setBooted(true);
       return;
@@ -70,7 +76,7 @@ function AuthGate() {
       }
     }
     setBooted(true);
-  }, [navState?.key, sessionResolved, userId, membershipsLoaded, userTeams.length]);
+  }, [navState?.key, sessionResolved, userId, membershipsLoaded, userTeams.length, pathname]);
 
   if (!booted) {
     return (
@@ -218,6 +224,7 @@ export default function RootLayout() {
           <Stack.Screen name="box-score" options={{ headerShown: false }} />
           <Stack.Screen name="account" options={{ headerShown: false }} />
           <Stack.Screen name="terms" options={{ headerShown: false }} />
+          <Stack.Screen name="privacy" options={{ headerShown: false }} />
         </Stack>
         <AuthGate />
         <NameCaptureGate />
