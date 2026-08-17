@@ -2,9 +2,9 @@ import { COACH_ROLES, useTeamContext } from '@/context';
 import { filterModerated, loadModeration } from '@/lib/core/moderation';
 import { supabase } from '@/supabase';
 import { showContentActions } from './moderationActions';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, InputAccessoryView, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentCard from '@/components/content-card/ContentCard';
@@ -61,9 +61,12 @@ type Post = {
   note: string | null;
 };
 
-// Whether the Coaches' Corner PIN has been entered this app session (module-level
-// so navigating away and back doesn't re-prompt until the app is relaunched).
-let CORNER_UNLOCKED = false;
+// Coaches' Corner stays unlocked for a few minutes of use, then re-locks.
+// CORNER_UNLOCKED_AT = last time the PIN was satisfied / the board was viewed
+// (module-level so it survives navigating away and back within the window).
+let CORNER_UNLOCKED_AT = 0;
+const PIN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes idle → re-lock
+function pinStillValid() { return CORNER_UNLOCKED_AT > 0 && Date.now() - CORNER_UNLOCKED_AT < PIN_TIMEOUT_MS; }
 // The number-pad keyboard has no return key, so we pin the submit button to a bar
 // above the keyboard (iOS InputAccessoryView) — otherwise the keyboard covers it.
 const PIN_ACCESSORY_ID = 'coachesPinAccessory';
@@ -76,7 +79,7 @@ export default function CoachesCornerScreen() {
 
   // PIN gate: 'checking' → status pending; 'set' → a team requires it but I have no
   // PIN yet; 'enter' → I have a PIN to enter; 'ok' → unlocked (or not required).
-  const [pinGate, setPinGate] = useState<'checking' | 'set' | 'enter' | 'ok'>(CORNER_UNLOCKED ? 'ok' : 'checking');
+  const [pinGate, setPinGate] = useState<'checking' | 'set' | 'enter' | 'ok'>(pinStillValid() ? 'ok' : 'checking');
   const [pin, setPin] = useState('');
   const [pinBusy, setPinBusy] = useState(false);
   const [pinErr, setPinErr] = useState<string | null>(null);
@@ -130,18 +133,22 @@ export default function CoachesCornerScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Does this coach need to enter a PIN before seeing the board?
-  useEffect(() => {
-    if (CORNER_UNLOCKED) return;
+  // Re-check the PIN each time the screen is focused. Unlock stays valid for a few
+  // minutes; visiting refreshes that window; after ~5 min idle it re-locks.
+  useFocusEffect(useCallback(() => {
+    if (pinStillValid()) { CORNER_UNLOCKED_AT = Date.now(); setPinGate('ok'); return; }
+    let cancelled = false;
     (async () => {
       const { data, error } = await supabase.rpc('coaches_pin_status');
+      if (cancelled) return;
       const st = (data as { required?: boolean; has_pin?: boolean } | null) ?? null;
       // Fail OPEN on error — the board is already coaches-only via RLS; the PIN is a
       // casual lock, so a transient error shouldn't strand a coach out of it.
-      if (error || !st || !st.required) { CORNER_UNLOCKED = true; setPinGate('ok'); return; }
+      if (error || !st || !st.required) { CORNER_UNLOCKED_AT = Date.now(); setPinGate('ok'); return; }
       setPinGate(st.has_pin ? 'enter' : 'set');
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, []));
 
   async function submitSetPin() {
     if (!/^[0-9]{4,8}$/.test(pin)) { setPinErr('Pick a 4–8 digit PIN.'); return; }
@@ -149,7 +156,7 @@ export default function CoachesCornerScreen() {
     const { error } = await supabase.rpc('set_coaches_pin', { p_pin: pin });
     setPinBusy(false);
     if (error) { setPinErr(error.message); return; }
-    CORNER_UNLOCKED = true; setPin(''); setPinErr(null); setPinGate('ok');
+    CORNER_UNLOCKED_AT = Date.now(); setPin(''); setPinErr(null); setPinGate('ok');
   }
 
   async function submitEnterPin() {
@@ -158,7 +165,7 @@ export default function CoachesCornerScreen() {
     const { data, error } = await supabase.rpc('verify_coaches_pin', { p_pin: pin });
     setPinBusy(false);
     if (error) { setPinErr(error.message); return; }
-    if (data === true) { CORNER_UNLOCKED = true; setPin(''); setPinErr(null); setPinGate('ok'); }
+    if (data === true) { CORNER_UNLOCKED_AT = Date.now(); setPin(''); setPinErr(null); setPinGate('ok'); }
     else setPinErr('Incorrect PIN. Try again.');
   }
 
