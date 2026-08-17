@@ -5,7 +5,7 @@ import { showContentActions } from './moderationActions';
 import { router } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, InputAccessoryView, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentCard from '@/components/content-card/ContentCard';
 import { ShareComments } from '@/components/share-comments';
@@ -64,6 +64,9 @@ type Post = {
 // Whether the Coaches' Corner PIN has been entered this app session (module-level
 // so navigating away and back doesn't re-prompt until the app is relaunched).
 let CORNER_UNLOCKED = false;
+// The number-pad keyboard has no return key, so we pin the submit button to a bar
+// above the keyboard (iOS InputAccessoryView) — otherwise the keyboard covers it.
+const PIN_ACCESSORY_ID = 'coachesPinAccessory';
 
 export default function CoachesCornerScreen() {
   const insets = useSafeAreaInsets();
@@ -244,10 +247,15 @@ export default function CoachesCornerScreen() {
   }
 
   if (pinGate !== 'ok') {
+    const submit = pinGate === 'set' ? submitSetPin : submitEnterPin;
+    const btnLabel = pinBusy ? 'Please wait…' : pinGate === 'set' ? 'Set PIN & open' : 'Unlock';
     return (
       <View style={[styles.container, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
         {Platform.OS === 'web' ? <WebTopNav active="coaches" /> : null}
-        <View style={Platform.OS === 'web' ? [styles.pageWrap, styles.pageWrapWeb] : styles.pageWrap}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={Platform.OS === 'web' ? [styles.pageWrap, styles.pageWrapWeb] : styles.pageWrap}
+        >
           <View style={styles.lockWrap}>
             {pinGate === 'checking' ? (
               <ActivityIndicator size="large" color="#534AB7" />
@@ -258,7 +266,7 @@ export default function CoachesCornerScreen() {
                 <Text style={styles.lockSub}>
                   {pinGate === 'set'
                     ? 'Your team requires a PIN to open Coaches’ Corner. Pick a 4–8 digit PIN you’ll remember — you’ll use it to unlock this board.'
-                    : 'Coaches’ Corner is locked. Enter your PIN to continue.'}
+                    : 'Coaches’ Corner is locked. Enter your PIN, then tap Unlock (above the keypad).'}
                 </Text>
                 <TextInput
                   style={styles.lockInput}
@@ -270,11 +278,13 @@ export default function CoachesCornerScreen() {
                   secureTextEntry
                   maxLength={8}
                   autoFocus
-                  onSubmitEditing={pinGate === 'set' ? submitSetPin : submitEnterPin}
+                  returnKeyType="done"
+                  onSubmitEditing={submit}
+                  inputAccessoryViewID={Platform.OS === 'ios' ? PIN_ACCESSORY_ID : undefined}
                 />
                 {pinErr ? <Text style={styles.lockErr}>{pinErr}</Text> : null}
-                <TouchableOpacity style={styles.lockBtn} onPress={pinGate === 'set' ? submitSetPin : submitEnterPin} disabled={pinBusy}>
-                  <Text style={styles.lockBtnText}>{pinBusy ? 'Please wait…' : pinGate === 'set' ? 'Set PIN & open' : 'Unlock'}</Text>
+                <TouchableOpacity style={styles.lockBtn} onPress={submit} disabled={pinBusy}>
+                  <Text style={styles.lockBtnText}>{btnLabel}</Text>
                 </TouchableOpacity>
                 {pinGate === 'enter' ? (
                   <TouchableOpacity onPress={() => { setPin(''); setPinErr(null); setPinGate('set'); }} style={{ marginTop: 14 }}>
@@ -284,7 +294,17 @@ export default function CoachesCornerScreen() {
               </>
             )}
           </View>
-        </View>
+        </KeyboardAvoidingView>
+        {/* iOS number pad has no return key, so pin the submit button above it. */}
+        {Platform.OS === 'ios' && pinGate !== 'checking' ? (
+          <InputAccessoryView nativeID={PIN_ACCESSORY_ID}>
+            <View style={styles.accessoryBar}>
+              <TouchableOpacity style={styles.accessoryBtn} onPress={submit} disabled={pinBusy}>
+                <Text style={styles.accessoryBtnText}>{btnLabel}</Text>
+              </TouchableOpacity>
+            </View>
+          </InputAccessoryView>
+        ) : null}
       </View>
     );
   }
@@ -368,6 +388,10 @@ const styles = StyleSheet.create({
   lockBtn: { backgroundColor: '#534AB7', borderRadius: 12, paddingVertical: 15, alignItems: 'center', width: '100%', marginTop: 4 },
   lockBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
   lockLink: { color: '#8b83e6', fontWeight: '700', fontSize: 14 },
+  // Bar pinned above the number keypad (iOS) so Unlock is always reachable.
+  accessoryBar: { backgroundColor: '#14161c', borderTopWidth: 1, borderTopColor: '#333', padding: 8 },
+  accessoryBtn: { backgroundColor: '#534AB7', borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
+  accessoryBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
   // Grid like Home/Film Room, but 2-across (wider cells) so each post's comment
   // thread has room to read + type.
   feedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' },
