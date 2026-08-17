@@ -17,6 +17,23 @@ clips, build highlight reels, and share them to team/kid walls. Repo dir is
 `hoops-app`; product is "IamSports". A separate Railway-hosted ffmpeg service
 (`https://web-production-1bf7f.up.railway.app`) renders the reels.
 
+## MCP servers available
+
+This project wires up MCP servers in `.mcp.json` (project-scoped, git-tracked).
+**Reach for these instead of asking Adam to do things by hand** — a past session
+forgot the Supabase MCP existed and wasted his time. If a server's tools aren't
+showing, it needs a reconnect/approval: `/mcp reconnect all`, approve the project
+trust prompt, or reload the VS Code window (stdio servers need a one-time approval).
+
+| Server | Transport | What it's for |
+|---|---|---|
+| **supabase** | HTTP (`mcp.supabase.com`, project `wscfpkaltajnrhiusoze`) | Live DB — read-only SQL (`execute_sql`), list/apply migrations, advisors, storage. **Verify schema/data against the live DB here before writing SQL or diagnosing "missing data."** Needs interactive OAuth. |
+| **context7** | stdio (`npx -y @upstash/context7-mcp`) | Live, version-accurate library docs (Expo, RN, Supabase, RevenueCat…). **Use instead of possibly-stale training data** for API/library specifics. Optional API key for higher rate limits. |
+| **playwright** | stdio (`npx @playwright/mcp@latest`) | Real-browser automation to drive/test the **web app** (iamsports-app.vercel.app): sign-up, cold-start, click-throughs, screenshots. First run may need `npx playwright install chromium`. |
+
+**GitHub is NOT an MCP** — GitHub access is the `gh` CLI + git over SSH, not a
+configured server. Keep this table in sync whenever an MCP is added or removed.
+
 ## Commands
 
 ```bash
