@@ -7,7 +7,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack, router, useRootNavigationState } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, StyleSheet, View } from 'react-native';
 import 'react-native-reanimated';
 import { TERMS_VERSION } from '@/constants/legal';
 import NameCaptureSheet from './components/NameCaptureSheet';
@@ -39,7 +39,9 @@ function AuthGate() {
     if (!userId) {
       if (decidedForUserRef.current !== null) {
         decidedForUserRef.current = null;
-        router.replace('/login');
+        // Web gets the marketing landing as the front door; native goes straight
+        // to login (app-store users don't need the marketing page).
+        router.replace(Platform.OS === 'web' ? '/landing' : '/login');
       }
       setBooted(true);
       return;
@@ -187,6 +189,7 @@ export default function RootLayout() {
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="landing" options={{ headerShown: false }} />
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
           <Stack.Screen name="game" options={{ headerShown: false }} />
