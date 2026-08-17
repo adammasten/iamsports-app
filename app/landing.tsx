@@ -50,6 +50,7 @@ export default function Landing() {
   const narrow = width < 760;
 
   const goLogin = () => router.push('/login');
+  const goSignup = () => router.push({ pathname: '/login', params: { signup: '1' } });
   const scrollTo = (y: number) => scrollRef.current?.scrollTo({ y: y - 60, animated: true });
 
   // Column widths for the wrap-grids (percent-ish via flexBasis).
@@ -71,7 +72,7 @@ export default function Landing() {
               </>
             )}
             <Pressable onPress={goLogin} style={styles.navLoginBtn}><Text style={styles.navLoginTxt}>Log in</Text></Pressable>
-            <Pressable onPress={goLogin} style={styles.navCta}><Text style={styles.navCtaTxt}>Get started</Text></Pressable>
+            <Pressable onPress={goSignup} style={styles.navCta}><Text style={styles.navCtaTxt}>Get started</Text></Pressable>
           </View>
         </View>
       </View>
@@ -84,7 +85,7 @@ export default function Landing() {
             <Text style={styles.h1}>PROFESSIONAL TAGGING.{'\n'}<Text style={{ color: C.orange }}>WITHOUT THE PROFESSIONAL COST.</Text></Text>
             <Text style={styles.heroSub}>IamSports turns your phone into a film room. Tag game film courtside, build highlight reels in minutes, and share it all on a team wall your parents actually check.</Text>
             <View style={styles.heroBtns}>
-              <Pressable onPress={goLogin} style={styles.ctaOrange}><Text style={styles.ctaOrangeTxt}>Start free</Text></Pressable>
+              <Pressable onPress={goSignup} style={styles.ctaOrange}><Text style={styles.ctaOrangeTxt}>Start free</Text></Pressable>
               <Pressable onPress={() => scrollTo(howY.current)} style={styles.ctaOutline}><Text style={styles.ctaOutlineTxt}>See how it works</Text></Pressable>
             </View>
             <Text style={styles.heroFoot}>iPhone + web at launch. Your first game breakdown is free.</Text>
@@ -162,7 +163,7 @@ export default function Landing() {
                     </View>
                   ))}
                 </View>
-                <Pressable onPress={goLogin} style={[styles.planBtn, { backgroundColor: p.featured ? C.orange : C.ink }]}>
+                <Pressable onPress={goSignup} style={[styles.planBtn, { backgroundColor: p.featured ? C.orange : C.ink }]}>
                   <Text style={styles.planBtnTxt}>Get started</Text>
                 </Pressable>
               </View>
@@ -175,7 +176,7 @@ export default function Landing() {
           <View style={[styles.section, { alignItems: 'center' }]}>
             <Text style={[styles.h2, { color: '#fff', textAlign: 'center' }]}>YOUR NEXT GAME DESERVES A <Text style={{ color: C.orange }}>FILM ROOM</Text></Text>
             <Text style={[styles.body, { color: C.panelBlue, textAlign: 'center', maxWidth: 520, marginTop: 12 }]}>Free to start. Tag your first game tonight and see what your team&apos;s been missing.</Text>
-            <Pressable onPress={goLogin} style={[styles.ctaOrange, { marginTop: 24 }]}><Text style={styles.ctaOrangeTxt}>Start free</Text></Pressable>
+            <Pressable onPress={goSignup} style={[styles.ctaOrange, { marginTop: 24 }]}><Text style={styles.ctaOrangeTxt}>Start free</Text></Pressable>
           </View>
           <View style={styles.footer}>
             <View style={[styles.section, styles.footerInner, narrow && { flexDirection: 'column', gap: 8 }]}>

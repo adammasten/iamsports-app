@@ -1,13 +1,26 @@
 import { supabase } from '@/supabase';
 import * as Linking from 'expo-linking';
+import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
+// Login is the bridge between the (light) marketing landing and the (dark) app.
+// On WEB it matches the landing — cream/ink/orange — for a seamless hand-off from
+// iamsports.com; on NATIVE it stays dark to match the app you drop into. The
+// ?signup=1 param (from the landing's "Get started") opens the create-account form.
+const isWeb = Platform.OS === 'web';
+const DISPLAY = isWeb ? 'Barlow Condensed' : undefined;
+const BODY = isWeb ? 'Barlow' : undefined;
+const T = isWeb
+  ? { bg: '#FAF9F6', text: '#0E1B2C', sub: '#415062', border: '#E4E0D8', primary: '#F25C1F', ph: '#9aa0a8', onPrimary: '#fff' }
+  : { bg: '#000', text: '#fff', sub: '#aaa', border: '#333', primary: '#534AB7', ph: '#888888', onPrimary: '#fff' };
+
 export default function LoginScreen() {
+  const { signup } = useLocalSearchParams<{ signup?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(signup === '1');
   // Passwordless (magic-link + OTP) state. otpSent flips the UI to code entry.
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
@@ -67,7 +80,7 @@ export default function LoginScreen() {
         showsVerticalScrollIndicator={false}
       >
       <View style={styles.card}>
-      <Text style={styles.title}>🏀 IamSports</Text>
+      <Text style={styles.wordmark}>IAM<Text style={{ color: T.primary }}>SPORTS</Text></Text>
       {otpSent ? (
         <>
           <Text style={styles.subtitle}>Enter your code</Text>
@@ -75,7 +88,7 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             placeholder="8-digit code"
-            placeholderTextColor="#888888"
+            placeholderTextColor={T.ph}
             value={otpCode}
             onChangeText={setOtpCode}
             keyboardType="number-pad"
@@ -95,11 +108,11 @@ export default function LoginScreen() {
         </>
       ) : (
         <>
-          <Text style={styles.subtitle}>{isSignUp ? 'Create account' : 'Welcome back'}</Text>
+          <Text style={styles.subtitle}>{isSignUp ? 'Create your account' : 'Welcome back, coach.'}</Text>
           <TextInput
             style={styles.input}
             placeholder="Email"
-            placeholderTextColor="#888888"
+            placeholderTextColor={T.ph}
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
@@ -108,7 +121,7 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             placeholder="Password"
-            placeholderTextColor="#888888"
+            placeholderTextColor={T.ph}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -136,26 +149,23 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#000' },
+  screen: { flex: 1, backgroundColor: T.bg },
   container: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  // Centered, capped-width card. On web this stops the fields stretching the whole
-  // browser; on phones it's just full width (maxWidth never reached) so nothing changes.
+  // Centered, capped-width card. Web gets a white card (matches the landing); native
+  // stays chrome-less on the dark screen so it never reaches the cap on a phone.
   card: {
     width: '100%', maxWidth: 400, alignSelf: 'center', alignItems: 'center',
-    ...Platform.select({
-      web: { backgroundColor: '#0d0d10', borderWidth: 1, borderColor: '#222', borderRadius: 16, padding: 32 },
-      default: {},
-    }),
+    ...(isWeb ? { backgroundColor: '#fff', borderWidth: 1, borderColor: T.border, borderRadius: 18, padding: 32 } : {}),
   },
-  title: { fontSize: 36, marginBottom: 8, color: '#fff', textAlign: 'center' },
-  subtitle: { fontSize: 18, color: '#aaa', marginBottom: 32, textAlign: 'center' },
-  input: { width: '100%', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 14, marginBottom: 12, fontSize: 16, color: '#FFFFFF' },
-  button: { width: '100%', backgroundColor: '#534AB7', borderRadius: 8, padding: 16, alignItems: 'center', marginBottom: 16 },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  toggle: { color: '#534AB7', fontSize: 14 },
-  hint: { color: '#aaa', fontSize: 13, marginBottom: 16, textAlign: 'center' },
-  divider: { marginVertical: 16 },
-  dividerText: { color: '#666', fontSize: 13 },
-  secondaryButton: { width: '100%', borderWidth: 1, borderColor: '#534AB7', borderRadius: 8, padding: 16, alignItems: 'center' },
-  secondaryButtonText: { color: '#534AB7', fontSize: 16, fontWeight: '600' },
+  wordmark: { fontFamily: DISPLAY, fontStyle: 'italic', fontWeight: '800', fontSize: 34, letterSpacing: -0.5, color: T.text, marginBottom: 6 },
+  subtitle: { fontFamily: BODY, fontSize: 16, color: T.sub, marginBottom: 28, textAlign: 'center' },
+  input: { width: '100%', borderWidth: 1, borderColor: T.border, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 12, fontSize: 16, color: T.text, backgroundColor: isWeb ? '#fff' : 'transparent', fontFamily: BODY },
+  button: { width: '100%', backgroundColor: T.primary, borderRadius: 10, padding: 15, alignItems: 'center', marginBottom: 14 },
+  buttonText: { color: T.onPrimary, fontSize: 16, fontWeight: '700', fontFamily: BODY },
+  toggle: { color: T.primary, fontSize: 14, fontWeight: '600', fontFamily: BODY, marginBottom: 4, textAlign: 'center' },
+  hint: { color: T.sub, fontSize: 13, marginBottom: 16, textAlign: 'center', fontFamily: BODY },
+  divider: { marginVertical: 14 },
+  dividerText: { color: T.sub, fontSize: 13, fontFamily: BODY },
+  secondaryButton: { width: '100%', borderWidth: 1.5, borderColor: isWeb ? T.text : T.primary, borderRadius: 10, padding: 14, alignItems: 'center' },
+  secondaryButtonText: { color: isWeb ? T.text : T.primary, fontSize: 15, fontWeight: '700', fontFamily: BODY },
 });
