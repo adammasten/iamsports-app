@@ -66,6 +66,7 @@ export default function LoginScreen() {
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
       >
+      <View style={styles.card}>
       <Text style={styles.title}>🏀 IamSports</Text>
       {otpSent ? (
         <>
@@ -128,6 +129,7 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </>
       )}
+      </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -136,8 +138,17 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000' },
   container: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  title: { fontSize: 36, marginBottom: 8, color: '#fff' },
-  subtitle: { fontSize: 18, color: '#aaa', marginBottom: 32 },
+  // Centered, capped-width card. On web this stops the fields stretching the whole
+  // browser; on phones it's just full width (maxWidth never reached) so nothing changes.
+  card: {
+    width: '100%', maxWidth: 400, alignSelf: 'center', alignItems: 'center',
+    ...Platform.select({
+      web: { backgroundColor: '#0d0d10', borderWidth: 1, borderColor: '#222', borderRadius: 16, padding: 32 },
+      default: {},
+    }),
+  },
+  title: { fontSize: 36, marginBottom: 8, color: '#fff', textAlign: 'center' },
+  subtitle: { fontSize: 18, color: '#aaa', marginBottom: 32, textAlign: 'center' },
   input: { width: '100%', borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 14, marginBottom: 12, fontSize: 16, color: '#FFFFFF' },
   button: { width: '100%', backgroundColor: '#534AB7', borderRadius: 8, padding: 16, alignItems: 'center', marginBottom: 16 },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
