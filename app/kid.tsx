@@ -52,6 +52,7 @@ export default function KidWallScreen() {
   const [attaching, setAttaching] = useState(false);
   const [guardians, setGuardians] = useState<{ user_id: string; name: string; relationship: string; is_you: boolean }[]>([]);
   const [guardianCode, setGuardianCode] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [codeLastUsed, setCodeLastUsed] = useState<string | null>(null);
   const [guardiansOpen, setGuardiansOpen] = useState(false); // collapsed by default so the wall gets the room
   // Team side of "who can see this kid" — coaches per active team (kid_team_audience).
@@ -168,6 +169,17 @@ export default function KidWallScreen() {
   function shareGuardianCode() {
     if (!guardianCode) return;
     Share.share({ message: `Add me as ${name || 'my kid'}’s guardian on IamSports — code: ${guardianCode}` });
+  }
+
+  // Copy JUST the code (not the whole share message). Web uses the browser
+  // clipboard (matches roster.tsx); native falls back to sharing only the code.
+  async function copyGuardianCode() {
+    if (!guardianCode) return;
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+      try { await navigator.clipboard.writeText(guardianCode); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+    } else {
+      Share.share({ message: guardianCode });
+    }
   }
 
   function resetGuardianCode() {
@@ -699,10 +711,16 @@ export default function KidWallScreen() {
                   <Text style={styles.gCodeLabel}>Invite code</Text>
                   <Text style={styles.gCodeBig}>{guardianCode}</Text>
                 </View>
-                <TouchableOpacity style={styles.gShareBtn} onPress={shareGuardianCode}>
-                  <Ionicons name="share-outline" size={15} color="#fff" />
-                  <Text style={styles.gShareText}>Share</Text>
-                </TouchableOpacity>
+                <View style={styles.gCodeActions}>
+                  <TouchableOpacity style={styles.gCopyBtn} onPress={copyGuardianCode}>
+                    <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={15} color="#fff" />
+                    <Text style={styles.gShareText}>{copied ? 'Copied' : 'Copy'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.gShareBtn} onPress={shareGuardianCode}>
+                    <Ionicons name="share-outline" size={15} color="#fff" />
+                    <Text style={styles.gShareText}>Share</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
               <Text style={styles.gHint}>Share with a co-parent or grandparents so they can see {name || 'your kid'}’s film. Up to 4 guardians.</Text>
               <Text style={[styles.gHint, { color: codeLastUsed ? '#7cc47c' : '#c9a24b', marginTop: 6 }]}>
@@ -943,6 +961,8 @@ const styles = StyleSheet.create({
   gCodeLabel: { color: '#8b83e6', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   gCodeBig: { color: '#fff', fontSize: 26, fontWeight: '800', letterSpacing: 4, marginTop: 2 },
   gShareBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#534AB7', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8 },
+  gCodeActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  gCopyBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#2b2740', borderWidth: 1, borderColor: '#534AB7', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8 },
   gShareText: { color: '#fff', fontWeight: '700' },
   gHint: { color: '#888', fontSize: 12, lineHeight: 16, marginTop: 8 },
   gReset: { color: '#8b83e6', fontWeight: '700', fontSize: 13, marginTop: 10 },
