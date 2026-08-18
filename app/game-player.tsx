@@ -59,6 +59,9 @@ export default function GamePlayerScreen() {
   const retryRef = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
+  // True only once the ⛶ button has rotated us to landscape, so we restore portrait
+  // on exit ONLY when we actually changed it (a redundant lock mid-nav is glitchy).
+  const didLockLandscapeRef = useRef(false);
 
   const player = useVideoPlayer(null, p => { p.timeUpdateEventInterval = 0.25; });
   const { currentTime } = useEvent(player, 'timeUpdate', { currentTime: 0, currentLiveTimestamp: null, currentOffsetFromLive: null, bufferedPosition: 0 });
@@ -88,15 +91,20 @@ export default function GamePlayerScreen() {
     })();
   }, [gameId, shareId]);
 
-  // Restore portrait when leaving the player (the ⛶ button may have gone landscape).
+  // Leaving the player: STOP playback before the native video surface is torn down —
+  // tearing it down mid-play is what caused the "distorted freeze" on back. Then
+  // restore portrait, but ONLY if the ⛶ button actually rotated us to landscape.
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       if (retryTimer.current) clearTimeout(retryTimer.current);
-      if (Platform.OS !== 'web') ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      try { player.pause(); } catch { /* already released */ }
+      if (Platform.OS !== 'web' && didLockLandscapeRef.current) {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      }
     };
-  }, []);
+  }, [player]);
 
   // Load the current video: cached file if present, else a freshly-minted signed URL.
   const loadCurrent = useCallback(async (preferCache: boolean) => {
@@ -177,7 +185,9 @@ export default function GamePlayerScreen() {
       } catch { /* fullscreen denied */ }
       return;
     }
-    ScreenOrientation.lockAsync(isLandscape ? ScreenOrientation.OrientationLock.PORTRAIT_UP : ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+    const goLandscape = !isLandscape;
+    didLockLandscapeRef.current = goLandscape;
+    ScreenOrientation.lockAsync(goLandscape ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
   }, [isLandscape]);
   // Keep the ⛶/⤡ icon in sync with the browser's actual fullscreen state.
   useEffect(() => {
@@ -187,6 +197,8 @@ export default function GamePlayerScreen() {
     return () => document.removeEventListener('fullscreenchange', onFs);
   }, []);
   const retryNow = useCallback(() => { retryRef.current = 0; setLoadError(false); setVideoReady(false); loadCurrent(false); }, [loadCurrent]);
+  // Pause before navigating away so playback stops cleanly (see unmount cleanup).
+  const leave = useCallback(() => { try { player.pause(); } catch {} goBackOrHome(); }, [player]);
 
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
   const cur = videos[currentIndex];
@@ -225,7 +237,7 @@ export default function GamePlayerScreen() {
       {controls && (
         <>
           <View style={[styles.top, { paddingTop: insets.top + 8, paddingLeft: insets.left + 18, paddingRight: insets.right + 18 }]} pointerEvents="box-none">
-            <Pressable onPress={goBackOrHome} hitSlop={12}><Text style={styles.back}>‹</Text></Pressable>
+            <Pressable onPress={leave} hitSlop={12}><Text style={styles.back}>‹</Text></Pressable>
             <View style={{ flex: 1 }}>
               <Text style={styles.topTitle} numberOfLines={1}>{title}</Text>
               <Text style={styles.topSub} numberOfLines={1}>{cur ? `${cur.label} · video ${currentIndex + 1} of ${videos.length}` : ''}</Text>

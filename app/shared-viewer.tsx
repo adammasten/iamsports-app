@@ -98,13 +98,20 @@ export default function SharedViewerScreen() {
   const status = useEvent(player, 'statusChange', { status: 'idle' as string, oldStatus: undefined, error: undefined });
   const ready = status.status === 'readyToPlay';
 
+  // See game-player: stop playback before the native video surface is torn down
+  // (prevents the "distorted freeze" on back), and only restore portrait if we
+  // actually rotated to landscape via the ⛶ button.
+  const didLockLandscapeRef = useRef(false);
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      if (Platform.OS !== 'web') ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      try { player.pause(); } catch { /* released */ }
+      if (Platform.OS !== 'web' && didLockLandscapeRef.current) {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      }
     };
-  }, []);
+  }, [player]);
 
   // Mint a signed URL from the storage path and load it (also the tap-to-retry path).
   const loadSource = useCallback(async () => {
@@ -153,6 +160,8 @@ export default function SharedViewerScreen() {
   const onScrubStart = useCallback(() => { wasPlayingRef.current = isPlaying; try { player.pause(); } catch {} setScrubbing(true); }, [isPlaying, player]);
   const onScrubEnd = useCallback(() => { setScrubbing(false); if (wasPlayingRef.current) { try { player.play(); } catch {} } }, [player]);
   const togglePlay = useCallback(() => { try { if (isPlaying) player.pause(); else player.play(); } catch {} }, [player, isPlaying]);
+  // Pause before navigating away so playback stops cleanly (see unmount cleanup).
+  const leave = useCallback(() => { try { player.pause(); } catch {} goBackOrHome(); }, [player]);
   const toggleFullscreen = useCallback(() => {
     if (Platform.OS === 'web') {
       try {
@@ -163,7 +172,9 @@ export default function SharedViewerScreen() {
       } catch { /* fullscreen denied */ }
       return;
     }
-    ScreenOrientation.lockAsync(isLandscape ? ScreenOrientation.OrientationLock.PORTRAIT_UP : ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+    const goLandscape = !isLandscape;
+    didLockLandscapeRef.current = goLandscape;
+    ScreenOrientation.lockAsync(goLandscape ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
   }, [isLandscape]);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -204,7 +215,7 @@ export default function SharedViewerScreen() {
       {controls && (
         <>
           <View style={[styles.top, { paddingTop: insets.top + 8, paddingLeft: insets.left + 18, paddingRight: insets.right + 18 }]} pointerEvents="box-none">
-            <Pressable onPress={goBackOrHome} hitSlop={12}><Text style={styles.back}>‹</Text></Pressable>
+            <Pressable onPress={leave} hitSlop={12}><Text style={styles.back}>‹</Text></Pressable>
             <View style={{ flex: 1 }}><Text style={styles.topTitle} numberOfLines={1}>{title || 'Video'}</Text></View>
             {!!shareId && (
               <Pressable onPress={saveToMyFilm} disabled={saving || saved} hitSlop={10}>
