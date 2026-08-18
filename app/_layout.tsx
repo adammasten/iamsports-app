@@ -22,7 +22,7 @@ export const unstable_settings = {
 // the SINGLE routing chokepoint — no other file should call router.replace for
 // auth/landing decisions.
 function AuthGate() {
-  const { sessionResolved, userId, membershipsLoaded, userTeams } = useTeamContext();
+  const { sessionResolved, userId, membershipsLoaded, kidsLoaded, userTeams, userKids } = useTeamContext();
   const navState = useRootNavigationState();
   const pathname = usePathname();
   const colorScheme = useColorScheme();
@@ -53,30 +53,33 @@ function AuthGate() {
       return;
     }
 
-    // Logged in: wait for memberships before deciding. membershipsLoaded is
-    // derived from userId in context, so it's reliably false until THIS user's
-    // memberships have loaded (no stale-loaded race). We therefore NEVER reach
-    // the userTeams.length check while still loading.
-    if (!membershipsLoaded) return;
+    // Logged in: wait for BOTH memberships and kids before deciding. Both flags are
+    // derived from userId in context, so they're reliably false until THIS user's
+    // data has loaded (no stale-loaded race). We therefore NEVER reach the
+    // teams/kids check below while still loading — critical so a guardian who's
+    // only claimed a kid isn't mistaken for empty and sent to onboarding.
+    if (!membershipsLoaded || !kidsLoaded) return;
 
     // Decide exactly once per user (cold start or fresh login).
     if (decidedForUserRef.current !== userId) {
       decidedForUserRef.current = userId;
-      if (userTeams.length === 0) {
-        // Brand-new user: zero confirmed memberships → onboarding.
+      if (userTeams.length === 0 && userKids.length === 0) {
+        // TRULY new user: no confirmed team memberships AND no linked kids → onboarding.
+        // A guardian who's only claimed a child (kid, no team) has userKids > 0, so
+        // they skip this and land straight on home — no Welcome screen every launch.
         // TODO(pending-invites): when the invite system exists, branch here — a
         // user with pending invites (and no confirmed memberships) should go to
         // an invite-accept screen. Until then, pending-invite-only users
         // intentionally fall through to onboarding.
         router.replace('/onboarding');   // STUB screen — real onboarding is a separate task
       } else {
-        // >=1 confirmed membership → into the working app. (Role-aware home
-        // ordering is a later task; everyone lands here for now.)
+        // Has a confirmed team OR a linked kid → into the working app. (Role-aware
+        // home ordering is a later task; everyone lands here for now.)
         router.replace('/select-team');
       }
     }
     setBooted(true);
-  }, [navState?.key, sessionResolved, userId, membershipsLoaded, userTeams.length, pathname]);
+  }, [navState?.key, sessionResolved, userId, membershipsLoaded, kidsLoaded, userTeams.length, userKids.length, pathname]);
 
   if (!booted) {
     return (
