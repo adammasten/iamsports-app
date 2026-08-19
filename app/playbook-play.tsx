@@ -5,7 +5,7 @@
 import PlayPlayer from '@/components/PlayPlayer';
 import { useTeamContext } from '@/context';
 import { LINK_TYPE_LABEL, fetchPlay, fetchPlayClips, unlinkClip, type PlayClip, type PlayFull } from '@/lib/core/playbook/filmLinks';
-import { fetchCoachTeams } from '@/lib/core/playbook/installs';
+import { fetchCoachTeams, savePlay, type CoachTeam } from '@/lib/core/playbook/installs';
 import { tagColor } from '@/lib/core/playbook/tags';
 import { goBackOrHome } from '@/lib/nav';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -18,8 +18,12 @@ export default function PlayDetail() {
   const { userId } = useTeamContext();
   const [play, setPlay] = useState<PlayFull | null>(null);
   const [clips, setClips] = useState<PlayClip[]>([]);
+  const [coachTeams, setCoachTeams] = useState<CoachTeam[]>([]);
   const [isCoach, setIsCoach] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyBusy, setCopyBusy] = useState<string | null>(null);
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
   const loadClips = useCallback(() => { if (playId) fetchPlayClips(playId).then(setClips).catch(() => {}); }, [playId]);
 
@@ -30,7 +34,7 @@ export default function PlayDetail() {
       .then(p => {
         if (!alive) return;
         setPlay(p);
-        if (userId) fetchCoachTeams(userId).then(ts => { if (alive) setIsCoach(ts.some(t => t.id === p.teamId)); }).catch(() => {});
+        if (userId) fetchCoachTeams(userId).then(ts => { if (alive) { setCoachTeams(ts); setIsCoach(ts.some(t => t.id === p.teamId)); } }).catch(() => {});
       })
       .catch(e => { if (alive) setErr(e?.message ?? String(e)); });
     return () => { alive = false; };
@@ -44,6 +48,19 @@ export default function PlayDetail() {
     router.push({ pathname: '/shared-viewer', params: { title: c.title, storagePath: c.storagePath, startTime: String(c.start), endTime: String(c.end) } });
   }
   async function remove(linkId: string) { try { await unlinkClip(linkId); loadClips(); } catch (e: any) { setErr(e?.message ?? String(e)); } }
+
+  // Copy the DIAGRAM (doc + tags) to another team — NOT the linked film. Each
+  // copy is an independent play the other team can tweak on its own.
+  async function copyTo(t: CoachTeam) {
+    if (!play?.doc || !userId) return;
+    setCopyBusy(t.id); setCopyMsg(null); setErr(null);
+    try {
+      await savePlay({ teamId: t.id, doc: play.doc, tags: play.tags, userId });
+      setCopyMsg(`Copied to ${t.name}. (Its film starts fresh.)`);
+    } catch (e: any) { setErr(e?.message ?? String(e)); }
+    finally { setCopyBusy(null); }
+  }
+  const otherTeams = play ? coachTeams.filter(t => t.id !== play.teamId) : [];
 
   return (
     <View style={styles.root}>
@@ -73,6 +90,28 @@ export default function PlayDetail() {
             </View>
             {play.doc?.note ? (
               <View style={styles.noteBox}><Text style={styles.noteLabel}>COACH’S NOTES</Text><Text style={styles.noteTxt}>{play.doc.note}</Text></View>
+            ) : null}
+
+            {/* Copy to another team */}
+            {isCoach && otherTeams.length > 0 ? (
+              <View style={styles.copyBox}>
+                <Pressable onPress={() => setCopyOpen(o => !o)}>
+                  <Text style={styles.copyToggle}>📋  Copy this play to another team  {copyOpen ? '▲' : '▼'}</Text>
+                </Pressable>
+                {copyOpen ? (
+                  <>
+                    <Text style={styles.copyHint}>Copies the diagram, tags & notes — not the film. The other team gets its own editable copy.</Text>
+                    <View style={styles.copyTeams}>
+                      {otherTeams.map(t => (
+                        <Pressable key={t.id} style={styles.copyTeamBtn} onPress={() => copyTo(t)} disabled={copyBusy === t.id}>
+                          <Text style={styles.copyTeamTxt}>{copyBusy === t.id ? 'Copying…' : `→ ${t.name}`}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </>
+                ) : null}
+                {copyMsg ? <Text style={styles.copyMsg}>✓ {copyMsg}</Text> : null}
+              </View>
             ) : null}
 
             {/* Film */}
@@ -122,6 +161,13 @@ const styles = StyleSheet.create({
   noteBox: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 10, padding: 12, gap: 6, marginTop: 12 },
   noteLabel: { color: '#ff6a2c', fontSize: 10.5, fontWeight: '800', letterSpacing: 1.2 },
   noteTxt: { color: '#c7d2dc', fontSize: 13.5, lineHeight: 19 },
+  copyBox: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 12, padding: 14, marginTop: 14, gap: 8 },
+  copyToggle: { color: '#ff6a2c', fontSize: 14, fontWeight: '800' },
+  copyHint: { color: '#9db0bd', fontSize: 12.5, lineHeight: 18 },
+  copyTeams: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  copyTeamBtn: { backgroundColor: '#0e1b2c', borderColor: '#534AB7', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  copyTeamTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
+  copyMsg: { color: '#3ec48c', fontSize: 13, fontWeight: '700' },
   filmHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 26, marginBottom: 10 },
   filmTitle: { color: '#f1f4f6', fontSize: 18, fontWeight: '800' },
   linkBtn: { backgroundColor: '#ff6a2c', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
