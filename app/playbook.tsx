@@ -7,7 +7,8 @@ import { fetchInstalls, type InstallSummary } from '@/lib/core/playbook/installs
 import { goBackOrHome } from '@/lib/nav';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import WebTopNav from './components/WebTopNav';
 
 export default function PlaybookHome() {
   const params = useLocalSearchParams();
@@ -25,13 +26,25 @@ export default function PlaybookHome() {
   }, [teamId]);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <View style={styles.root}>
+      {Platform.OS === 'web' ? <WebTopNav /> : null}
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Pressable onPress={() => goBackOrHome()} hitSlop={8} style={styles.back}>
         <Text style={styles.backTxt}>← Back</Text>
       </Pressable>
       <Text style={styles.eyebrow}>{teamName ? teamName.toUpperCase() : 'PLAYBOOK'}</Text>
       <Text style={styles.h1}>Installs</Text>
       <Text style={styles.sub}>What your coaches have published. Tap one to run the plays.</Text>
+
+      {teamId ? (
+        <Pressable
+          style={styles.allBtn}
+          onPress={() => router.push({ pathname: '/playbook-all', params: { teamId, teamName: teamName ?? '' } })}
+        >
+          <Text style={styles.allBtnText}>📋  Review all plays</Text>
+          <Text style={styles.allBtnSub}>Every play this team runs — all weeks, one place →</Text>
+        </Pressable>
+      ) : null}
 
       {err ? (
         <View style={styles.errBox}><Text style={styles.errTxt}>Couldn’t load installs: {err}</Text></View>
@@ -57,13 +70,18 @@ export default function PlaybookHome() {
         ))
       )}
       <View style={{ height: 40 }} />
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#0e1b2c' },
   screen: { flex: 1, backgroundColor: '#0e1b2c' },
   content: { padding: 20, maxWidth: 720, width: '100%', alignSelf: 'center' },
+  allBtn: { backgroundColor: '#16232f', borderColor: '#ff6a2c', borderWidth: 1, borderRadius: 14, padding: 16, marginBottom: 18, gap: 3 },
+  allBtnText: { color: '#ff6a2c', fontSize: 16, fontWeight: '800' },
+  allBtnSub: { color: '#9db0bd', fontSize: 13 },
   back: { alignSelf: 'flex-start', paddingVertical: 6 },
   backTxt: { color: '#ff6a2c', fontSize: 14, fontWeight: '700' },
   eyebrow: { color: '#ff6a2c', fontSize: 12, fontWeight: '800', letterSpacing: 1.6, marginTop: 8 },

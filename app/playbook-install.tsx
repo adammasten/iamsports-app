@@ -7,7 +7,8 @@ import { fetchInstallDetail, type InstallDetail } from '@/lib/core/playbook/inst
 import { goBackOrHome } from '@/lib/nav';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import WebTopNav from './components/WebTopNav';
 
 export default function InstallDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -24,7 +25,9 @@ export default function InstallDetailScreen() {
   }, [id]);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <View style={styles.root}>
+      {Platform.OS === 'web' ? <WebTopNav /> : null}
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Pressable onPress={() => goBackOrHome()} hitSlop={8} style={styles.back}>
         <Text style={styles.backTxt}>← Installs</Text>
       </Pressable>
@@ -59,11 +62,13 @@ export default function InstallDetailScreen() {
           <View style={{ height: 40 }} />
         </>
       )}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#0e1b2c' },
   screen: { flex: 1, backgroundColor: '#0e1b2c' },
   content: { padding: 20, maxWidth: 640, width: '100%', alignSelf: 'center' },
   back: { alignSelf: 'flex-start', paddingVertical: 6 },
