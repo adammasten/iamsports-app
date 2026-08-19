@@ -41,6 +41,14 @@ function fmt(s: number) {
   return `${m}:${sec < 10 ? '0' : ''}${sec}`;
 }
 
+// Display order WITHIN a bundle: action first, player last. Adam's rule — a bundle
+// should always read "Made 2 · Lars" no matter whether he tapped the player or the
+// event first. Actions are offense/defense/plays; players sort to the end. Stable,
+// so multiple actions keep their tap order among themselves.
+function orderTags<T extends { category: string }>(tags: T[]): T[] {
+  return [...tags].sort((a, b) => (a.category === 'players' ? 1 : 0) - (b.category === 'players' ? 1 : 0));
+}
+
 export default function TaggingStudioWeb() {
   const { userId } = useTeamContext();
   const params = useLocalSearchParams();
@@ -232,6 +240,10 @@ export default function TaggingStudioWeb() {
     setBuilding([]);
   }, [building, editingId]);
 
+  const removeStagedBundle = useCallback((idx: number) => {
+    setStagedBundles(b => b.filter((_, i) => i !== idx));
+  }, []);
+
   const commitClip = useCallback(async () => {
     if (saving || !userId) return;
     const useMarks = markIn != null && markOut != null && markOut > markIn;
@@ -399,6 +411,16 @@ export default function TaggingStudioWeb() {
                   {inPct != null ? <View style={[styles.markTick, { left: `${inPct}%`, backgroundColor: C.made }]} /> : null}
                   {outPct != null ? <View style={[styles.markTick, { left: `${outPct}%`, backgroundColor: C.poe }]} /> : null}
                 </View>
+                {/* Clip timeline — every saved clip as a segment under the track, so you
+                    can see WHERE the clips already are while scrubbing (parity with the
+                    mobile tagger). Highlight/POE clips glow gold; the clip you're currently
+                    inside brightens. Non-interactive so it never steals the scrub gesture. */}
+                {duration > 0 ? clips.map(c => {
+                  const left = (c.start / duration) * 100;
+                  const w = Math.max(0.4, ((c.end - c.start) / duration) * 100);
+                  const active = currentTime >= c.start && currentTime <= c.end;
+                  return <View key={c.id} pointerEvents="none" style={[styles.clipMarker, { left: `${left}%`, width: `${w}%`, backgroundColor: (c.starred || c.poe) ? C.star : C.accent, opacity: active ? 1 : 0.5 }]} />;
+                }) : null}
                 <View style={[styles.scrubHead, { left: `${Math.round(progress * 100)}%` }]} />
               </View>
             </GestureDetector>
@@ -430,10 +452,31 @@ export default function TaggingStudioWeb() {
           {/* build tray */}
           <View style={[styles.tray, building.length > 0 && { borderTopColor: C.accent }]}>
             <Text style={styles.trayLabel}>{editingId ? 'EDITING CLIP' : groupCount > 0 ? `BUILDING CLIP · ${groupCount} GROUP${groupCount === 1 ? '' : 'S'}` : 'BUILDING CLIP'}</Text>
+            {/* Running tally of already-staged groups, so you never forget what's in
+                the clip after "+ Add group" clears the build row. Each is removable. */}
+            {stagedBundles.length > 0 ? (
+              <View style={styles.stagedList}>
+                {stagedBundles.map((grp, gi) => (
+                  <View key={gi} style={styles.stagedRow}>
+                    <Text style={styles.stagedNum}>{gi + 1}</Text>
+                    <View style={styles.stagedTags}>
+                      {orderTags(grp).map((b, i) => (
+                        <View key={i} style={[styles.miniTag, { backgroundColor: CAT_COLOR[b.category] ?? C.dim }]}>
+                          <Text style={styles.miniTxt}>{b.name}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <Pressable focusable={false} onPress={() => removeStagedBundle(gi)} hitSlop={6}>
+                      <Text style={styles.stagedRemove}>✕</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            ) : null}
             <View style={styles.trayChips}>
               {building.length === 0
                 ? <Text style={styles.trayHint}>Tap an event, then a player — stack as many as you want</Text>
-                : building.map((b, i) => (
+                : orderTags(building).map((b, i) => (
                   <View key={b.id} style={styles.trayRow}>
                     {i > 0 ? <Text style={styles.plus}>+</Text> : null}
                     <View style={styles.builtChip}>
@@ -496,7 +539,7 @@ export default function TaggingStudioWeb() {
                   <View key={gi} style={styles.clipGroup}>
                     {c.groups.length > 1 ? <Text style={styles.clipGroupNum}>{gi + 1}</Text> : null}
                     <View style={styles.clipTags}>
-                      {g.map((t, i) => (
+                      {orderTags(g).map((t, i) => (
                         <View key={i} style={[styles.miniTag, { backgroundColor: CAT_COLOR[t.category] ?? C.dim }]}>
                           <Text style={styles.miniTxt}>{t.name}</Text>
                         </View>
@@ -539,6 +582,12 @@ const styles = StyleSheet.create({
   scrubHead: { position: 'absolute', width: 15, height: 15, borderRadius: 8, backgroundColor: '#fff', marginLeft: -7, top: '50%', marginTop: -7.5 },
   inOutBand: { position: 'absolute', top: 0, bottom: 0, backgroundColor: 'rgba(108,92,231,0.35)', borderRadius: 3 },
   markTick: { position: 'absolute', width: 3, top: -3, bottom: -3, marginLeft: -1.5, borderRadius: 2 },
+  clipMarker: { position: 'absolute', bottom: 0, height: 4, borderRadius: 2 },
+  stagedList: { gap: 5, marginBottom: 8 },
+  stagedRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  stagedNum: { width: 16, textAlign: 'center', color: C.faint, fontWeight: '800', fontSize: 12 },
+  stagedTags: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  stagedRemove: { color: C.dim, fontSize: 13, fontWeight: '800', paddingHorizontal: 4 },
   transport: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
   tBtn: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 8, height: 32, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
   tBtnTxt: { color: C.text, fontSize: 13, fontWeight: '700' },
