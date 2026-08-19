@@ -92,8 +92,11 @@ export default function TaggingOverlayScreen() {
   // of selected tags. Each Add attaches it as a bundle to the open clip; a new
   // window (Mark Start/End) starts a fresh clip. Star/POE are clip-level flags.
   const [building, setBuilding] = useState<string[]>([]);
-  const [openClipId, setOpenClipId] = useState<string | null>(null);
-  const [bundleCount, setBundleCount] = useState(0);
+  // Build-then-commit: `building` is the current group of tags. "Add group" pushes
+  // it onto stagedBundles (a LOCAL staging tray — nothing hits the DB yet). "Save
+  // clip" commits the whole clip (window + all bundles + clip-level ★/POE/period)
+  // in one batch, then resets. Replaces the old commit-on-every-Add model.
+  const [stagedBundles, setStagedBundles] = useState<string[][]>([]);
   const [isStar, setIsStar] = useState(false);
   const [isPoe, setIsPoe] = useState(false);
   const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [] });
@@ -437,10 +440,13 @@ export default function TaggingOverlayScreen() {
 
   const videoReady = statusEvent.status === 'readyToPlay';
   const retriesExhausted = (statusEvent.status === 'error' && retryCountRef.current >= 3) || signFailed;
-  // Add-as-you-go: you can Add once the current group has tags AND a clip exists
-  // or a valid Start+End window is marked (no auto-window — an end is required).
+  // Build-then-commit: build tags anytime. "Add group" needs tags in the current
+  // group; "Save clip" needs a valid Start+End window AND at least one group
+  // (staged, or the current un-added one).
   const hasWindow = startTime !== null && endTime !== null && endTime > startTime;
-  const canSave = building.length > 0 && !saving && videoReady && (openClipId !== null || hasWindow);
+  const groupCount = stagedBundles.length + (building.length > 0 ? 1 : 0);
+  const canAddGroup = building.length > 0 && !saving && videoReady;
+  const canSave = hasWindow && groupCount > 0 && !saving && videoReady;
 
   // Highlight ★ button scale-pulse — fires only on enable (un-lit → lit).
   // Coaches frequently miss this button, so the pulse + larger size + label
@@ -581,59 +587,50 @@ export default function TaggingOverlayScreen() {
   const activeClips = existingClips.filter(c => currentTime >= c.start && currentTime <= c.end);
   const activeTagNames = Array.from(new Set(activeClips.flatMap(c => c.tags.map(t => t.name))));
 
-  // Add-as-you-go (identical to the web tagger). Each Add attaches the current
-  // GROUP (`building`) as a bundle to the open clip. First Add creates the clip
-  // (group 1); with a Start/End window it stays open so the next Add stacks
-  // group 2, 3… on the SAME clip. No window → auto-window (−8s/+3s), one clip
-  // per Add. The bundle_number contract (clip-level/period/star/POE = 0, groups
-  // = 1,2,3…) is what app/export.tsx's clipMatchesGroup relies on.
+  // Stage the current group as a bundle and start a fresh group. LOCAL only — no
+  // DB write. ★/POE are per-CLIP (applied at Save), so they are NOT cleared here.
+  function addGroup() {
+    if (building.length === 0) return;
+    setStagedBundles(b => [...b, building]);
+    setBuilding([]);
+  }
+
+  // Commit the whole clip at once: the Start+End window, every bundle (staged +
+  // the current un-added group), and the clip-level ★/POE/period. Then reset for
+  // the next clip. The bundle_number contract (clip-level = 0, groups = 1,2,3…) is
+  // what app/export.tsx's clipMatchesGroup relies on — preserved here.
   async function saveClip() {
-    if (building.length === 0 || saving) return;
+    if (saving) return;
     if (!userId) { Alert.alert('Not signed in'); return; }
-    const useMarks = startTime !== null && endTime !== null && endTime > startTime;
-    // A clip REQUIRES an explicit Start + End window — no auto-window, no clips
-    // without an end time. (Adding another group reuses the open clip's window.)
-    if (openClipId === null && !useMarks) {
-      Alert.alert('Mark the clip', 'Tap Mark Start and Mark End to set the clip first.');
-      return;
-    }
-    const groupTagIds = [...building];
+    if (!hasWindow) { Alert.alert('Mark the clip', 'Tap Mark Start and Mark End to set the clip window first.'); return; }
+    // Every group for this clip: what's staged, plus the current group if it has tags.
+    const bundles = [...stagedBundles, ...(building.length > 0 ? [building] : [])];
+    if (bundles.length === 0) { Alert.alert('Add a tag', 'Pick at least one tag before saving.'); return; }
     setSaving(true);
 
-    let targetId = openClipId;
-    let bundleNum: number;
-    if (targetId === null) {
-      const { data: clip, error: clipError } = await supabase
-        .from('clips')
-        .insert({ video_id: videoId, team_id: tagTeamId, created_by_user_id: userId, start_time: startTime as number, end_time: endTime as number, note: '' })
-        .select().single();
-      if (clipError || !clip) { Alert.alert('Error saving clip', clipError?.message ?? 'Could not save clip'); setSaving(false); return; }
-      targetId = clip.id;
-      setOpenClipId(clip.id); // keep the windowed clip open for more groups
-      bundleNum = 1;
-      setBundleCount(1);
-    } else {
-      bundleNum = bundleCount + 1;
-      setBundleCount(bundleNum);
-    }
+    const { data: clip, error: clipError } = await supabase
+      .from('clips')
+      .insert({ video_id: videoId, team_id: tagTeamId, created_by_user_id: userId, start_time: startTime as number, end_time: endTime as number, note: '' })
+      .select().single();
+    if (clipError || !clip) { Alert.alert('Error saving clip', clipError?.message ?? 'Could not save clip'); setSaving(false); return; }
 
-    // The built tags become one group at bundle N. Clip-level items (bundle 0) —
-    // the sticky game period + star + POE — ride along once, with the first group.
-    const rows: any[] = groupTagIds.map(tag_id => ({ clip_id: targetId, tag_id, bundle_number: bundleNum }));
-    if (bundleNum === 1) {
-      if (activePeriod) rows.push({ clip_id: targetId, tag_id: activePeriod, bundle_number: 0 });
-      if (isStar && specialTagIds.highlight) rows.push({ clip_id: targetId, tag_id: specialTagIds.highlight, bundle_number: 0 });
-      if (isPoe && specialTagIds.poe) rows.push({ clip_id: targetId, tag_id: specialTagIds.poe, bundle_number: 0 });
-    }
+    const rows: any[] = [];
+    bundles.forEach((grp, i) => grp.forEach(tag_id => rows.push({ clip_id: clip.id, tag_id, bundle_number: i + 1 })));
+    // Clip-level (bundle 0): sticky game period + ★ + POE.
+    if (activePeriod) rows.push({ clip_id: clip.id, tag_id: activePeriod, bundle_number: 0 });
+    if (isStar && specialTagIds.highlight) rows.push({ clip_id: clip.id, tag_id: specialTagIds.highlight, bundle_number: 0 });
+    if (isPoe && specialTagIds.poe) rows.push({ clip_id: clip.id, tag_id: specialTagIds.poe, bundle_number: 0 });
     if (rows.length > 0) {
       const { error: tagError } = await supabase.from('clip_tags').insert(rows);
       if (tagError) { Alert.alert('Error saving tags', tagError.message); setSaving(false); return; }
     }
 
-    // Keep the Start/End window + open clip so the next Add stacks another group.
-    // Clear only the current group + star/POE. A new window / Mark Start/End
-    // starts a fresh clip.
+    // Committed → reset the whole clip (window + groups + ★/POE) for the next one.
+    // The sticky period stays (it carries across clips within a quarter).
+    setStartTime(null);
+    setEndTime(null);
     setBuilding([]);
+    setStagedBundles([]);
     setIsStar(false);
     setIsPoe(false);
     loadExistingClips(); // refresh the marker strip with the just-saved clip
@@ -714,7 +711,7 @@ export default function TaggingOverlayScreen() {
                 disabled={!canSave}
                 onPress={saveClip}
               >
-                <Text style={styles.saveBtnText}>{saving ? 'Adding…' : openClipId ? 'Add group' : 'Add clip'}</Text>
+                <Text style={styles.saveBtnText}>{saving ? 'Saving…' : groupCount > 0 ? `Save clip (${groupCount})` : 'Save clip'}</Text>
               </TouchableOpacity>
             )}
             {/* "Now tagged" readout — what's tagged at the current playhead, so a
@@ -761,6 +758,19 @@ export default function TaggingOverlayScreen() {
           style={[styles.sideStrip, { top: insets.top + 60, bottom: insets.bottom + 76, right: insets.right + 8 }]}
           pointerEvents="box-none"
         >
+          <TouchableOpacity
+            style={[styles.addGroupBtn, !canAddGroup && styles.disabledBtn]}
+            onPress={addGroup}
+            disabled={!canAddGroup}
+            hitSlop={6}
+          >
+            <Text style={styles.addGroupBtnText}>+ Group</Text>
+          </TouchableOpacity>
+          {groupCount > 0 && (
+            <View style={styles.stagedBadge}>
+              <Text style={styles.stagedBadgeText}>{groupCount} staged</Text>
+            </View>
+          )}
           <TouchableOpacity
             style={styles.toggleBtn}
             onPress={() => setTagMode(m => (m === 'compact' ? 'fullscreen' : 'compact'))}
@@ -964,7 +974,7 @@ export default function TaggingOverlayScreen() {
             <View style={styles.markGroup}>
               <TouchableOpacity
                 style={[styles.markBtn, styles.markStartBtn, !videoReady && styles.disabledBtn]}
-                onPress={() => { setStartTime(player.currentTime); setOpenClipId(null); setBundleCount(0); }}
+                onPress={() => setStartTime(player.currentTime)}
                 disabled={!videoReady}
               >
                 <Text style={styles.markBtnText}>
@@ -973,7 +983,7 @@ export default function TaggingOverlayScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.markBtn, styles.markEndBtn, !videoReady && styles.disabledBtn]}
-                onPress={() => { setEndTime(player.currentTime); setOpenClipId(null); setBundleCount(0); }}
+                onPress={() => setEndTime(player.currentTime)}
                 disabled={!videoReady}
               >
                 <Text style={styles.markBtnText}>
@@ -1308,4 +1318,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   toggleBtnText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  // "+ Group" (stage a bundle) + the staged-count badge, top of the right strip.
+  addGroupBtn: { width: 58, paddingVertical: 8, borderRadius: 9, backgroundColor: '#1D9E75', justifyContent: 'center', alignItems: 'center' },
+  addGroupBtnText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  stagedBadge: { borderRadius: 9, backgroundColor: 'rgba(29,158,117,0.22)', borderWidth: 1, borderColor: '#1D9E75', paddingHorizontal: 6, paddingVertical: 3, alignItems: 'center' },
+  stagedBadgeText: { color: '#7ee0bd', fontSize: 10, fontWeight: '800' },
 });
