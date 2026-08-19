@@ -158,15 +158,22 @@ function moversFor(a: Action): string[] {
   return m;
 }
 
-// Where a token sits at progress t. Actions run in sequence (equal slices) so
-// the play develops step by step; the latest action a token has entered wins.
+// Where a token sits at progress t. Actions are grouped into BEATS (Action.step):
+// actions sharing a step animate simultaneously; beats play in sequence. Unset
+// step → each action is its own beat (so a play with no beats stays sequential,
+// exactly as before). The latest beat a token has entered wins.
 export function tokenPosAt(doc: PlayDoc, tokenId: string, t: number): Vec {
   const base = doc.tokens.find(x => x.id === tokenId);
   let pos: Vec = base ? base.pos : { x: 0.5, y: 0.5 };
-  const n = doc.actions.length || 1;
+  // Effective beat per action (fallback: its position → fully sequential).
+  const beats = doc.actions.map((a, i) => a.step ?? i + 1);
+  const distinct = Array.from(new Set(beats)).sort((a, b) => a - b);
+  const total = distinct.length || 1;
+  const slotOf = new Map(distinct.map((b, idx) => [b, idx]));
   doc.actions.forEach((a, i) => {
     if (!moversFor(a).includes(tokenId)) return;
-    const start = i / n, end = (i + 1) / n;
+    const slot = slotOf.get(beats[i]) ?? 0;
+    const start = slot / total, end = (slot + 1) / total;
     if (t <= start) return;
     pos = pointAlong(a.path, Math.min(1, (t - start) / (end - start)));
   });

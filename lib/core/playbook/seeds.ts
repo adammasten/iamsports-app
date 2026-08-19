@@ -22,9 +22,11 @@ export const HORNS: PlayDoc = {
     { id: 'ball', kind: 'ball', pos: { x: 0.545, y: 0.79 } },
   ],
   actions: [
-    { id: 'a1', type: 'screen', fromToken: 'p5', path: [{ x: 0.64, y: 0.40 }, { x: 0.57, y: 0.70 }] },
-    { id: 'a2', type: 'dribble', fromToken: 'p1', path: [{ x: 0.50, y: 0.80 }, { x: 0.66, y: 0.60 }] },
-    { id: 'a3', type: 'move', fromToken: 'p4', path: [{ x: 0.36, y: 0.40 }, { x: 0.42, y: 0.12 }] },
+    // Beat 1: 5 sets the ball screen AS 1 attacks off it — simultaneous.
+    { id: 'a1', type: 'screen', fromToken: 'p5', step: 1, path: [{ x: 0.64, y: 0.40 }, { x: 0.57, y: 0.70 }] },
+    { id: 'a2', type: 'dribble', fromToken: 'p1', step: 1, path: [{ x: 0.50, y: 0.80 }, { x: 0.66, y: 0.60 }] },
+    // Beat 2: then 4 dives to the rim.
+    { id: 'a3', type: 'move', fromToken: 'p4', step: 2, path: [{ x: 0.36, y: 0.40 }, { x: 0.42, y: 0.12 }] },
   ],
 };
 

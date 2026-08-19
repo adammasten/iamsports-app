@@ -50,6 +50,9 @@ export default function PlayEditor() {
   const [drawFor, setDrawFor] = useState<string | null>(null);
   const [drawType, setDrawType] = useState<ActionType>('move');
   const [drawPts, setDrawPts] = useState<{ x: number; y: number }[]>([]);
+  // Current BEAT — routes drawn now share this beat and animate together.
+  // "New beat" advances it so the next routes happen after.
+  const [currentBeat, setCurrentBeat] = useState(1);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
   const dragId = useRef<string | null>(null);
@@ -64,7 +67,7 @@ export default function PlayEditor() {
   // Live document = committed actions + the in-progress route (so you see it draw).
   const doc: PlayDoc = useMemo(() => {
     const draft: Action[] = drawFor && drawPts.length >= 1
-      ? [{ id: 'draft', type: drawType, fromToken: drawFor, path: drawPts.length >= 2 ? drawPts : [tokens.find(t => t.id === drawFor)!.pos, drawPts[0]] }]
+      ? [{ id: 'draft', type: drawType, fromToken: drawFor, step: currentBeat, path: drawPts.length >= 2 ? drawPts : [tokens.find(t => t.id === drawFor)!.pos, drawPts[0]] }]
       : [];
     return { schema_version: 1, sport: 'basketball', surface, name: name || 'Untitled play', tokens, actions: [...actions, ...draft] };
   }, [surface, name, tokens, actions, drawFor, drawPts, drawType]);
@@ -104,7 +107,7 @@ export default function PlayEditor() {
     if (drawFor && drawPts.length >= 1) {
       const start = tokens.find(t => t.id === drawFor)!.pos;
       const path = drawPts.length >= 2 ? drawPts : [start, drawPts[0]];
-      setActions(a => [...a, { id: 'a' + a.length, type: drawType, fromToken: drawFor!, path }]);
+      setActions(a => [...a, { id: 'a' + a.length, type: drawType, fromToken: drawFor!, path, step: currentBeat }]);
     }
     setDrawFor(null); setDrawPts([]);
   }
@@ -154,6 +157,12 @@ export default function PlayEditor() {
 
         <div style={S.field}>
           <label style={S.label}>Draw a route</label>
+          <div style={{ ...S.chipRow, alignItems: 'center' }}>
+            <span style={S.beatTag}>Beat {currentBeat}</span>
+            <span style={S.beatHint}>routes you draw now move together</span>
+            <button onClick={() => setCurrentBeat(b => b + 1)} style={S.ghostSm}>＋ New beat</button>
+            {currentBeat > 1 ? <button onClick={() => setCurrentBeat(b => Math.max(1, b - 1))} style={S.ghostSm}>◄ Beat {currentBeat - 1}</button> : null}
+          </div>
           {drawFor ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={S.chipRow}>
@@ -178,7 +187,7 @@ export default function PlayEditor() {
             <div style={{ ...S.chipRow, marginTop: 8 }}>
               {actions.map((a, i) => (
                 <button key={i} onClick={() => setActions(list => list.filter((_, j) => j !== i))} style={{ ...S.chip, ...S.routeChip }}>
-                  {tokens.find(t => t.id === a.fromToken)?.label} · {a.type} ✕
+                  B{a.step ?? i + 1} · {tokens.find(t => t.id === a.fromToken)?.label} · {a.type} ✕
                 </button>
               ))}
             </div>
@@ -221,7 +230,7 @@ export default function PlayEditor() {
         ) : null}
 
         <button onClick={save} disabled={saving} style={{ ...S.primary, opacity: saving ? 0.6 : 1 }}>{saving ? 'Saving…' : 'Save play'}</button>
-        <button onClick={() => { setTokens(startTokens()); setActions([]); setName(''); setNote(''); setTags([]); setSaved(null); setErr(null); }} style={S.ghost}>Reset</button>
+        <button onClick={() => { setTokens(startTokens()); setActions([]); setName(''); setNote(''); setTags([]); setSaved(null); setErr(null); setCurrentBeat(1); }} style={S.ghost}>Reset</button>
       </div>
     </div>
   );
@@ -240,6 +249,8 @@ const S: Record<string, React.CSSProperties> = {
   chip: { background: '#16232f', border: '1px solid #25333f', borderRadius: 999, color: '#c7d2dc', padding: '7px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer' },
   chipOn: { background: '#ff6a2c', borderColor: '#ff6a2c', color: '#160b02' },
   routeChip: { borderColor: '#3a4b5a' },
+  beatTag: { background: '#6c5ce7', color: '#fff', borderRadius: 999, padding: '5px 11px', fontSize: 12.5, fontWeight: 800 },
+  beatHint: { color: '#7e8b98', fontSize: 11.5 },
   tagGroupLabel: { color: '#7e8b98', fontSize: 11, fontWeight: 700, marginBottom: 5 },
   tag: { background: '#16232f', border: '1px solid #25333f', borderRadius: 999, color: '#c7d2dc', padding: '5px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' },
   primary: { background: '#ff6a2c', border: 'none', borderRadius: 10, color: '#160b02', padding: '13px', fontSize: 15, fontWeight: 800, cursor: 'pointer' },

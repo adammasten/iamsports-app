@@ -44,7 +44,9 @@ export type Action = {
   path: Vec[];        // polyline the action follows; first point is the origin
   fromToken?: string; // optional: token id the action starts from (labelling)
   toToken?: string;   // optional: token id the action targets (pass/screen)
-  order?: number;     // sequence index for future phased/animated display
+  step?: number;      // BEAT: actions sharing a step animate simultaneously;
+                      // steps play in order. Unset → each action is its own beat.
+  order?: number;     // (legacy alias, unused)
 };
 
 export type Annotation = {
