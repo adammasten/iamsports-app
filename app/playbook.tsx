@@ -53,10 +53,11 @@ export default function PlaybookHome() {
       ) : installs.length === 0 ? (
         <Text style={styles.empty}>No installs yet. When a coach publishes one to your team, it shows up here.</Text>
       ) : (
-        installs.map(inst => (
+        <View style={styles.grid}>
+          {installs.map(inst => (
           <Pressable
             key={inst.id}
-            style={styles.card}
+            style={[styles.card, styles.gridCard]}
             onPress={() => router.push({ pathname: '/playbook-install', params: { id: inst.id } })}
           >
             <View style={styles.cardTop}>
@@ -67,7 +68,8 @@ export default function PlaybookHome() {
             {inst.note ? <Text style={styles.note}>{inst.note}</Text> : null}
             <Text style={styles.open}>Open →</Text>
           </Pressable>
-        ))
+          ))}
+        </View>
       )}
       <View style={{ height: 40 }} />
       </ScrollView>
@@ -78,7 +80,9 @@ export default function PlaybookHome() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0e1b2c' },
   screen: { flex: 1, backgroundColor: '#0e1b2c' },
-  content: { padding: 20, maxWidth: 720, width: '100%', alignSelf: 'center' },
+  content: { padding: 20, maxWidth: 1120, width: '100%', alignSelf: 'center' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
+  gridCard: { flexBasis: '30%', flexGrow: 1, minWidth: 250, marginBottom: 0 },
   allBtn: { backgroundColor: '#16232f', borderColor: '#ff6a2c', borderWidth: 1, borderRadius: 14, padding: 16, marginBottom: 18, gap: 3 },
   allBtnText: { color: '#ff6a2c', fontSize: 16, fontWeight: '800' },
   allBtnSub: { color: '#9db0bd', fontSize: 13 },

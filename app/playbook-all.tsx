@@ -69,8 +69,9 @@ export default function AllPlaysScreen() {
       ) : filtered.length === 0 ? (
         <Text style={styles.empty}>No plays tagged “{filter}”.</Text>
       ) : (
-        filtered.map((p, i) => (
-          <View key={p.playId} style={styles.card}>
+        <View style={styles.grid}>
+        {filtered.map((p, i) => (
+          <View key={p.playId} style={[styles.card, styles.gridCard]}>
             <Text style={styles.name}>{p.doc?.name ?? p.name ?? `Play ${i + 1}`}</Text>
             {p.tags.length > 0 ? (
               <View style={styles.tagWrap}>
@@ -90,7 +91,8 @@ export default function AllPlaysScreen() {
               </View>
             ) : null}
           </View>
-        ))
+        ))}
+        </View>
       )}
       <View style={{ height: 40 }} />
       </ScrollView>
@@ -101,7 +103,9 @@ export default function AllPlaysScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0e1b2c' },
   screen: { flex: 1, backgroundColor: '#0e1b2c' },
-  content: { padding: 20, maxWidth: 640, width: '100%', alignSelf: 'center' },
+  content: { padding: 20, maxWidth: 1120, width: '100%', alignSelf: 'center' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
+  gridCard: { flexBasis: '30%', flexGrow: 1, minWidth: 250, marginTop: 0 },
   back: { alignSelf: 'flex-start', paddingVertical: 6 },
   backTxt: { color: '#ff6a2c', fontSize: 14, fontWeight: '700' },
   eyebrow: { color: '#ff6a2c', fontSize: 12, fontWeight: '800', letterSpacing: 1.6, marginTop: 8 },

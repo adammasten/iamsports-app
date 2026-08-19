@@ -109,6 +109,35 @@ export async function savePlay(opts: { teamId: string; doc: PlayDoc; tags: strin
   return playId;
 }
 
+// Log that the caller opened this install (binary event — NO duration, ever).
+// Fire-and-forget: a receipt failure must never block viewing.
+export async function logInstallView(installId: string, userId: string): Promise<void> {
+  try {
+    await supabase.from('install_receipts').insert({ install_id: installId, user_id: userId, event_type: 'install_viewed' });
+  } catch { /* ignore */ }
+}
+
+// Who has opened this install. RLS scopes it: a COACH sees every viewer; a parent
+// sees only themselves / their child. Binary "opened", deduped to latest per user.
+export type Receipt = { userId: string; name: string; lastViewed: string };
+
+export async function fetchInstallReceipts(installId: string): Promise<Receipt[]> {
+  const { data, error } = await supabase
+    .from('install_receipts')
+    .select('user_id, created_at')
+    .eq('install_id', installId)
+    .eq('event_type', 'install_viewed')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  const latest = new Map<string, string>();
+  (data ?? []).forEach((r: any) => { if (!latest.has(r.user_id)) latest.set(r.user_id, r.created_at); });
+  const ids = Array.from(latest.keys());
+  if (!ids.length) return [];
+  const { data: profs } = await supabase.from('user_profiles').select('user_id, display_name').in('user_id', ids);
+  const nameById = new Map<string, string>((profs ?? []).map((p: any) => [p.user_id, p.display_name || 'A member']));
+  return ids.map(id => ({ userId: id, name: nameById.get(id) ?? 'A member', lastViewed: latest.get(id)! }));
+}
+
 export async function fetchInstallDetail(installId: string): Promise<InstallDetail> {
   const { data: inst, error: e1 } = await supabase
     .from('installs')
