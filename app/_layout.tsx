@@ -63,7 +63,13 @@ function AuthGate() {
     // Decide exactly once per user (cold start or fresh login).
     if (decidedForUserRef.current !== userId) {
       decidedForUserRef.current = userId;
-      if (userTeams.length === 0 && userKids.length === 0) {
+      // Preserve an explicit deep-link the user opened directly (e.g. the dark
+      // /playbook-dev preview) — don't yank a logged-in user to home on cold
+      // start when they asked for a specific route. Scoped to that route so it
+      // can't change normal login/landing routing.
+      if (pathname === '/playbook-dev' || pathname.startsWith('/playbook-dev')) {
+        // leave them where they navigated
+      } else if (userTeams.length === 0 && userKids.length === 0) {
         // TRULY new user: no confirmed team memberships AND no linked kids → onboarding.
         // A guardian who's only claimed a child (kid, no team) has userKids > 0, so
         // they skip this and land straight on home — no Welcome screen every launch.
@@ -199,6 +205,7 @@ export default function RootLayout() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="landing" options={{ headerShown: false }} />
+          <Stack.Screen name="playbook-dev" options={{ headerShown: false }} />
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
           <Stack.Screen name="game" options={{ headerShown: false }} />
