@@ -39,11 +39,24 @@ Verified live: 7/7 RLS on, policy counts correct, RESTRICT + composite FKs prese
 Cross-team RLS test written (`test_playbook_crossteam_leak.sql`) — runs once the
 pilot has ≥2 teams.
 
-### ▶ NEXT slices (post data-model, in order)
-1. **Render worker + cache** (Railway): JSON → `play_renders/{play_id}/{version}/{renderer_version}.{svg,png}`. Viewer reads images; no client vector renderer.
-2. **Viewer**: install list → install detail → play view (cached images). Player-facing on the team page; parent-visible receipts.
-3. **Internal seeding tools** (concierge): import a pilot team's real playbook as JSON. Not user-facing.
-4. Editor / template library / install-authoring UI — **Phase 2**, gated on pilot metrics.
+### ✅ BUILT & LIVE (web, 2026-08-19)
+Renderer + interactive playback (beats/simultaneous movement) · viewer (install
+list → install → play) · All Plays library · tags + filtering · editor (drag +
+draw routes + beats) · receipts (binary "viewed") · team-page entry · **film ↔
+play clip linkage** (the moat — `/playbook-play` + `/playbook-link`, reuses
+clips/sign-media). We client-render instead of the Railway cache (deferred).
+
+### ▶ NEXT slices
+1. **Share / export** — a play or playbook as image/PDF + a shareable link (fast win).
+2. **Teach → Run → Review card** — auto-summary now that clip linkage exists
+   ("installed Horns; 4 possessions Friday: 2 scores, 1 breakdown").
+3. **Per-player assignments** (Phase 6) · editor ▶ preview · coach cross-team library UI.
+
+### Future (parked — don't build until asked)
+- **Play depository / community play bank** — browse + copy plays other coaches
+  made (copy-on-grab onto `library_plays`). **DIAGRAM-ONLY: linked film must never
+  travel with a shared play** (film = team-scoped kid footage). Network-effect +
+  Pro-Coach monetization lever. See memory `project_playbook_depository`.
 
 ## Open items / gates (need Adam or counsel)
 
