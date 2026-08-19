@@ -1,0 +1,52 @@
+-- =====================================================================
+-- Playbook §6 — explicit cross-team clip-leak RLS test
+-- Spec requirement (PLAYBOOK_V2_CONVERGED.md §6, §10):
+--   "user on Team B, viewing a play derived from the same library play as
+--    Team A's, must see zero Team A clips."
+--
+-- This is a MANUAL verification script — it needs two real teams, a clip
+-- on each, and a user who is a member of Team B ONLY. Run it once the
+-- concierge pilot has ≥2 teams (that's exactly the setup the pilot gives
+-- us). Until then the guarantee rests on the structural facts below.
+--
+-- WHY THE LEAK IS STRUCTURALLY IMPOSSIBLE (independent of this test):
+--   1. play_clips.team_id is the FILM's team, not the play's.
+--   2. play_clips SELECT policy = is_super_admin() OR is_team_member(team_id).
+--      A Team-B-only user fails is_team_member(TeamA) → zero Team A rows.
+--   3. Library plays cannot link clips at all (play_clips.play_id → team
+--      `plays` only). Shared library lineage grants NOTHING here.
+-- =====================================================================
+
+-- ---- Setup (fill in real IDs from the pilot) -------------------------
+--   :team_a         a team the viewer is NOT on
+--   :team_b         a team the viewer IS on
+--   :viewer_b       a user in team_b only
+--   :clip_a         a clip whose clips.team_id = team_a
+--   :play_b         a play on team_b (optionally derived from the same
+--                   library_play as a team_a play)
+--   :play_b_version an existing play_versions row for play_b
+--
+-- Impersonate the viewer the way PostgREST does:
+--   select set_config('role','authenticated', true);
+--   select set_config('request.jwt.claims',
+--     json_build_object('sub', :'viewer_b', 'role','authenticated')::text, true);
+
+-- ---- Assertion 1: viewer_b cannot even INSERT a Team A clip link ------
+-- (coach-only + clip must belong to the row's team_id). Expect: 0 rows /
+-- policy violation. A non-coach insert must be rejected.
+
+-- ---- Assertion 2: with a Team A link present, viewer_b sees NONE -------
+-- As a coach of team_a (separately), link :clip_a to a team_a play with
+-- team_id = :team_a. THEN, as viewer_b, run:
+--
+--   select count(*) as leaked
+--   from public.play_clips
+--   where team_id = :'team_a';       -- must be 0 for viewer_b
+--
+-- PASS  = leaked = 0
+-- FAIL  = leaked > 0  →  cross-team film leak; STOP and fix RLS before
+--         any Phase-2 clip-linking UI ships.
+
+-- ---- Assertion 3: viewer_b DOES see their own team's links ------------
+--   select count(*) from public.play_clips where team_id = :'team_b';
+--   -- > 0 once team_b has links (sanity: the policy isn't just "deny all")
