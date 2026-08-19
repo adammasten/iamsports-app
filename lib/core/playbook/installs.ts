@@ -57,12 +57,12 @@ export async function fetchInstalls(teamId?: string): Promise<InstallSummary[]> 
 // Every play a team runs — the cumulative library across all installs. One row
 // per play (installs reference plays, so weeks don't duplicate them). RLS: a
 // coach sees all the team's plays; a member sees those in a published install.
-export type TeamPlay = { playId: string; name: string; doc: PlayDoc | null };
+export type TeamPlay = { playId: string; name: string; doc: PlayDoc | null; tags: string[] };
 
 export async function fetchTeamPlays(teamId: string): Promise<TeamPlay[]> {
   const { data, error } = await supabase
     .from('plays')
-    .select('id, name, doc')
+    .select('id, name, doc, tags')
     .eq('team_id', teamId)
     .order('name');
   if (error) throw error;
@@ -70,6 +70,7 @@ export async function fetchTeamPlays(teamId: string): Promise<TeamPlay[]> {
     playId: r.id,
     name: r.name,
     doc: (r.doc ?? null) as PlayDoc | null,
+    tags: Array.isArray(r.tags) ? r.tags : [],
   }));
 }
 
