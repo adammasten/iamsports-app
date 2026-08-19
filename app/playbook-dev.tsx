@@ -22,12 +22,14 @@ export default function PlaybookDev() {
       <Text style={styles.h1}>Seed plays, rendered in-app</Text>
       <Text style={styles.sub}>Dark route — not in navigation. Proves the pure renderer draws on the real web surface.</Text>
 
-      {SEED_PLAYS.map((p, i) => (
-        <View key={i} style={styles.card}>
-          <Text style={styles.name}>{p.name}</Text>
-          <PlayDiagram doc={p} />
-        </View>
-      ))}
+      <View style={styles.grid}>
+        {SEED_PLAYS.map((p, i) => (
+          <View key={i} style={styles.card}>
+            <Text style={styles.name}>{p.name}</Text>
+            <PlayDiagram doc={p} />
+          </View>
+        ))}
+      </View>
       <View style={{ height: 40 }} />
     </ScrollView>
   );
@@ -35,12 +37,13 @@ export default function PlaybookDev() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#0e1b2c' },
-  content: { padding: 20, maxWidth: 640, width: '100%', alignSelf: 'center' },
+  content: { padding: 20, maxWidth: 1120, width: '100%', alignSelf: 'center' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, marginTop: 4 },
   back: { alignSelf: 'flex-start', paddingVertical: 6 },
   backTxt: { color: '#ff6a2c', fontSize: 14, fontWeight: '700' },
   eyebrow: { color: '#ff6a2c', fontSize: 12, fontWeight: '800', letterSpacing: 1.6, marginTop: 8 },
   h1: { color: '#f1f4f6', fontSize: 26, fontWeight: '800', letterSpacing: -0.4, marginTop: 6 },
   sub: { color: '#9db0bd', fontSize: 14, marginTop: 6, marginBottom: 12 },
-  card: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 16, padding: 16, marginTop: 16, gap: 10 },
+  card: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 16, padding: 16, gap: 10, flexGrow: 1, flexBasis: 300, minWidth: 280, maxWidth: 460 },
   name: { color: '#f1f4f6', fontSize: 16, fontWeight: '700' },
 });

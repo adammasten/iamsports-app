@@ -47,7 +47,11 @@ function keyAt(by: number, dir: 1 | -1, t: Theme): string {
   const paintBot = by + dir * 190;
   const ftCy = by + dir * 190;
   const cornerY = by + dir * 142.5;            // where 3pt verticals meet the arc
-  const sweep = dir === 1 ? 1 : 0;             // bulge away from the baseline
+  // Sweep picks which of the two centers the arc curves around. Verified
+  // numerically: for a top basket (dir=1) sweep=0 puts the center back at the
+  // hoop so the arc bulges DOWN to the top of the key (sweep=1 curved it up
+  // into the baseline — the bug). Mirror for a bottom basket.
+  const sweep = dir === 1 ? 0 : 1;
   return `
     <line x1="210" y1="${bbY}" x2="290" y2="${bbY}" stroke="${t.line}" stroke-width="3"/>
     <circle cx="250" cy="${hoopCy}" r="9" ${s}/>
