@@ -90,6 +90,9 @@ export default function AllPlaysScreen() {
                 <Text style={styles.noteTxt}>{p.doc.note}</Text>
               </View>
             ) : null}
+            <Pressable onPress={() => router.push({ pathname: '/playbook-play', params: { playId: p.playId, teamId: teamId ?? '' } })}>
+              <Text style={styles.openLink}>Open play &amp; film →</Text>
+            </Pressable>
           </View>
         ))}
         </View>
@@ -129,6 +132,7 @@ const styles = StyleSheet.create({
   noteBox: { backgroundColor: '#0e1b2c', borderColor: '#25333f', borderWidth: 1, borderRadius: 10, padding: 12, gap: 6 },
   noteLabel: { color: '#ff6a2c', fontSize: 10.5, fontWeight: '800', letterSpacing: 1.2 },
   noteTxt: { color: '#c7d2dc', fontSize: 13.5, lineHeight: 19 },
+  openLink: { color: '#ff6a2c', fontSize: 13, fontWeight: '800', marginTop: 2 },
   empty: { color: '#9db0bd', fontSize: 14, marginTop: 24 },
   errBox: { backgroundColor: '#2a1416', borderColor: '#5c2a2a', borderWidth: 1, borderRadius: 12, padding: 14, marginTop: 20 },
   errTxt: { color: '#ffb4a8', fontSize: 13.5, lineHeight: 19 },
