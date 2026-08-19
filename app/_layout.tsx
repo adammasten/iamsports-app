@@ -67,7 +67,7 @@ function AuthGate() {
       // routes) — don't yank a logged-in user to home on cold start when they
       // asked for a specific route. Scoped to /playbook* so it can't change
       // normal login/landing routing.
-      if (pathname.startsWith('/playbook')) {
+      if (pathname.startsWith('/playbook') || pathname.startsWith('/my-playbook')) {
         // leave them where they navigated
       } else if (userTeams.length === 0 && userKids.length === 0) {
         // TRULY new user: no confirmed team memberships AND no linked kids → onboarding.
@@ -212,6 +212,7 @@ export default function RootLayout() {
           <Stack.Screen name="playbook-edit" options={{ headerShown: false }} />
           <Stack.Screen name="playbook-play" options={{ headerShown: false }} />
           <Stack.Screen name="playbook-link" options={{ headerShown: false }} />
+          <Stack.Screen name="my-playbook" options={{ headerShown: false }} />
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
           <Stack.Screen name="game" options={{ headerShown: false }} />

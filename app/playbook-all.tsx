@@ -42,8 +42,8 @@ export default function AllPlaysScreen() {
       <Text style={styles.h1}>All Plays</Text>
       <Text style={styles.sub}>Everything this team runs — every play from every week, in one place.</Text>
 
-      <Pressable style={styles.newBtn} onPress={() => router.push('/playbook-edit')}>
-        <Text style={styles.newBtnTxt}>＋  New play</Text>
+      <Pressable style={styles.newBtn} onPress={() => router.push('/my-playbook')}>
+        <Text style={styles.newBtnTxt}>＋  Add a play from My Playbook</Text>
       </Pressable>
 
       {plays && allTags.length > 0 ? (

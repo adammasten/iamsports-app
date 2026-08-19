@@ -7,7 +7,7 @@
 
 import { useTeamContext } from '@/context';
 import { surfaceSize } from '@/lib/core/playbook/court';
-import { fetchCoachTeams, savePlay, type CoachTeam } from '@/lib/core/playbook/installs';
+import { saveLibraryPlay } from '@/lib/core/playbook/library';
 import type { Action, ActionType, PlayDoc, Token } from '@/lib/core/playbook/playDoc';
 import { renderPlaySvg } from '@/lib/core/playbook/renderPlay';
 import { PLAY_TAG_GROUPS, tagColor } from '@/lib/core/playbook/tags';
@@ -40,8 +40,6 @@ export default function PlayEditor() {
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
   const [tags, setTags] = useState<string[]>([]);
-  const [teams, setTeams] = useState<CoachTeam[]>([]);
-  const [teamId, setTeamId] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -56,13 +54,6 @@ export default function PlayEditor() {
 
   const boxRef = useRef<HTMLDivElement | null>(null);
   const dragId = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!userId) return;
-    fetchCoachTeams(userId)
-      .then(t => { setTeams(t); if (t[0]) setTeamId(t[0].id); })
-      .catch(e => setErr(e?.message ?? String(e)));
-  }, [userId]);
 
   // Live document = committed actions + the in-progress route (so you see it draw).
   const doc: PlayDoc = useMemo(() => {
@@ -115,14 +106,13 @@ export default function PlayEditor() {
 
   async function save() {
     setErr(null); setSaved(null);
-    if (!teamId) { setErr('Pick a team to save to.'); return; }
     if (!name.trim()) { setErr('Give the play a name.'); return; }
     if (!userId) { setErr('You’re not signed in.'); return; }
     setSaving(true);
     try {
       const finalDoc: PlayDoc = { schema_version: 1, sport: 'basketball', surface, name: name.trim(), note: note.trim() || undefined, tokens, actions };
-      await savePlay({ teamId, doc: finalDoc, tags, userId });
-      setSaved('Saved! It’s in your team’s playbook.');
+      await saveLibraryPlay({ doc: finalDoc, tags, userId });
+      setSaved('Saved to My Playbook.');
     } catch (e: any) { setErr(e?.message ?? String(e)); }
     finally { setSaving(false); }
   }
@@ -213,19 +203,11 @@ export default function PlayEditor() {
           ))}
         </div>
 
-        <div style={S.field}>
-          <label style={S.label}>Save to team</label>
-          <select style={S.input} value={teamId} onChange={e => setTeamId(e.target.value)}>
-            {teams.length === 0 ? <option value="">No coach teams found</option> : null}
-            {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </div>
-
         {err ? <div style={S.err}>{err}</div> : null}
         {saved ? (
           <div style={S.ok}>
             {saved}{' '}
-            <button onClick={() => router.push({ pathname: '/playbook-all', params: { teamId } })} style={S.linkBtn}>View playbook →</button>
+            <button onClick={() => router.push('/my-playbook')} style={S.linkBtn}>Go to My Playbook →</button>
           </div>
         ) : null}
 
