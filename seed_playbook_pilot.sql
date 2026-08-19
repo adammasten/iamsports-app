@@ -1,0 +1,12 @@
+-- Concierge seed (data, not schema) — applied live 2026-08-19 via Supabase MCP.
+-- Puts the 3 reference plays + a published install onto "Center Attack Regents"
+-- so the DB-backed viewer (/playbook) has real content. Adam is admin there on
+-- adammasten@gmail.com and parent on adam@emeraldnational.com, so either web
+-- login sees the published install.
+--
+-- Play docs are the exact JSON from lib/core/playbook/seeds.ts. Re-run only
+-- against a fresh team (it inserts new rows each time). Install id created:
+--   a4b599da-28a8-4321-a5b9-f962ba851b3a  ("Week 1 — Half-Court Sets")
+--
+-- (Full DO block is in the session history; kept short here — the seeds.ts file
+-- is the source of truth for the play documents.)
