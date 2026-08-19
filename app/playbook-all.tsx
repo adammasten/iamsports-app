@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#0e1b2c' },
   content: { padding: 20, maxWidth: 1120, width: '100%', alignSelf: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
-  gridCard: { flexBasis: '30%', flexGrow: 1, minWidth: 250, marginTop: 0 },
+  gridCard: { flexBasis: '30%', flexGrow: 1, minWidth: 250, maxWidth: 380, marginTop: 0 },
   back: { alignSelf: 'flex-start', paddingVertical: 6 },
   backTxt: { color: '#ff6a2c', fontSize: 14, fontWeight: '700' },
   eyebrow: { color: '#ff6a2c', fontSize: 12, fontWeight: '800', letterSpacing: 1.6, marginTop: 8 },

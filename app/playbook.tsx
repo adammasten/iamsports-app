@@ -82,7 +82,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#0e1b2c' },
   content: { padding: 20, maxWidth: 1120, width: '100%', alignSelf: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
-  gridCard: { flexBasis: '30%', flexGrow: 1, minWidth: 250, marginBottom: 0 },
+  gridCard: { flexBasis: '30%', flexGrow: 1, minWidth: 250, maxWidth: 380, marginBottom: 0 },
   allBtn: { backgroundColor: '#16232f', borderColor: '#ff6a2c', borderWidth: 1, borderRadius: 14, padding: 16, marginBottom: 18, gap: 3 },
   allBtnText: { color: '#ff6a2c', fontSize: 16, fontWeight: '800' },
   allBtnSub: { color: '#9db0bd', fontSize: 13 },

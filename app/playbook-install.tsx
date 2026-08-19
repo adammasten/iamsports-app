@@ -87,7 +87,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#0e1b2c' },
   content: { padding: 20, maxWidth: 1120, width: '100%', alignSelf: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
-  gridCard: { flexBasis: '30%', flexGrow: 1, minWidth: 250, marginTop: 0 },
+  gridCard: { flexBasis: '30%', flexGrow: 1, minWidth: 250, maxWidth: 380, marginTop: 0 },
   receiptBox: { backgroundColor: '#12271e', borderColor: '#1D9E75', borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 8, marginBottom: 12, gap: 4 },
   receiptLabel: { color: '#3ec48c', fontSize: 11, fontWeight: '800', letterSpacing: 1 },
   receiptTxt: { color: '#c7d2dc', fontSize: 13.5, lineHeight: 19 },
