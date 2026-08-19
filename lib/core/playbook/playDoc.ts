@@ -58,6 +58,7 @@ export type PlayDoc = {
   sport: 'basketball';
   surface: Surface;
   name?: string;
+  note?: string;   // coach's teaching note, shown under the diagram
   tokens: Token[];
   actions: Action[];
   annotations?: Annotation[];

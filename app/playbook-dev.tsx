@@ -27,6 +27,12 @@ export default function PlaybookDev() {
           <View key={i} style={styles.card}>
             <Text style={styles.name}>{p.name}</Text>
             <PlayPlayer doc={p} />
+            {p.note ? (
+              <View style={styles.noteBox}>
+                <Text style={styles.noteLabel}>COACH’S NOTES</Text>
+                <Text style={styles.noteTxt}>{p.note}</Text>
+              </View>
+            ) : null}
           </View>
         ))}
       </View>
@@ -46,4 +52,7 @@ const styles = StyleSheet.create({
   sub: { color: '#9db0bd', fontSize: 14, marginTop: 6, marginBottom: 12 },
   card: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 16, padding: 16, gap: 10, flexGrow: 1, flexBasis: 300, minWidth: 280, maxWidth: 460 },
   name: { color: '#f1f4f6', fontSize: 16, fontWeight: '700' },
+  noteBox: { backgroundColor: '#0e1b2c', borderColor: '#25333f', borderWidth: 1, borderRadius: 10, padding: 12, gap: 5 },
+  noteLabel: { color: '#ff6a2c', fontSize: 10.5, fontWeight: '800', letterSpacing: 1.2 },
+  noteTxt: { color: '#c7d2dc', fontSize: 13.5, lineHeight: 19 },
 });

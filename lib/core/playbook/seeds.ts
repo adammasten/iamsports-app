@@ -12,6 +12,7 @@ export const HORNS: PlayDoc = {
   sport: 'basketball',
   surface: 'half',
   name: 'Horns — 5 ball screen, 4 dive',
+  note: 'Primary look. If they switch the ball screen, 4 dives hard and we throw over the top. Keep the corners spaced — don’t let their man help on the roll.',
   tokens: [
     { id: 'p1', kind: 'offense', label: '1', pos: { x: 0.50, y: 0.80 } },
     { id: 'p4', kind: 'offense', label: '4', pos: { x: 0.36, y: 0.40 } },
@@ -34,6 +35,7 @@ export const GIVE_AND_GO: PlayDoc = {
   sport: 'basketball',
   surface: 'half',
   name: 'Give & go — pass, cut, layup',
+  note: 'Teaching the basic read: pass, then cut HARD to the rim. If your defender turns their head to watch the ball, you’re already gone.',
   tokens: [
     { id: 'p1', kind: 'offense', label: '1', pos: { x: 0.50, y: 0.80 } },
     { id: 'p2', kind: 'offense', label: '2', pos: { x: 0.15, y: 0.55 } },
@@ -56,6 +58,7 @@ export const BLOB_BOX: PlayDoc = {
   sport: 'basketball',
   surface: 'half',
   name: "BLOB 'Box' — 5 rim, 2 curl to corner",
+  note: 'Late-game baseline out-of-bounds. First option is 5 at the front of the rim; if that’s covered, 2 curls off the down screen to the corner for the catch.',
   tokens: [
     { id: 'p1', kind: 'offense', label: '1', pos: { x: 0.50, y: 0.02 } },
     { id: 'p5', kind: 'offense', label: '5', pos: { x: 0.38, y: 0.18 } },
