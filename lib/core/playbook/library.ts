@@ -18,6 +18,16 @@ export async function fetchLibraryPlays(userId: string): Promise<LibraryPlay[]> 
   return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, doc: (r.doc ?? null) as PlayDoc | null, tags: Array.isArray(r.tags) ? r.tags : [] }));
 }
 
+// Distinct tags the coach has already used across their library — so custom tags
+// they invented once resurface in the tag picker forever after.
+export async function fetchCoachTags(userId: string): Promise<string[]> {
+  const { data, error } = await supabase.from('library_plays').select('tags').eq('owner_user_id', userId);
+  if (error) throw error;
+  const set = new Set<string>();
+  (data ?? []).forEach((r: any) => (Array.isArray(r.tags) ? r.tags : []).forEach((t: string) => set.add(t)));
+  return Array.from(set).sort();
+}
+
 export async function fetchLibraryPlay(id: string): Promise<LibraryPlay> {
   const { data, error } = await supabase.from('library_plays').select('id, name, doc, tags').eq('id', id).single();
   if (error) throw error;

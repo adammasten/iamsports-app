@@ -7,10 +7,10 @@
 
 import { useTeamContext } from '@/context';
 import { surfaceSize } from '@/lib/core/playbook/court';
-import { saveLibraryPlay } from '@/lib/core/playbook/library';
+import { fetchCoachTags, saveLibraryPlay } from '@/lib/core/playbook/library';
 import type { Action, ActionType, PlayDoc, Token } from '@/lib/core/playbook/playDoc';
 import { renderPlaySvg } from '@/lib/core/playbook/renderPlay';
-import { PLAY_TAG_GROUPS, tagColor } from '@/lib/core/playbook/tags';
+import { ALL_PLAY_TAGS, PLAY_TAG_GROUPS, tagColor } from '@/lib/core/playbook/tags';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -40,6 +40,8 @@ export default function PlayEditor() {
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
   const [tags, setTags] = useState<string[]>([]);
+  const [tagQuery, setTagQuery] = useState('');
+  const [coachTags, setCoachTags] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -54,6 +56,9 @@ export default function PlayEditor() {
 
   const boxRef = useRef<HTMLDivElement | null>(null);
   const dragId = useRef<string | null>(null);
+
+  useEffect(() => { if (userId) fetchCoachTags(userId).then(setCoachTags).catch(() => {}); }, [userId]);
+  const addTag = (t: string) => { const v = t.trim(); if (!v) return; setTags(s => (s.some(x => x.toLowerCase() === v.toLowerCase()) ? s : [...s, v])); setTagQuery(''); };
 
   // Live document = committed actions + the in-progress route (so you see it draw).
   const doc: PlayDoc = useMemo(() => {
@@ -189,19 +194,49 @@ export default function PlayEditor() {
           <textarea style={{ ...S.input, minHeight: 60, resize: 'vertical' }} value={note} onChange={e => setNote(e.target.value)} placeholder="What you’re teaching…" />
         </div>
 
-        <div style={S.field}>
-          <label style={S.label}>Tags</label>
-          {PLAY_TAG_GROUPS.map(g => (
-            <div key={g.key} style={{ marginBottom: 8 }}>
-              <div style={S.tagGroupLabel}>{g.label}</div>
-              <div style={S.chipRow}>
-                {g.tags.map(t => (
-                  <button key={t} onClick={() => toggleTag(t)} style={{ ...S.tag, ...(tags.includes(t) ? { background: tagColor(t), color: '#0e1b2c', borderColor: tagColor(t) } : {}) }}>{t}</button>
-                ))}
-              </div>
+        {(() => {
+          const pool = Array.from(new Set([...ALL_PLAY_TAGS, ...coachTags]));
+          const q = tagQuery.trim().toLowerCase();
+          const matches = q ? pool.filter(t => t.toLowerCase().includes(q) && !tags.includes(t)).slice(0, 24) : [];
+          const canCreate = !!q && !pool.some(t => t.toLowerCase() === q) && !tags.some(t => t.toLowerCase() === q);
+          return (
+            <div style={S.field}>
+              <label style={S.label}>Tags</label>
+              {tags.length > 0 ? (
+                <div style={S.chipRow}>
+                  {tags.map(t => (
+                    <button key={t} onClick={() => toggleTag(t)} style={{ ...S.tag, background: tagColor(t), color: '#0e1b2c', borderColor: tagColor(t) }}>{t}  ✕</button>
+                  ))}
+                </div>
+              ) : null}
+              <input
+                style={S.input}
+                placeholder="Search tags, or type your own…"
+                value={tagQuery}
+                onChange={e => setTagQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (matches[0]) addTag(matches[0]); else if (canCreate) addTag(tagQuery); } }}
+              />
+              {q ? (
+                <div style={S.chipRow}>
+                  {matches.map(t => <button key={t} onClick={() => addTag(t)} style={S.tag}>{t}</button>)}
+                  {canCreate ? <button onClick={() => addTag(tagQuery)} style={{ ...S.tag, borderColor: '#1D9E75', color: '#3ec48c' }}>＋ Create “{tagQuery.trim()}”</button> : null}
+                  {matches.length === 0 && !canCreate ? <span style={S.beatHint}>already added</span> : null}
+                </div>
+              ) : (
+                PLAY_TAG_GROUPS.map(g => {
+                  const avail = g.tags.filter(t => !tags.includes(t));
+                  if (avail.length === 0) return null;
+                  return (
+                    <div key={g.key} style={{ marginBottom: 8 }}>
+                      <div style={S.tagGroupLabel}>{g.label}</div>
+                      <div style={S.chipRow}>{avail.map(t => <button key={t} onClick={() => addTag(t)} style={S.tag}>{t}</button>)}</div>
+                    </div>
+                  );
+                })
+              )}
             </div>
-          ))}
-        </div>
+          );
+        })()}
 
         {err ? <div style={S.err}>{err}</div> : null}
         {saved ? (
