@@ -6,7 +6,7 @@ import PlayPlayer from '@/components/PlayPlayer';
 import { fetchTeamPlays, type TeamPlay } from '@/lib/core/playbook/installs';
 import { tagColor } from '@/lib/core/playbook/tags';
 import { goBackOrHome } from '@/lib/nav';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import WebTopNav from './components/WebTopNav';
@@ -41,6 +41,10 @@ export default function AllPlaysScreen() {
       <Text style={styles.eyebrow}>{teamName ? teamName.toUpperCase() : 'PLAYBOOK'}</Text>
       <Text style={styles.h1}>All Plays</Text>
       <Text style={styles.sub}>Everything this team runs — every play from every week, in one place.</Text>
+
+      <Pressable style={styles.newBtn} onPress={() => router.push('/playbook-edit')}>
+        <Text style={styles.newBtnTxt}>＋  New play</Text>
+      </Pressable>
 
       {plays && allTags.length > 0 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={styles.chipRowInner}>
@@ -103,6 +107,8 @@ const styles = StyleSheet.create({
   eyebrow: { color: '#ff6a2c', fontSize: 12, fontWeight: '800', letterSpacing: 1.6, marginTop: 8 },
   h1: { color: '#f1f4f6', fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginTop: 6 },
   sub: { color: '#9db0bd', fontSize: 14, marginTop: 6, marginBottom: 8, lineHeight: 20 },
+  newBtn: { alignSelf: 'flex-start', backgroundColor: '#ff6a2c', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10, marginTop: 4, marginBottom: 10 },
+  newBtnTxt: { color: '#160b02', fontSize: 14, fontWeight: '800' },
   chipRow: { marginTop: 6, marginBottom: 2 },
   chipRowInner: { gap: 8, paddingRight: 20, paddingVertical: 4 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },

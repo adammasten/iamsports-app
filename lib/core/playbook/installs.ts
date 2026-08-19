@@ -74,6 +74,41 @@ export async function fetchTeamPlays(teamId: string): Promise<TeamPlay[]> {
   }));
 }
 
+// Teams the user can author plays for (coach/admin/head_coach). Used by the
+// editor's team picker. RLS on plays enforces is_team_coach on save regardless.
+export type CoachTeam = { id: string; name: string };
+
+export async function fetchCoachTeams(userId: string): Promise<CoachTeam[]> {
+  const { data, error } = await supabase
+    .from('team_memberships')
+    .select('team_id, role, teams(name)')
+    .eq('user_id', userId)
+    .eq('status', 'confirmed')
+    .in('role', ['admin', 'head_coach', 'coach']);
+  if (error) throw error;
+  const seen = new Map<string, string>();
+  (data ?? []).forEach((r: any) => { if (r.team_id && !seen.has(r.team_id)) seen.set(r.team_id, r.teams?.name ?? 'Team'); });
+  return Array.from(seen, ([id, name]) => ({ id, name }));
+}
+
+// Create a new play: inserts the play row + its first append-only version.
+// RLS: both inserts require is_team_coach(teamId).
+export async function savePlay(opts: { teamId: string; doc: PlayDoc; tags: string[]; userId: string }): Promise<string> {
+  const { teamId, doc, tags, userId } = opts;
+  const { data: play, error } = await supabase
+    .from('plays')
+    .insert({ team_id: teamId, sport: 'basketball', name: doc.name ?? 'Untitled play', doc, latest_version: 1, created_by: userId, tags })
+    .select('id')
+    .single();
+  if (error) throw error;
+  const playId = (play as any).id as string;
+  const { error: e2 } = await supabase
+    .from('play_versions')
+    .insert({ play_id: playId, version: 1, doc, created_by: userId });
+  if (e2) throw e2;
+  return playId;
+}
+
 export async function fetchInstallDetail(installId: string): Promise<InstallDetail> {
   const { data: inst, error: e1 } = await supabase
     .from('installs')
