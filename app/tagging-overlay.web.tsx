@@ -60,8 +60,10 @@ export default function TaggingStudioWeb() {
   // While a Start/End window is open, successive Adds append tag GROUPS (bundles)
   // to the SAME clip — matching the phone tagger + export's bundle model — instead
   // of making a new clip each time. Cleared when the window changes.
-  const [openClipId, setOpenClipId] = useState<string | null>(null);
-  const [bundleCount, setBundleCount] = useState(0);
+  // Build-then-commit staging (matches the mobile tagger): "Add group" pushes the
+  // current group onto stagedBundles (no DB write); "Save clip" commits the clip +
+  // all bundles at once, then resets.
+  const [stagedBundles, setStagedBundles] = useState<Built[][]>([]);
   // When set, the board is EDITING an already-committed clip (loaded back in)
   // rather than building a new one. Save writes changes; Cancel exits.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -188,15 +190,14 @@ export default function TaggingStudioWeb() {
   const tapTag = useCallback((t: Tag) => {
     setBuilding(prev => prev.some(b => b.id === t.id) ? prev.filter(b => b.id !== t.id) : [...prev, { id: t.id, name: t.name, category: t.category }]);
   }, []);
-  const clearBuilding = useCallback(() => { setBuilding([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null); setOpenClipId(null); setBundleCount(0); }, []);
+  const clearBuilding = useCallback(() => { setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null); }, []);
   // After committing a group, clear only the tags/flags — KEEP the Start/End
   // window and the open clip so the next Add stacks another GROUP on the SAME
   // clip (e.g. Neo steal, then Neo fouled). A new window / Clear / Backspace
   // starts a fresh clip.
-  const clearTagsOnly = useCallback(() => { setBuilding([]); setIsStar(false); setIsPoe(false); }, []);
   // Setting a new Start or End begins a new window → a new clip.
-  const markInNow = useCallback(() => { setMarkIn(player.currentTime || 0); setOpenClipId(null); setBundleCount(0); }, [player]);
-  const markOutNow = useCallback(() => { setMarkOut(player.currentTime || 0); setOpenClipId(null); setBundleCount(0); }, [player]);
+  const markInNow = useCallback(() => { setMarkIn(player.currentTime || 0); }, [player]);
+  const markOutNow = useCallback(() => { setMarkOut(player.currentTime || 0); }, [player]);
   // Tap a saved clip on the right → jump the video to its start and play.
   const jumpToClip = useCallback((startSec: number) => {
     try { player.currentTime = Math.max(0, startSec); player.play(); } catch {}
@@ -209,7 +210,7 @@ export default function TaggingStudioWeb() {
     setBuilding(c.editTags.map(t => ({ id: t.id, name: t.name, category: t.category })));
     setMarkIn(c.start); setMarkOut(c.end);
     setIsStar(c.starred); setIsPoe(c.poe);
-    setOpenClipId(null); setBundleCount(0);
+    setStagedBundles([]);
     try { player.currentTime = Math.max(0, c.start); } catch {}
   }, [player]);
   const cancelEdit = useCallback(() => {
@@ -223,14 +224,22 @@ export default function TaggingStudioWeb() {
     loadClips();
   }, [editingId, cancelEdit, loadClips]);
 
+  // Stage the current group as a bundle; start a fresh group. LOCAL only (no DB).
+  // ★/POE are per-CLIP (applied at Save), so they are NOT cleared here.
+  const addGroup = useCallback(() => {
+    if (building.length === 0 || editingId) return;
+    setStagedBundles(b => [...b, building]);
+    setBuilding([]);
+  }, [building, editingId]);
+
   const commitClip = useCallback(async () => {
-    if (building.length === 0 || saving || !userId) return;
+    if (saving || !userId) return;
     const useMarks = markIn != null && markOut != null && markOut > markIn;
 
-    // EDIT MODE: overwrite the existing clip's window + tags (star/POE/period at
-    // bundle 0, the rest as one group). Replaces all clip_tags for the clip.
+    // EDIT MODE: overwrite the existing clip's window + tags (flattened to one group
+    // + clip-level ★/POE). Replaces all clip_tags for the clip.
     if (editingId) {
-      if (!useMarks) return;
+      if (building.length === 0 || !useMarks) return;
       setSaving(true);
       await supabase.from('clips').update({ start_time: markIn as number, end_time: markOut as number }).eq('id', editingId);
       await supabase.from('clip_tags').delete().eq('clip_id', editingId);
@@ -240,52 +249,35 @@ export default function TaggingStudioWeb() {
       if (rows.length) await supabase.from('clip_tags').insert(rows);
       setSaving(false);
       setEditingId(null);
-      setBuilding([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null);
+      setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null);
       loadClips();
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 1600);
       return;
     }
 
-    // A clip REQUIRES an explicit Start + End window — no auto-window, no clips
-    // without an end time. (Adding another group reuses the open clip's window.)
-    if (openClipId == null && !useMarks) return;
-    const groupTagIds = building.map(b => b.id);
+    // NEW CLIP: commit every bundle (staged + the current un-added group) at once.
+    // Requires an explicit Start+End window. bundle_number: clip-level=0, groups=1,2,3…
+    if (!useMarks) return;
+    const bundles = [...stagedBundles, ...(building.length > 0 ? [building] : [])];
+    if (bundles.length === 0) return;
     setSaving(true);
-
-    // With an open windowed clip, this Add is another GROUP (bundle) on it.
-    // Otherwise create a fresh clip (bundle 1 = the first group).
-    let targetId = openClipId;
-    let bundleNum: number;
-    if (targetId == null) {
-      const { data: clip, error } = await supabase
-        .from('clips')
-        .insert({ video_id: videoId, team_id: teamId, created_by_user_id: userId, start_time: markIn as number, end_time: markOut as number, note: '' })
-        .select().single();
-      if (error || !clip) { setSaving(false); return; }
-      targetId = clip.id;
-      setOpenClipId(clip.id); // keep the clip open for more groups
-      bundleNum = 1;
-      setBundleCount(1);
-    } else {
-      bundleNum = bundleCount + 1;
-      setBundleCount(bundleNum);
-    }
-
-    // The built tags become one group at bundle N (1,2,3…). Star/POE apply to the
-    // whole clip → bundle 0, added once (with the first group).
-    const rows = groupTagIds.map(tag_id => ({ clip_id: targetId as string, tag_id, bundle_number: bundleNum }));
-    if (bundleNum === 1) {
-      if (isStar && special.highlight) rows.push({ clip_id: targetId as string, tag_id: special.highlight, bundle_number: 0 });
-      if (isPoe && special.poe) rows.push({ clip_id: targetId as string, tag_id: special.poe, bundle_number: 0 });
-    }
+    const { data: clip, error } = await supabase
+      .from('clips')
+      .insert({ video_id: videoId, team_id: teamId, created_by_user_id: userId, start_time: markIn as number, end_time: markOut as number, note: '' })
+      .select().single();
+    if (error || !clip) { setSaving(false); return; }
+    const rows: { clip_id: string; tag_id: string; bundle_number: number }[] = [];
+    bundles.forEach((grp, i) => grp.forEach(b => rows.push({ clip_id: clip.id, tag_id: b.id, bundle_number: i + 1 })));
+    if (isStar && special.highlight) rows.push({ clip_id: clip.id, tag_id: special.highlight, bundle_number: 0 });
+    if (isPoe && special.poe) rows.push({ clip_id: clip.id, tag_id: special.poe, bundle_number: 0 });
     if (rows.length) await supabase.from('clip_tags').insert(rows);
     setSaving(false);
-    clearTagsOnly();
+    setMarkIn(null); setMarkOut(null); setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false);
     loadClips();
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1600);
-  }, [building, saving, userId, videoId, teamId, isStar, isPoe, special, markIn, markOut, openClipId, bundleCount, editingId, clearTagsOnly, loadClips]);
+  }, [building, stagedBundles, saving, userId, videoId, teamId, isStar, isPoe, special, markIn, markOut, editingId, loadClips]);
 
   // Latest-commit ref, assigned DURING RENDER (not in an effect). Space/arrows
   // worked because they only touch the stable `player`; Enter called a stale
@@ -340,7 +332,9 @@ export default function TaggingStudioWeb() {
   const inPct = markIn != null && duration > 0 ? (markIn / duration) * 100 : null;
   const outPct = markOut != null && duration > 0 ? (markOut / duration) * 100 : null;
   const hasWindow = markIn != null && markOut != null && markOut > markIn;
-  const canAdd = building.length > 0 && !saving && (openClipId != null || hasWindow);
+  const groupCount = stagedBundles.length + (building.length > 0 ? 1 : 0);
+  const canAddGroup = building.length > 0 && !saving && !editingId;
+  const canSave = !saving && (editingId ? (building.length > 0 && hasWindow) : (hasWindow && groupCount > 0));
   const windowLabel = (markIn != null || markOut != null)
     ? `${markIn != null ? fmt(markIn) : '—'} → ${markOut != null ? fmt(markOut) : '—'}`
     : 'Mark Start + End';
@@ -426,7 +420,7 @@ export default function TaggingStudioWeb() {
               <View style={{ flex: 1 }} />
               <Text style={styles.windowLbl}>Clip: {windowLabel}</Text>
               {(markIn != null || markOut != null) ? (
-                <Pressable focusable={false} onPress={() => { setMarkIn(null); setMarkOut(null); setOpenClipId(null); setBundleCount(0); }} hitSlop={6}>
+                <Pressable focusable={false} onPress={() => { setMarkIn(null); setMarkOut(null); }} hitSlop={6}>
                   <Text style={styles.clearWindow}>✕ clear</Text>
                 </Pressable>
               ) : null}
@@ -435,7 +429,7 @@ export default function TaggingStudioWeb() {
 
           {/* build tray */}
           <View style={[styles.tray, building.length > 0 && { borderTopColor: C.accent }]}>
-            <Text style={styles.trayLabel}>{editingId ? 'EDITING CLIP' : openClipId ? `ADDING GROUP ${bundleCount + 1} · SAME CLIP` : 'BUILDING CLIP'}</Text>
+            <Text style={styles.trayLabel}>{editingId ? 'EDITING CLIP' : groupCount > 0 ? `BUILDING CLIP · ${groupCount} GROUP${groupCount === 1 ? '' : 'S'}` : 'BUILDING CLIP'}</Text>
             <View style={styles.trayChips}>
               {building.length === 0
                 ? <Text style={styles.trayHint}>Tap an event, then a player — stack as many as you want</Text>
@@ -452,9 +446,14 @@ export default function TaggingStudioWeb() {
             <Pressable focusable={false} onPress={() => setIsStar(s => !s)} style={[styles.flag, { borderColor: C.star, backgroundColor: isStar ? C.star : C.star + '22' }]}><Text style={{ color: isStar ? '#1a1030' : C.star, fontWeight: '800' }}>★ Highlight</Text></Pressable>
             <Pressable focusable={false} onPress={() => setIsPoe(p => !p)} style={[styles.flag, { borderColor: '#dc3545', backgroundColor: isPoe ? '#dc3545' : '#dc354522' }]}><Text style={{ color: isPoe ? '#fff' : '#dc3545', fontWeight: '800' }}>◎ POE</Text></Pressable>
             {editingId ? <Pressable focusable={false} onPress={cancelEdit} style={styles.clearBtn}><Text style={styles.clearTxt}>Cancel</Text></Pressable>
-              : building.length > 0 ? <Pressable focusable={false} onPress={clearBuilding} style={styles.clearBtn}><Text style={styles.clearTxt}>Clear</Text></Pressable> : null}
-            <Pressable focusable={false} onPress={commitClip} disabled={!canAdd} style={[styles.doneBtn, !canAdd && { opacity: 0.35 }]}>
-              <Text style={styles.doneTxt}>{saving ? 'Saving…' : editingId ? 'Save changes ↵' : openClipId ? 'Add group ↵' : 'Add clip ↵'}</Text>
+              : (building.length > 0 || stagedBundles.length > 0) ? <Pressable focusable={false} onPress={clearBuilding} style={styles.clearBtn}><Text style={styles.clearTxt}>Clear</Text></Pressable> : null}
+            {!editingId && (
+              <Pressable focusable={false} onPress={addGroup} disabled={!canAddGroup} style={[styles.addGroupBtn, !canAddGroup && { opacity: 0.35 }]}>
+                <Text style={styles.addGroupTxt}>+ Add group</Text>
+              </Pressable>
+            )}
+            <Pressable focusable={false} onPress={commitClip} disabled={!canSave} style={[styles.doneBtn, !canSave && { opacity: 0.35 }]}>
+              <Text style={styles.doneTxt}>{saving ? 'Saving…' : editingId ? 'Save changes ↵' : groupCount > 0 ? `Save clip (${groupCount}) ↵` : 'Save clip ↵'}</Text>
             </Pressable>
           </View>
 
@@ -572,6 +571,8 @@ const styles = StyleSheet.create({
   clearTxt: { color: C.dim, fontSize: 12, fontWeight: '600' },
   doneBtn: { backgroundColor: C.accent, borderRadius: 9, height: 36, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' },
   doneTxt: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  addGroupBtn: { backgroundColor: '#1D9E75', borderRadius: 9, height: 36, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+  addGroupTxt: { color: '#fff', fontSize: 13, fontWeight: '800' },
 
   board: { backgroundColor: C.bg, flexDirection: 'row', gap: 14, paddingHorizontal: 18, paddingTop: 11, paddingBottom: 13 },
   catCol: { minWidth: 0 },
