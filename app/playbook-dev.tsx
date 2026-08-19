@@ -7,7 +7,7 @@
 // which will read installs/install_plays/play_versions from Supabase. Delete or
 // gate this route before it would ever matter to a real user.
 
-import PlayDiagram from '@/components/PlayDiagram';
+import PlayPlayer from '@/components/PlayPlayer';
 import { SEED_PLAYS } from '@/lib/core/playbook/seeds';
 import { goBackOrHome } from '@/lib/nav';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -19,14 +19,14 @@ export default function PlaybookDev() {
         <Text style={styles.backTxt}>← Back</Text>
       </Pressable>
       <Text style={styles.eyebrow}>PLAYBOOK · DEV PREVIEW</Text>
-      <Text style={styles.h1}>Seed plays, rendered in-app</Text>
-      <Text style={styles.sub}>Dark route — not in navigation. Proves the pure renderer draws on the real web surface.</Text>
+      <Text style={styles.h1}>Seed plays — press ▶ to run them</Text>
+      <Text style={styles.sub}>Dark route — not in navigation. Press Play (or scrub / step) to watch the five move along their routes.</Text>
 
       <View style={styles.grid}>
         {SEED_PLAYS.map((p, i) => (
           <View key={i} style={styles.card}>
             <Text style={styles.name}>{p.name}</Text>
-            <PlayDiagram doc={p} />
+            <PlayPlayer doc={p} />
           </View>
         ))}
       </View>

@@ -124,3 +124,61 @@ export function renderPlaySvg(doc: PlayDoc, theme: Theme = DEFAULT_THEME): strin
   }).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">${MARKERS}${court}${actions}${tokens}${notes}</svg>`;
 }
+
+// ── Interactive playback ──────────────────────────────────────────────
+// Same pure-function idea, one extra input: t (0..1) = progress through the
+// play. The frame shows the routes as faint "ghosts" plus every token AT its
+// position for that instant, so pressing play animates the five moving along
+// their routes in sequence. Web renders this by re-drawing on a rAF loop.
+
+// Point at fraction u (0..1) along a normalised polyline, by arc length.
+function pointAlong(path: Vec[], u: number): Vec {
+  if (u <= 0 || path.length === 1) return path[0];
+  if (u >= 1) return path[path.length - 1];
+  const segs: number[] = [];
+  let total = 0;
+  for (let i = 0; i < path.length - 1; i++) { const d = Math.hypot(path[i + 1].x - path[i].x, path[i + 1].y - path[i].y); segs.push(d); total += d; }
+  let target = u * total;
+  for (let i = 0; i < segs.length; i++) {
+    if (target <= segs[i] || i === segs.length - 1) {
+      const f = segs[i] ? target / segs[i] : 0;
+      return { x: path[i].x + (path[i + 1].x - path[i].x) * f, y: path[i].y + (path[i + 1].y - path[i].y) * f };
+    }
+    target -= segs[i];
+  }
+  return path[path.length - 1];
+}
+
+// Which token(s) an action moves. A pass/shot moves the ball; a dribble moves
+// the handler AND the ball; everything else moves the acting player.
+function moversFor(a: Action): string[] {
+  if (a.type === 'pass' || a.type === 'shot') return ['ball'];
+  const m = a.fromToken ? [a.fromToken] : [];
+  if (a.type === 'dribble') m.push('ball');
+  return m;
+}
+
+// Where a token sits at progress t. Actions run in sequence (equal slices) so
+// the play develops step by step; the latest action a token has entered wins.
+export function tokenPosAt(doc: PlayDoc, tokenId: string, t: number): Vec {
+  const base = doc.tokens.find(x => x.id === tokenId);
+  let pos: Vec = base ? base.pos : { x: 0.5, y: 0.5 };
+  const n = doc.actions.length || 1;
+  doc.actions.forEach((a, i) => {
+    if (!moversFor(a).includes(tokenId)) return;
+    const start = i / n, end = (i + 1) / n;
+    if (t <= start) return;
+    pos = pointAlong(a.path, Math.min(1, (t - start) / (end - start)));
+  });
+  return pos;
+}
+
+// A single animation frame at progress t (responsive svg — fills its box).
+export function renderPlayFrameSvg(doc: PlayDoc, t: number, theme: Theme = DEFAULT_THEME): string {
+  const s = doc.surface;
+  const { w, h } = surfaceSize(s);
+  const court = courtSvg(s, theme);
+  const routes = `<g opacity="0.3">${doc.actions.map(a => renderAction(a, s, theme)).join('')}</g>`;
+  const tokens = doc.tokens.map(tk => renderToken(tk.id, tk.kind, tk.label ?? '', px(tokenPosAt(doc, tk.id, t), s), theme)).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:100%;display:block">${MARKERS}${court}${routes}${tokens}</svg>`;
+}
