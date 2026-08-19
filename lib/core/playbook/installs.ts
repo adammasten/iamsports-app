@@ -35,12 +35,13 @@ export type InstallDetail = {
   plays: InstallPlay[];
 };
 
-export async function fetchInstalls(): Promise<InstallSummary[]> {
-  const { data, error } = await supabase
+export async function fetchInstalls(teamId?: string): Promise<InstallSummary[]> {
+  let q = supabase
     .from('installs')
     .select('id, title, note, team_id, published_at, teams(name), install_plays(count)')
-    .eq('status', 'published')
-    .order('published_at', { ascending: false });
+    .eq('status', 'published');
+  if (teamId) q = q.eq('team_id', teamId);
+  const { data, error } = await q.order('published_at', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((r: any) => ({
     id: r.id,

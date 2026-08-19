@@ -5,28 +5,31 @@
 
 import { fetchInstalls, type InstallSummary } from '@/lib/core/playbook/installs';
 import { goBackOrHome } from '@/lib/nav';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function PlaybookHome() {
+  const params = useLocalSearchParams();
+  const teamId = Array.isArray(params.teamId) ? params.teamId[0] : params.teamId;
+  const teamName = Array.isArray(params.teamName) ? params.teamName[0] : params.teamName;
   const [installs, setInstalls] = useState<InstallSummary[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    fetchInstalls()
+    fetchInstalls(teamId || undefined)
       .then(d => { if (alive) setInstalls(d); })
       .catch(e => { if (alive) setErr(e?.message ?? String(e)); });
     return () => { alive = false; };
-  }, []);
+  }, [teamId]);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Pressable onPress={() => goBackOrHome()} hitSlop={8} style={styles.back}>
         <Text style={styles.backTxt}>← Back</Text>
       </Pressable>
-      <Text style={styles.eyebrow}>PLAYBOOK</Text>
+      <Text style={styles.eyebrow}>{teamName ? teamName.toUpperCase() : 'PLAYBOOK'}</Text>
       <Text style={styles.h1}>Installs</Text>
       <Text style={styles.sub}>What your coaches have published. Tap one to run the plays.</Text>
 

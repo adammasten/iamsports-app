@@ -59,6 +59,23 @@ export default function HomeScreen() {
   const [wallError, setWallError] = useState<string | null>(null);
   const [visiblePosts, setVisiblePosts] = useState<FilterableItem[]>([]);
 
+  // Playbook entry — shown only when the active team has a published install, so
+  // the feature stays dark on every team we haven't seeded (RLS limits the count
+  // to installs this member is allowed to see).
+  const [hasPlaybook, setHasPlaybook] = useState(false);
+  useEffect(() => {
+    const team = activeTeam;
+    if (!team) { setHasPlaybook(false); return; }
+    let alive = true;
+    supabase
+      .from('installs')
+      .select('id', { count: 'exact', head: true })
+      .eq('team_id', team.id)
+      .eq('status', 'published')
+      .then(({ count }) => { if (alive) setHasPlaybook((count ?? 0) > 0); });
+    return () => { alive = false; };
+  }, [activeTeam]);
+
   // Batch-loaded tag data for the feed: each post's tag set (by contentId) and
   // tag metadata (id → name/category). Three queries total, no N+1 (see effect).
   const [tagsByContentId, setTagsByContentId] = useState<Map<string, Set<string>>>(new Map());
@@ -234,6 +251,15 @@ export default function HomeScreen() {
 
           <Text style={styles.subtitle}>The published team feed — watch-only. Make &amp; post from the Film Room.</Text>
 
+          {hasPlaybook ? (
+            <TouchableOpacity
+              style={styles.playbookBtn}
+              onPress={() => router.push({ pathname: '/playbook', params: { teamId: activeTeam.id, teamName: activeTeam.name } })}
+            >
+              <Text style={styles.playbookBtnText}>🏀  Playbook &amp; Installs</Text>
+            </TouchableOpacity>
+          ) : null}
+
           {/* Watch-only wall. Create a game via + (upload); manage games & make
               reels in the Film Room. */}
           <FilterBar
@@ -305,6 +331,8 @@ const styles = StyleSheet.create({
   teamHeadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headingAction: { marginLeft: 'auto' },
   subtitle: { color: '#888', fontSize: 13, lineHeight: 18, textAlign: 'center', marginBottom: 14 },
+  playbookBtn: { alignSelf: 'center', backgroundColor: '#534AB7', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, marginBottom: 14 },
+  playbookBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 
   primaryBtn: { backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 16 },
   primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
