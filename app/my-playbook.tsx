@@ -22,6 +22,7 @@ export default function MyPlaybook() {
   const [attachFor, setAttachFor] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [done, setDone] = useState<Record<string, string>>({});
+  const [filter, setFilter] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -42,6 +43,9 @@ export default function MyPlaybook() {
     finally { setBusyKey(null); }
   }
 
+  const allTags = plays ? Array.from(new Set(plays.flatMap(p => p.tags))).sort() : [];
+  const filtered = plays ? (filter ? plays.filter(p => p.tags.includes(filter)) : plays) : [];
+
   return (
     <View style={styles.root}>
       {Platform.OS === 'web' ? <WebTopNav /> : null}
@@ -55,22 +59,38 @@ export default function MyPlaybook() {
           <Text style={styles.newBtnTxt}>＋  New play</Text>
         </Pressable>
 
+        {plays && allTags.length > 0 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={styles.chipRowInner}>
+            <Pressable onPress={() => setFilter(null)} style={[styles.chip, !filter && styles.chipOn]}>
+              <Text style={[styles.chipTxt, !filter && styles.chipTxtOn]}>All ({plays.length})</Text>
+            </Pressable>
+            {allTags.map(t => (
+              <Pressable key={t} onPress={() => setFilter(f => (f === t ? null : t))} style={[styles.chip, filter === t && styles.chipOn]}>
+                <View style={[styles.tagDot, { backgroundColor: tagColor(t) }]} />
+                <Text style={[styles.chipTxt, filter === t && styles.chipTxtOn]}>{t}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
+
         {err ? <View style={styles.errBox}><Text style={styles.errTxt}>{err}</Text></View> : null}
         {plays === null ? (
           <ActivityIndicator color="#ff6a2c" style={{ marginTop: 30 }} />
         ) : plays.length === 0 ? (
           <Text style={styles.empty}>No plays yet. Tap “＋ New play” to draw your first — it’ll live here, ready to attach to any team.</Text>
+        ) : filtered.length === 0 ? (
+          <Text style={styles.empty}>No plays tagged “{filter}”.</Text>
         ) : (
           <View style={styles.grid}>
-            {plays.map((p, i) => (
+            {filtered.map((p, i) => (
               <View key={p.id} style={[styles.card, styles.gridCard]}>
                 <Text style={styles.name}>{p.doc?.name ?? p.name ?? `Play ${i + 1}`}</Text>
                 {p.tags.length > 0 ? (
                   <View style={styles.tagWrap}>
                     {p.tags.map(t => (
-                      <View key={t} style={[styles.tagChip, { borderColor: tagColor(t) }]}>
+                      <Pressable key={t} onPress={() => setFilter(t)} style={[styles.tagChip, { borderColor: tagColor(t) }]}>
                         <View style={[styles.tagDot, { backgroundColor: tagColor(t) }]} /><Text style={styles.tagChipTxt}>{t}</Text>
-                      </View>
+                      </Pressable>
                     ))}
                   </View>
                 ) : null}
@@ -112,8 +132,14 @@ const styles = StyleSheet.create({
   eyebrow: { color: '#ff6a2c', fontSize: 12, fontWeight: '800', letterSpacing: 1.6, marginTop: 8 },
   h1: { color: '#f1f4f6', fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginTop: 6 },
   sub: { color: '#9db0bd', fontSize: 14, marginTop: 6, marginBottom: 14, lineHeight: 20 },
-  newBtn: { alignSelf: 'flex-start', backgroundColor: '#ff6a2c', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10, marginBottom: 14 },
+  newBtn: { alignSelf: 'flex-start', backgroundColor: '#ff6a2c', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10, marginBottom: 10 },
   newBtnTxt: { color: '#160b02', fontSize: 14, fontWeight: '800' },
+  chipRow: { marginBottom: 6 },
+  chipRowInner: { gap: 8, paddingRight: 20, paddingVertical: 4 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  chipOn: { backgroundColor: '#ff6a2c', borderColor: '#ff6a2c' },
+  chipTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
+  chipTxtOn: { color: '#160b02' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
   gridCard: { flexBasis: '30%', flexGrow: 1, minWidth: 250, maxWidth: 380, marginTop: 0 },
   card: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 16, padding: 16, gap: 10 },
