@@ -30,6 +30,9 @@ const CAT_COLOR: Record<string, string> = {
 // Event-tag hotkey pool (players use the number row). Reserved keys — space,
 // arrows, enter, backspace, and I/O (mark In/Out) — are never in here.
 const EVENT_KEYS = 'QWERTYUPASDFGHJKLZXCVBNM'.split('');
+// Playback-speed cycle: normal → 1.2× → 1.5× → 2× → back. One tap-to-cycle chip
+// tucked into the transport row (matches the mobile tagger).
+const PLAYBACK_SPEEDS = [1, 1.2, 1.5, 2];
 
 type Tag = { id: string; name: string; category: string };
 type Built = { id: string; name: string; category: string };
@@ -76,6 +79,7 @@ export default function TaggingStudioWeb() {
   // rather than building a new one. Save writes changes; Cancel exits.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [barWidth, setBarWidth] = useState(0);
+  const [speed, setSpeed] = useState(1);
   // Measured pixel size of the video box. On web, expo-video's <video> uses a
   // percentage height that won't resolve against a flex-computed box, so
   // contentFit can't letterbox and the frame stretches. Feeding explicit px
@@ -191,6 +195,9 @@ export default function TaggingStudioWeb() {
 
   // ── player controls ──
   const togglePlay = useCallback(() => { try { isPlaying ? player.pause() : player.play(); } catch {} }, [player, isPlaying]);
+  const cycleSpeed = useCallback(() => {
+    setSpeed(s => PLAYBACK_SPEEDS[(PLAYBACK_SPEEDS.indexOf(s) + 1) % PLAYBACK_SPEEDS.length]);
+  }, []);
   const seekBy = useCallback((d: number) => { try { player.currentTime = Math.max(0, Math.min(duration || 0, (player.currentTime || 0) + d)); } catch {} }, [player, duration]);
   const seekToX = useCallback((x: number) => { if (barWidth <= 0 || duration <= 0) return; try { player.currentTime = Math.max(0, Math.min(duration, (x / barWidth) * duration)); } catch {} }, [player, barWidth, duration]);
 
@@ -336,6 +343,12 @@ export default function TaggingStudioWeb() {
     } catch {}
   }, []);
 
+  // Apply playback rate; re-assert once the video is ready (rate can reset on load).
+  useEffect(() => {
+    if (!videoReady) return;
+    try { player.playbackRate = speed; } catch {}
+  }, [speed, videoReady, player]);
+
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
   const builtSet = new Set(building.map(b => b.id));
   const scrub = Gesture.Pan().minDistance(0)
@@ -428,6 +441,9 @@ export default function TaggingStudioWeb() {
               <Pressable focusable={false} style={styles.tBtn} onPress={() => seekBy(-5)}><Text style={styles.tBtnTxt}>−5s</Text></Pressable>
               <Pressable focusable={false} style={[styles.tBtn, styles.tPlay]} onPress={togglePlay}><Text style={styles.tPlayTxt}>{isPlaying ? '❚❚' : '▶'}</Text></Pressable>
               <Pressable focusable={false} style={styles.tBtn} onPress={() => seekBy(5)}><Text style={styles.tBtnTxt}>+5s</Text></Pressable>
+              <Pressable focusable={false} style={[styles.tBtn, speed !== 1 && styles.tSpeedOn]} onPress={cycleSpeed}>
+                <Text style={[styles.tBtnTxt, speed !== 1 && styles.tSpeedOnTxt]}>{speed}×</Text>
+              </Pressable>
               <View style={styles.tDivider} />
               {/* Clip trim points — the most-used action. Big, plain-language,
                   color-matched to the green/orange scrubber ticks so it's clear
@@ -591,6 +607,8 @@ const styles = StyleSheet.create({
   transport: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
   tBtn: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 8, height: 32, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
   tBtnTxt: { color: C.text, fontSize: 13, fontWeight: '700' },
+  tSpeedOn: { backgroundColor: C.star, borderColor: C.star },
+  tSpeedOnTxt: { color: '#1a1030' },
   tPlay: { backgroundColor: '#fff', minWidth: 46 },
   tPlayTxt: { color: '#000', fontSize: 14, fontWeight: '800' },
   tTime: { color: C.text, fontSize: 13, fontWeight: '700', marginLeft: 4 },

@@ -41,6 +41,12 @@ function formatTime(seconds: number) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// Playback-speed cycle: normal → 1.2× → 1.5× → 2× → back to normal. A single
+// tap-to-cycle chip (not a 4-button control) so it slides into the tight
+// bottom-row without stealing space. Same set on web + mobile.
+const PLAYBACK_SPEEDS = [1, 1.2, 1.5, 2];
+const speedLabel = (r: number) => `${r}×`;
+
 // Converts a #RRGGBB hex string to rgba(...) with the given alpha. Used for
 // translucent chip backgrounds/borders without polluting the CATEGORIES literal
 // (which mirrors the portrait UI's shape — see CLAUDE.md).
@@ -181,6 +187,9 @@ export default function TaggingOverlayScreen() {
   // barWidth captured via onLayout for pixel→time conversion.
   const [dragging, setDragging] = useState(false);
   const [barWidth, setBarWidth] = useState(0);
+  // Playback speed (1× default). Re-asserted whenever it changes or the video
+  // (re)loads — some players reset rate to 1 on a fresh source.
+  const [speed, setSpeed] = useState(1);
 
   // Existing clips already tagged on this video — drives the scrub-bar marker
   // strip + the "now tagged" readout in WATCH mode, so a reviewer can SEE what's
@@ -440,6 +449,16 @@ export default function TaggingOverlayScreen() {
 
   const videoReady = statusEvent.status === 'readyToPlay';
   const retriesExhausted = (statusEvent.status === 'error' && retryCountRef.current >= 3) || signFailed;
+
+  // Apply the chosen playback rate to the player. Keyed on videoReady too so the
+  // rate re-asserts after the source loads (native can reset it to 1 on load).
+  useEffect(() => {
+    if (!videoReady) return;
+    try { player.playbackRate = speed; } catch {}
+  }, [speed, videoReady, player]);
+  const cycleSpeed = useCallback(() => {
+    setSpeed(s => PLAYBACK_SPEEDS[(PLAYBACK_SPEEDS.indexOf(s) + 1) % PLAYBACK_SPEEDS.length]);
+  }, []);
   // Build-then-commit: build tags anytime. "Add group" needs tags in the current
   // group; "Save clip" needs a valid Start+End window AND at least one group
   // (staged, or the current un-added one).
@@ -958,6 +977,13 @@ export default function TaggingOverlayScreen() {
               >
                 <Text style={styles.skipBtnText}>+5s</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.skipBtn, speed !== 1 && styles.speedBtnOn]}
+                onPress={cycleSpeed}
+                hitSlop={6}
+              >
+                <Text style={[styles.skipBtnText, speed !== 1 && styles.speedBtnOnText]}>{speedLabel(speed)}</Text>
+              </TouchableOpacity>
               {!isWatch && existingClips.length > 0 && (
                 <>
                   <TouchableOpacity style={styles.tagNavBtn} onPress={() => jumpToTag(-1)} hitSlop={6}>
@@ -1143,6 +1169,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   skipBtnText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  speedBtnOn: { backgroundColor: '#f5c518' },
+  speedBtnOnText: { color: '#1a1030', fontWeight: '800' },
 
   markGroup: {
     flexDirection: 'row',
