@@ -1,0 +1,18 @@
+-- Door #2 — applied live 2026-08-20 via Supabase MCP (door2_storage_owner_scope_update).
+-- Closes "any authenticated user can overwrite any Videos object": the UPDATE
+-- policy is now owner-scoped, and a BEFORE INSERT trigger guarantees every
+-- authenticated upload is owned at creation (so owner-scoped UPDATE holds
+-- through the TUS PATCH chunks — both web + mobile PATCH send the user's JWT).
+-- Service-role uploads (reel exports, thumbnails, 720p copies) stay owner-null
+-- and bypass RLS, so they're unaffected.
+--
+-- Investigation finding: null-owner objects were almost all SERVICE-ROLE
+-- artifacts, NOT client uploads — client TUS uploads already set owner. So this
+-- was safe (INSERT left blanket; only the overwrite vector was closed).
+--
+-- REVERT (only if a real upload breaks):
+--   drop policy if exists "videos_authenticated_update" on storage.objects;
+--   create policy "videos_authenticated_update" on storage.objects
+--     for update to authenticated using (bucket_id='Videos') with check (bucket_id='Videos');
+--
+-- (Full applied body is in the migration; see live policy/trigger for the source.)
