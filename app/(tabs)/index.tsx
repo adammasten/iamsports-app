@@ -64,6 +64,9 @@ export default function HomeScreen() {
   // to installs this member is allowed to see).
   const [hasPlaybook, setHasPlaybook] = useState(false);
   useEffect(() => {
+    // Playbook is WEB-ONLY for now (diagrams have no native renderer yet), so
+    // never surface its entry on the phone — no broken-diagram dead ends.
+    if (Platform.OS !== 'web') { setHasPlaybook(false); return; }
     const team = activeTeam;
     if (!team) { setHasPlaybook(false); return; }
     let alive = true;
