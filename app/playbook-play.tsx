@@ -92,8 +92,8 @@ export default function PlayDetail() {
               <View style={styles.noteBox}><Text style={styles.noteLabel}>COACH’S NOTES</Text><Text style={styles.noteTxt}>{play.doc.note}</Text></View>
             ) : null}
 
-            {/* Copy to another team */}
-            {isCoach && otherTeams.length > 0 ? (
+            {/* Copy to another team — web-only (a "making" action). */}
+            {isCoach && otherTeams.length > 0 && Platform.OS === 'web' ? (
               <View style={styles.copyBox}>
                 <Pressable onPress={() => setCopyOpen(o => !o)}>
                   <Text style={styles.copyToggle}>📋  Copy this play to another team  {copyOpen ? '▲' : '▼'}</Text>
@@ -117,7 +117,7 @@ export default function PlayDetail() {
             {/* Film */}
             <View style={styles.filmHead}>
               <Text style={styles.filmTitle}>🎬  Film</Text>
-              {isCoach ? (
+              {isCoach && Platform.OS === 'web' ? (
                 <Pressable style={styles.linkBtn} onPress={() => router.push({ pathname: '/playbook-link', params: { playId: play.id, teamId: play.teamId, version: String(play.latestVersion || 1) } })}>
                   <Text style={styles.linkBtnTxt}>＋ Link film</Text>
                 </Pressable>
@@ -133,7 +133,7 @@ export default function PlayDetail() {
                     <Text style={styles.clipType}>{LINK_TYPE_LABEL[c.linkType]}</Text>
                   </View>
                   <Pressable style={styles.watchBtn} onPress={() => watch(c)}><Text style={styles.watchTxt}>▶ Watch</Text></Pressable>
-                  {isCoach ? <Pressable hitSlop={8} onPress={() => remove(c.linkId)}><Text style={styles.unlink}>✕</Text></Pressable> : null}
+                  {isCoach && Platform.OS === 'web' ? <Pressable hitSlop={8} onPress={() => remove(c.linkId)}><Text style={styles.unlink}>✕</Text></Pressable> : null}
                 </View>
               ))
             )}

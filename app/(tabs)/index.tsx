@@ -64,9 +64,8 @@ export default function HomeScreen() {
   // to installs this member is allowed to see).
   const [hasPlaybook, setHasPlaybook] = useState(false);
   useEffect(() => {
-    // Playbook is WEB-ONLY for now (diagrams have no native renderer yet), so
-    // never surface its entry on the phone — no broken-diagram dead ends.
-    if (Platform.OS !== 'web') { setHasPlaybook(false); return; }
+    // VIEWING plays works on mobile (react-native-svg renders the diagrams);
+    // creating/editing stays web-only. So the viewer entry shows on both.
     const team = activeTeam;
     if (!team) { setHasPlaybook(false); return; }
     let alive = true;

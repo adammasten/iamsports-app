@@ -42,9 +42,12 @@ export default function AllPlaysScreen() {
       <Text style={styles.h1}>All Plays</Text>
       <Text style={styles.sub}>Everything this team runs — every play from every week, in one place.</Text>
 
-      <Pressable style={styles.newBtn} onPress={() => router.push('/my-playbook')}>
-        <Text style={styles.newBtnTxt}>＋  Add a play from My Playbook</Text>
-      </Pressable>
+      {/* Making/attaching plays is web-only for now (My Playbook + editor). */}
+      {Platform.OS === 'web' ? (
+        <Pressable style={styles.newBtn} onPress={() => router.push('/my-playbook')}>
+          <Text style={styles.newBtnTxt}>＋  Add a play from My Playbook</Text>
+        </Pressable>
+      ) : null}
 
       {plays && allTags.length > 0 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={styles.chipRowInner}>
