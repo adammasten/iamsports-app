@@ -1,16 +1,15 @@
 -- =====================================================================
--- Schedule the 30-day purge (run in the Supabase SQL editor by Adam).
--- Needs the SERVICE-ROLE key, which Claude doesn't have — that's why this
--- one step is yours. pg_cron + pg_net are already enabled; the edge function
--- purge-deleted is already deployed and gated to the service-role key.
+-- Schedule the 30-day purge. APPLIED LIVE via the Supabase MCP (cron.schedule).
+--
+-- Auth: the cron authenticates to the purge-deleted edge function with the
+-- NARROW 'purge_secret' (see migration_purge_secret_and_reader.sql), read from
+-- Vault at call time — NOT the service-role key. pg_cron + pg_net + supabase_vault
+-- are enabled; the edge function purge-deleted is deployed and gated on that
+-- secret. This whole file was applied by Claude via the MCP — no manual step.
 -- =====================================================================
 
--- 1) Store the service-role key in Vault (ONCE). Get it from:
---    Supabase Dashboard → Project Settings → API → "service_role" secret.
-select vault.create_secret('PASTE_SERVICE_ROLE_KEY_HERE', 'service_role_key');
-
--- 2) Schedule the purge daily at 04:00 UTC. It calls the edge function with the
---    key from Vault; the function only touches rows soft-deleted > 30 days ago.
+-- Runs daily at 04:00 UTC. Reads the gate secret from Vault and POSTs to the
+-- edge function, which purges only rows soft-deleted > 30 days ago.
 select cron.schedule(
   'purge-deleted-daily',
   '0 4 * * *',
@@ -18,7 +17,7 @@ select cron.schedule(
   select net.http_post(
     url     := 'https://wscfpkaltajnrhiusoze.supabase.co/functions/v1/purge-deleted',
     headers := jsonb_build_object(
-      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key'),
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'purge_secret'),
       'Content-Type',  'application/json'
     )
   );
@@ -28,5 +27,6 @@ select cron.schedule(
 -- To verify / manage later:
 --   select * from cron.job;                          -- see the schedule
 --   select * from cron.job_run_details order by start_time desc limit 5;  -- recent runs
+--   select id, status_code, content from net._http_response order by id desc limit 5;  -- function replies
 --   select cron.unschedule('purge-deleted-daily');   -- remove it
 -- =====================================================================

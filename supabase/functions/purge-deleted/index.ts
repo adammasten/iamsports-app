@@ -1,10 +1,13 @@
-// purge-deleted — deployed live via Supabase MCP (deploy_edge_function).
+// purge-deleted — deployed live via the Supabase MCP (deploy_edge_function).
 // Purges content soft-deleted > 30 days ago: removes the physical storage files
 // (via the storage API — the reason this is an edge function, not SQL), then
 // hard-deletes the rows and any shares pointing at them. Idempotent.
-// CUSTOM AUTH: only a caller with the service-role key (the scheduled cron) may
-// run it — verify_jwt is OFF; the bearer check below is the gate.
-// Scheduling: see migration_purge_schedule.sql (run by Adam — needs the key).
+//
+// CUSTOM AUTH: gated on the NARROW 'purge_secret' (stored in Vault, read via the
+// get_purge_secret() SECURITY DEFINER RPC) — NOT the service-role key. The daily
+// cron therefore carries a token that can do nothing but trigger this purge.
+// verify_jwt is OFF; the bearer check below is the gate.
+// Scheduling: see migration_purge_schedule.sql.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -14,11 +17,17 @@ const SUPA_URL = Deno.env.get("SUPABASE_URL")!;
 const WINDOW_DAYS = 30;
 
 Deno.serve(async (req) => {
-  if ((req.headers.get("Authorization") ?? "") !== `Bearer ${SERVICE_ROLE}`) {
+  const supa = createClient(SUPA_URL, SERVICE_ROLE);
+
+  // Gate on the narrow purge secret (from Vault), not the service-role key.
+  const { data: expected, error: secretErr } = await supa.rpc("get_purge_secret");
+  if (secretErr || !expected) {
+    return new Response("Gate secret unavailable", { status: 500 });
+  }
+  if ((req.headers.get("Authorization") ?? "") !== `Bearer ${expected}`) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const supa = createClient(SUPA_URL, SERVICE_ROLE);
   const cutoff = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   const { data: vids }  = await supa.from("videos").select("id, url").not("deleted_at", "is", null).lt("deleted_at", cutoff);
