@@ -1230,17 +1230,16 @@ export default function MyWorkScreen() {
                     style={styles.looseCard}
                     onLongPress={() => confirmDeleteVideo(v)}
                     onPress={() => v.uploadStatus !== 'ready'
-                      ? Alert.alert(v.label, v.uploadStatus === 'uploading' ? 'Still uploading — check back in a moment.' : 'This upload didn’t finish.', [
-                          { text: 'Delete', style: 'destructive', onPress: () => confirmDeleteVideo(v) },
-                          { text: 'Cancel', style: 'cancel' },
-                        ])
-                      : Alert.alert(v.label, undefined, [
-                          { text: 'Add to a game', onPress: () => openAttachPicker(v) },
-                          { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, personal: '1' } }) },
-                          { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
-                          { text: 'Rename', onPress: () => startVideoRename(v) },
-                          { text: 'Cancel', style: 'cancel' },
-                        ])}
+                      ? setOverflowSheet({ title: v.uploadStatus === 'uploading' ? `${v.label} — still uploading` : `${v.label} — upload didn’t finish`, options: [
+                          { label: 'Delete', destructive: true, onPress: () => confirmDeleteVideo(v) },
+                        ] })
+                      : setOverflowSheet({ title: v.label, options: [
+                          { label: 'Add to a game', onPress: () => openAttachPicker(v) },
+                          { label: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, personal: '1' } }) },
+                          { label: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },
+                          { label: 'Rename', onPress: () => startVideoRename(v) },
+                          { label: 'Delete', destructive: true, onPress: () => confirmDeleteVideo(v) },
+                        ] })}
                   >
                     <View style={styles.looseThumb}><Ionicons name="videocam-outline" size={22} color="#888" /></View>
                     <View style={styles.cardBody}>
