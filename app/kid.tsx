@@ -74,7 +74,7 @@ export default function KidWallScreen() {
   // Wall — player-audience shares a guardian has put on this kid's wall
   // (on_wall=true). Family-wide: every linked guardian sees the same wall.
   const [wall, setWall] = useState<{
-    shareId: string; contentType: string; audience: string; teamName: string | null;
+    shareId: string; contentType: string; contentId: string; audience: string; teamName: string | null;
     createdAt: string; title: string; storagePath: string | null; thumbnailPath: string | null;
     startTime: number | null; endTime: number | null; note: string | null;
   }[]>([]);
@@ -239,12 +239,24 @@ export default function KidWallScreen() {
   }, [guardians, amPrimary]);
 
   // Download a wall/inbox item to the device (camera roll on phone, browser
-  // download on web) — same helper the Film Room uses. Games have no single
-  // file to grab here (they're a bundle of videos), so they're skipped for now.
-  async function downloadItem(storagePath: string | null, title: string) {
-    if (!storagePath) { Alert.alert('Download', 'Open the game to download its videos.'); return; }
+  // download on web). A reel/video/clip is one file; a GAME fans out into all of
+  // its finished videos, each saved separately (same as the Film Room). A single
+  // stitched file would need a server-side ffmpeg concat — separate feature.
+  async function downloadItem(it: { contentType: string; contentId?: string | null; storagePath: string | null; title: string }) {
+    if (it.contentType === 'game' && it.contentId) {
+      const { data } = await supabase.from('videos')
+        .select('url, label').eq('game_id', it.contentId).is('deleted_at', null).eq('upload_status', 'ready');
+      const vids = (data ?? []).filter((v: any) => v.url).map((v: any) => ({ key: v.url as string, filename: `${it.title} - ${v.label ?? 'video'}` }));
+      if (vids.length === 0) { Alert.alert('Download', 'No finished videos to download yet.'); return; }
+      try {
+        const { saved, failed } = await downloadMedia(vids);
+        Alert.alert('Download', failed ? `Saved ${saved} of ${vids.length} — ${failed} couldn’t be saved.` : `Saved ${saved} video${saved === 1 ? '' : 's'} to your device.`);
+      } catch (e: any) { Alert.alert('Download', e?.message ?? 'Download failed.'); }
+      return;
+    }
+    if (!it.storagePath) { Alert.alert('Download', 'This can’t be downloaded.'); return; }
     try {
-      const { failed } = await downloadMedia([{ key: storagePath, filename: title }]);
+      const { failed } = await downloadMedia([{ key: it.storagePath, filename: it.title }]);
       Alert.alert('Download', failed ? 'Couldn’t save it.' : 'Saved to your device.');
     } catch (e: any) { Alert.alert('Download', e?.message ?? 'Download failed.'); }
   }
@@ -388,6 +400,7 @@ export default function KidWallScreen() {
       return {
         shareId: r.id,
         contentType: r.content_type,
+        contentId: c.content_id,
         audience: r.audience as string,
         teamName: r.teams?.name ?? null,
         createdAt: r.created_at,
@@ -926,7 +939,7 @@ export default function KidWallScreen() {
                       onPlay={() => openShared(item)}
                       note={item.note ? { text: item.note } : undefined}
                       actions={[
-                        { icon: 'download-outline', label: 'Download', onPress: () => downloadItem(item.storagePath, item.title) },
+                        { icon: 'download-outline', label: 'Download', onPress: () => downloadItem(item) },
                         ...(amPrimary ? [{ icon: 'trash-outline' as const, label: 'Take off wall', onPress: () => takeOffWall(item.shareId, item.title) }] : []),
                       ]}
                     />
