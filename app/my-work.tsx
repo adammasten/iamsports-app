@@ -268,6 +268,8 @@ export default function MyWorkScreen() {
   // Optional per-share note compose. `run` does the actual post(s) + set_share_note.
   const [noteSheet, setNoteSheet] = useState<{ audience: NoteAudience; run: (note: string) => Promise<void>; initialNote?: string } | null>(null);
   const [noteBusy, setNoteBusy] = useState(false);
+  // Manage-sharing sheet (modal, not Alert — so it works on web too).
+  const [manageSheet, setManageSheet] = useState<{ item: Postable; destinations: Destination[] } | null>(null);
 
   async function submitNote(note: string) {
     if (!noteSheet) return;
@@ -921,19 +923,13 @@ export default function MyWorkScreen() {
 
   // Film Room "Manage sharing" sheet: an Alert listing each current destination
   // with an edit-note + remove action, plus "Share…" (the existing add flow).
+  // Web-safe: open a modal sheet instead of Alert.alert (whose button menu is a
+  // native-only pattern that renders nothing usable on the web app).
   function manageSharing(item: Postable, destinations: Destination[]) {
-    const label = (d: Destination) =>
-      d.kind === 'public' ? 'Public' : d.kind === 'team' ? d.teamName : d.kind === 'coaches' ? `${d.teamName} coaches` : `${d.kidName} (shared)`;
-    Alert.alert('Sharing', item.title, [
-      ...destinations.map(d => ({
-        text: `${d.note ? 'Edit' : 'Add'} note · ${label(d)}`,
-        onPress: () => editDestinationNote(item, d),
-      })),
-      ...destinations.map(d => ({ text: `Remove from ${label(d)}`, style: 'destructive' as const, onPress: () => removeDestination(item, d) })),
-      { text: 'Share…', onPress: () => confirmPostToWall(item) },
-      { text: 'Cancel', style: 'cancel' as const },
-    ]);
+    setManageSheet({ item, destinations });
   }
+  const destLabel = (d: Destination): string =>
+    d.kind === 'public' ? 'Public' : d.kind === 'team' ? d.teamName : d.kind === 'coaches' ? `${d.teamName} coaches` : `${d.kidName} (shared)`;
 
   // Download to the device — reel = its one file, game = all its videos. Goes
   // through getSignedVideoUrl → sign-media, so you can only download what you're
@@ -1455,6 +1451,38 @@ export default function MyWorkScreen() {
         </Modal>
       )}
 
+      {/* Manage an already-shared item — web-safe modal (was an Alert menu). */}
+      {manageSheet && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setManageSheet(null)}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setManageSheet(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>Sharing · {manageSheet.item.title}</Text>
+              <ScrollView style={styles.sheetScroll}>
+                {manageSheet.destinations.map((d, i) => (
+                  <View key={i} style={styles.manageRow}>
+                    <Text style={styles.manageDest} numberOfLines={1}>{destLabel(d)}</Text>
+                    <View style={styles.manageActions}>
+                      <TouchableOpacity onPress={() => { const it = manageSheet.item; setManageSheet(null); editDestinationNote(it, d); }}>
+                        <Text style={styles.manageNote}>{d.note ? 'Edit note' : 'Add note'}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => { const it = manageSheet.item; setManageSheet(null); removeDestination(it, d); }}>
+                        <Text style={styles.manageRemove}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+                <TouchableOpacity style={styles.sheetRow} onPress={() => { const it = manageSheet.item; setManageSheet(null); confirmPostToWall(it); }}>
+                  <Text style={styles.sheetRowText}>＋ Share to more…</Text>
+                </TouchableOpacity>
+              </ScrollView>
+              <TouchableOpacity style={styles.sheetCancel} onPress={() => setManageSheet(null)}>
+                <Text style={styles.sheetCancelText}>Done</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
       {/* Your Teams → pick a coached team for a team-wall post. */}
       {teamWallReel && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setTeamWallReel(null)}>
@@ -1661,6 +1689,11 @@ const styles = StyleSheet.create({
   sheetSectionHeader: { color: '#888', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 6 },
   sheetRow: { backgroundColor: '#222', borderRadius: 10, padding: 16, marginBottom: 8 },
   sheetRowText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  manageRow: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 8, gap: 8 },
+  manageDest: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  manageActions: { flexDirection: 'row', gap: 20 },
+  manageNote: { color: '#6c8cff', fontSize: 14, fontWeight: '700' },
+  manageRemove: { color: '#e2574a', fontSize: 14, fontWeight: '700' },
   sheetCancel: { padding: 14, alignItems: 'center', marginTop: 4 },
   sheetCancelText: { color: '#888', fontSize: 15 },
 });
