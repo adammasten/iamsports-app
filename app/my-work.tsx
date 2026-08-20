@@ -8,6 +8,7 @@ import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, Style
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
 import { downloadMedia } from '@/lib/native/download-media';
+import { stitchAndDownloadGame } from '@/lib/native/stitch-download';
 import {
   type CacheProgress,
   type CacheStatus,
@@ -222,6 +223,7 @@ export default function MyWorkScreen() {
   const [tagMeta, setTagMeta] = useState<Map<string, { name: string; category: string }>>(new Map());
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [stitch, setStitch] = useState<{ title: string; label: string; progress: number } | null>(null);
   const [savedItems, setSavedItems] = useState<SavedEntry[]>([]);
 
   // Per-video offline cache state. Aggregated into per-game "Save for offline"
@@ -1025,6 +1027,24 @@ export default function MyWorkScreen() {
     }
   }
 
+  // Combine a game's videos into ONE file (server-side stitch) and save it.
+  // Slower than downloadGame (re-encodes on the server) — an explicit opt-in.
+  async function stitchGame(game: Game) {
+    const keys = game.videos.filter(v => v.url && v.uploadStatus === 'ready').map(v => v.url);
+    if (keys.length === 0) { Alert.alert('Combine', 'This game has no finished videos yet.'); return; }
+    if (keys.length === 1) { downloadGame(game); return; } // one video — nothing to combine
+    setStitch({ title: game.title, label: 'Starting…', progress: 0 });
+    try {
+      await stitchAndDownloadGame(keys, game.title, (s) =>
+        setStitch({ title: game.title, label: s.label, progress: s.progress }));
+      Alert.alert('Combine', 'Saved the combined game to your device.');
+    } catch (e: any) {
+      Alert.alert('Combine', e?.message ?? 'Combining failed.');
+    } finally {
+      setStitch(null);
+    }
+  }
+
   // "Saved to My Film" — live bookmarks to shares. Resolve each via
   // resolve_shared_content (which re-checks entitlement); anything you've lost
   // access to simply drops out. Save lives in the single-file shared viewer, so
@@ -1353,7 +1373,8 @@ export default function MyWorkScreen() {
                         { label: 'Rename', onPress: () => openRename('game', game.id, game.title) },
                         { label: 'Edit game details', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
                         { label: 'Edit lineup (who played)', onPress: () => router.push({ pathname: '/edit-lineup', params: { gameId: game.id, gameTitle: game.title } }) },
-                        { label: 'Download', onPress: () => downloadGame(game) },
+                        { label: 'Download (all videos)', onPress: () => downloadGame(game) },
+                        { label: 'Combine into one file', onPress: () => stitchGame(game) },
                         { label: 'Delete game', destructive: true, onPress: () => confirmDeleteGame(game) },
                       ] })}
                       shareStatus={deriveShareStatus(game.destinations)}
@@ -1477,6 +1498,24 @@ export default function MyWorkScreen() {
               </TouchableOpacity>
             </Pressable>
           </Pressable>
+        </Modal>
+      )}
+
+      {/* Combine-into-one-file progress — long op (server re-encode), so show it live. */}
+      {stitch && (
+        <Modal visible transparent animationType="fade">
+          <View style={styles.sheetBackdrop}>
+            <View style={styles.sheet}>
+              <Text style={styles.sheetTitle}>Combining · {stitch.title}</Text>
+              <View style={{ height: 8, borderRadius: 4, backgroundColor: '#2a2f3a', overflow: 'hidden', marginVertical: 14 }}>
+                <View style={{ height: 8, width: `${Math.max(4, Math.min(100, stitch.progress))}%`, backgroundColor: '#4c9aff' }} />
+              </View>
+              <Text style={{ color: '#9aa4b2', textAlign: 'center' }}>{stitch.label}</Text>
+              <Text style={{ color: '#6b7280', textAlign: 'center', fontSize: 12, marginTop: 10 }}>
+                This can take a few minutes — keep this screen open.
+              </Text>
+            </View>
+          </View>
         </Modal>
       )}
 
