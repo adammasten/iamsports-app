@@ -16,6 +16,7 @@ import { TeamLogo } from '@/components/team-logo';
 import { LoadError } from '@/components/load-error';
 import { withTimeout } from '@/lib/withTimeout';
 import ContentCard from '@/components/content-card/ContentCard';
+import { downloadMedia } from '@/lib/native/download-media';
 import { showContentActions } from './moderationActions';
 import { initials, teamColor } from './select-team';
 import WebTopNav from './components/WebTopNav';
@@ -236,6 +237,17 @@ export default function KidWallScreen() {
     initialTabRef.current = true;
     if (amPrimary) setSelectedTab('shared');
   }, [guardians, amPrimary]);
+
+  // Download a wall/inbox item to the device (camera roll on phone, browser
+  // download on web) — same helper the Film Room uses. Games have no single
+  // file to grab here (they're a bundle of videos), so they're skipped for now.
+  async function downloadItem(storagePath: string | null, title: string) {
+    if (!storagePath) { Alert.alert('Download', 'Open the game to download its videos.'); return; }
+    try {
+      const { failed } = await downloadMedia([{ key: storagePath, filename: title }]);
+      Alert.alert('Download', failed ? 'Couldn’t save it.' : 'Saved to your device.');
+    } catch (e: any) { Alert.alert('Download', e?.message ?? 'Download failed.'); }
+  }
   const totalCoaches = teamAudience.reduce((n, t) => n + (t.coaches?.length ?? 0), 0);
 
   // Refresh teams + guardians on every FOCUS, not just on mount. A parent can
@@ -913,7 +925,10 @@ export default function KidWallScreen() {
                       showPlayOnThumb
                       onPlay={() => openShared(item)}
                       note={item.note ? { text: item.note } : undefined}
-                      actions={amPrimary ? [{ icon: 'trash-outline', label: 'Take off wall', onPress: () => takeOffWall(item.shareId, item.title) }] : []}
+                      actions={[
+                        { icon: 'download-outline', label: 'Download', onPress: () => downloadItem(item.storagePath, item.title) },
+                        ...(amPrimary ? [{ icon: 'trash-outline' as const, label: 'Take off wall', onPress: () => takeOffWall(item.shareId, item.title) }] : []),
+                      ]}
                     />
                   </View>
                 );
