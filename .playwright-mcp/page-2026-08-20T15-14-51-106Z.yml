@@ -1,0 +1,38 @@
+- generic [ref=e3]:
+  - generic [ref=e9]:
+    - generic [ref=e10] [cursor=pointer]: ← Back
+    - generic [ref=e12]: PLAYBOOK · DEV PREVIEW
+    - generic [ref=e13]: Seed plays — press ▶ to run them
+    - generic [ref=e14]: Dark route — not in navigation. Press Play (or scrub / step) to watch the five move along their routes.
+    - generic [ref=e15]:
+      - generic [ref=e16]:
+        - generic [ref=e17]: Horns — 5 ball screen, 4 dive
+        - generic [ref=e20]:
+          - button "▶ Play" [ref=e21] [cursor=pointer]
+          - slider "Scrub play" [ref=e22] [cursor=pointer]: "0"
+          - button "Step" [ref=e23] [cursor=pointer]
+          - button "Reset" [ref=e24] [cursor=pointer]
+        - generic [ref=e25]:
+          - generic [ref=e26]: COACH’S NOTES
+          - generic [ref=e27]: Primary look. If they switch the ball screen, 4 dives hard and we throw over the top. Keep the corners spaced — don’t let their man help on the roll.
+      - generic [ref=e28]:
+        - generic [ref=e29]: Give & go — pass, cut, layup
+        - generic [ref=e32]:
+          - button "▶ Play" [ref=e33] [cursor=pointer]
+          - slider "Scrub play" [ref=e34] [cursor=pointer]: "0"
+          - button "Step" [ref=e35] [cursor=pointer]
+          - button "Reset" [ref=e36] [cursor=pointer]
+        - generic [ref=e37]:
+          - generic [ref=e38]: COACH’S NOTES
+          - generic [ref=e39]: "Teaching the basic read: pass, then cut HARD to the rim. If your defender turns their head to watch the ball, you’re already gone."
+      - generic [ref=e40]:
+        - generic [ref=e41]: BLOB 'Box' — 5 rim, 2 curl to corner
+        - generic [ref=e44]:
+          - button "▶ Play" [ref=e45] [cursor=pointer]
+          - slider "Scrub play" [ref=e46] [cursor=pointer]: "0"
+          - button "Step" [ref=e47] [cursor=pointer]
+          - button "Reset" [ref=e48] [cursor=pointer]
+        - generic [ref=e49]:
+          - generic [ref=e50]: COACH’S NOTES
+          - generic [ref=e51]: Late-game baseline out-of-bounds. First option is 5 at the front of the rim; if that’s covered, 2 curls off the down screen to the corner for the catch.
+  - progressbar [ref=e54]

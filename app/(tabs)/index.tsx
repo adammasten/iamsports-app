@@ -262,6 +262,15 @@ export default function HomeScreen() {
             </TouchableOpacity>
           ) : null}
 
+          {/* Recently Deleted — team admins only (the restore bin). */}
+          {activeRole === 'admin' ? (
+            <TouchableOpacity
+              onPress={() => router.push({ pathname: '/recently-deleted', params: { teamId: activeTeam.id, teamName: activeTeam.name } })}
+            >
+              <Text style={styles.recentlyDeletedLink}>🗑  Recently Deleted</Text>
+            </TouchableOpacity>
+          ) : null}
+
           {/* Watch-only wall. Create a game via + (upload); manage games & make
               reels in the Film Room. */}
           <FilterBar
@@ -335,6 +344,7 @@ const styles = StyleSheet.create({
   subtitle: { color: '#888', fontSize: 13, lineHeight: 18, textAlign: 'center', marginBottom: 14 },
   playbookBtn: { alignSelf: 'center', backgroundColor: '#534AB7', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, marginBottom: 14 },
   playbookBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  recentlyDeletedLink: { color: '#888', fontSize: 13, fontWeight: '600', textAlign: 'center', marginBottom: 14 },
 
   primaryBtn: { backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 16 },
   primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },

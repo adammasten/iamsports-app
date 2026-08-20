@@ -302,6 +302,7 @@ export default function MyWorkScreen() {
           .from('highlight_reels')
           .select('id, name, storage_path, thumbnail_path, duration_seconds, created_at')
           .eq('created_by_user_id', userId)
+          .is('deleted_at', null)
           .order('created_at', { ascending: false }),
       ));
     } catch (e: any) {
@@ -367,7 +368,8 @@ export default function MyWorkScreen() {
     const { data, error } = await supabase
       .from('videos')
       .select('id, label, url, thumbnail_path, sort_order, game_id, created_at, tagging_complete, event_type, upload_status, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))')
-      .eq('uploaded_by_user_id', userId);
+      .eq('uploaded_by_user_id', userId)
+      .is('deleted_at', null);
     if (error) { Alert.alert('Error', error.message); return; }
 
     const byId = new Map<string, Game>();
@@ -454,7 +456,7 @@ export default function MyWorkScreen() {
     const n = game.videos.length;
     Alert.alert(
       'Delete game',
-      `Delete “${game.title}”? This also deletes its ${n} video${n === 1 ? '' : 's'} and their clips. This can’t be undone.`,
+      `Delete “${game.title}”? It (and its ${n} video${n === 1 ? '' : 's'}) moves to Recently Deleted — a team admin can restore it for 30 days.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -476,14 +478,14 @@ export default function MyWorkScreen() {
   function confirmDeleteVideo(video: GameVideo) {
     Alert.alert(
       'Delete video',
-      `Delete “${video.label}”? This also deletes its clips. This can’t be undone.`,
+      `Delete “${video.label}”? It moves to Recently Deleted — restorable for 30 days.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            const { error } = await supabase.from('videos').delete().eq('id', video.id);
+            const { error } = await supabase.rpc('soft_delete_video', { p_video_id: video.id });
             if (error) { Alert.alert('Error', error.message); return; }
             loadGames();
           },
@@ -1144,9 +1146,9 @@ export default function MyWorkScreen() {
   // Web-safe: Alert.alert's buttons never fire on RN Web, so the reel delete was
   // impossible in the browser. confirm() maps to window.confirm on web.
   async function confirmDelete(reel: Reel) {
-    const ok = await confirm({ title: 'Delete reel', message: `Delete “${reel.name}”? This can’t be undone.`, confirmText: 'Delete', destructive: true });
+    const ok = await confirm({ title: 'Delete reel', message: `Delete “${reel.name}”? It moves to Recently Deleted — restorable for 30 days.`, confirmText: 'Delete', destructive: true });
     if (!ok) return;
-    const { error } = await supabase.from('highlight_reels').delete().eq('id', reel.id);
+    const { error } = await supabase.rpc('soft_delete_reel', { p_reel_id: reel.id });
     if (error) { Alert.alert('Error', error.message); return; }
     setReels(prev => prev.filter(r => r.id !== reel.id));
   }
