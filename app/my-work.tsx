@@ -1333,17 +1333,25 @@ export default function MyWorkScreen() {
                       ])}
                       shareStatus={deriveShareStatus(game.destinations)}
                       actions={(() => {
-                        const acts: CardAction[] = [{
-                          icon: game.destinations.length ? 'share-social' : 'share-outline',
-                          label: game.destinations.length ? 'Manage sharing' : 'Share',
-                          active: game.destinations.length > 0,
-                          onPress: () => {
-                            // A shared game plays only its finalized videos — nothing ready → nothing to share.
-                            if (!game.videos.some(v => v.uploadStatus === 'ready')) { Alert.alert('Share', 'No finished videos to share yet.'); return; }
-                            const item: Postable = { contentType: 'game', contentId: game.id, title: game.title };
-                            if (game.destinations.length) manageSharing(item, game.destinations); else confirmPostToWall(item);
+                        // Same action set as a reel — share · download · edit ·
+                        // delete — so every content type behaves identically.
+                        const item: Postable = { contentType: 'game', contentId: game.id, title: game.title };
+                        const acts: CardAction[] = [
+                          {
+                            icon: game.destinations.length ? 'share-social' : 'share-outline',
+                            label: game.destinations.length ? 'Manage sharing' : 'Share',
+                            active: game.destinations.length > 0,
+                            onPress: () => {
+                              // A shared game plays only its finalized videos — nothing ready → nothing to share.
+                              if (!game.videos.some(v => v.uploadStatus === 'ready')) { Alert.alert('Share', 'No finished videos to share yet.'); return; }
+                              if (game.destinations.length) manageSharing(item, game.destinations); else confirmPostToWall(item);
+                            },
                           },
-                        }];
+                          { icon: 'download-outline', label: 'Download', busy: downloadingId === game.id, onPress: () => downloadGame(game) },
+                          { icon: 'create-outline', label: 'Edit', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
+                          { icon: 'trash-outline', label: 'Delete', onPress: () => confirmDeleteGame(game) },
+                        ];
+                        // Games can also be cached on-device for offline tagging — an extra beyond the shared four.
                         const off = computeGameOffline(game, videoCacheStatus, videoCacheProgress);
                         if (off) acts.push({
                           icon: off.action === 'remove' ? 'cloud-done' : off.action === 'retry' ? 'refresh' : 'cloud-download-outline',
