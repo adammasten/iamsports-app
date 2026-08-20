@@ -270,6 +270,9 @@ export default function MyWorkScreen() {
   const [noteBusy, setNoteBusy] = useState(false);
   // Manage-sharing sheet (modal, not Alert — so it works on web too).
   const [manageSheet, setManageSheet] = useState<{ item: Postable; destinations: Destination[] } | null>(null);
+  // Inline rename (cross-platform modal) — reels + games rename the same way.
+  const [renameSheet, setRenameSheet] = useState<{ kind: 'reel' | 'game'; id: string } | null>(null);
+  const [renameText, setRenameText] = useState('');
 
   async function submitNote(note: string) {
     if (!noteSheet) return;
@@ -931,6 +934,28 @@ export default function MyWorkScreen() {
   const destLabel = (d: Destination): string =>
     d.kind === 'public' ? 'Public' : d.kind === 'team' ? d.teamName : d.kind === 'coaches' ? `${d.teamName} coaches` : `${d.kidName} (shared)`;
 
+  // Inline rename — one modal for reels + games, writing to the right column
+  // (reel → highlight_reels.name, game → games.title). Cross-platform (no Alert).
+  function openRename(kind: 'reel' | 'game', id: string, current: string) {
+    setRenameText(current);
+    setRenameSheet({ kind, id });
+  }
+  async function submitRename() {
+    const s = renameSheet;
+    const next = renameText.trim();
+    setRenameSheet(null);
+    if (!s || !next) return;
+    if (s.kind === 'reel') {
+      const { error } = await supabase.from('highlight_reels').update({ name: next }).eq('id', s.id);
+      if (error) { Alert.alert('Couldn’t rename', error.message); return; }
+      setReels(prev => prev.map(r => (r.id === s.id ? { ...r, name: next } : r)));
+    } else {
+      const { error } = await supabase.from('games').update({ title: next }).eq('id', s.id);
+      if (error) { Alert.alert('Couldn’t rename', error.message); return; }
+      setGames(prev => prev.map(g => (g.id === s.id ? { ...g, title: next } : g)));
+    }
+  }
+
   // Download to the device — reel = its one file, game = all its videos. Goes
   // through getSignedVideoUrl → sign-media, so you can only download what you're
   // entitled to watch. Camera roll on phone, browser download on web.
@@ -1295,7 +1320,7 @@ export default function MyWorkScreen() {
                         },
                       },
                       { icon: 'download-outline', label: 'Download', busy: downloadingId === reel.id, onPress: () => downloadReel(reel) },
-                      { icon: 'create-outline', label: 'Rename', onPress: () => router.push({ pathname: '/edit-reel', params: { id: reel.id } }) },
+                      { icon: 'create-outline', label: 'Rename', onPress: () => openRename('reel', reel.id, reel.name) },
                       { icon: 'trash-outline', label: 'Delete', onPress: () => confirmDelete(reel) },
                     ]}
                   />
@@ -1444,6 +1469,33 @@ export default function MyWorkScreen() {
                 )}
               </ScrollView>
               <TouchableOpacity style={styles.sheetCancel} onPress={() => setTierReel(null)}>
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Inline rename — cross-platform (reels + games). */}
+      {renameSheet && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setRenameSheet(null)}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setRenameSheet(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>Rename {renameSheet.kind}</Text>
+              <TextInput
+                style={styles.renameInput}
+                value={renameText}
+                onChangeText={setRenameText}
+                autoFocus
+                placeholder="Name"
+                placeholderTextColor="#888"
+                returnKeyType="done"
+                onSubmitEditing={submitRename}
+              />
+              <TouchableOpacity style={styles.sheetRow} onPress={submitRename}>
+                <Text style={styles.sheetRowText}>Save</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.sheetCancel} onPress={() => setRenameSheet(null)}>
                 <Text style={styles.sheetCancelText}>Cancel</Text>
               </TouchableOpacity>
             </Pressable>
@@ -1689,6 +1741,7 @@ const styles = StyleSheet.create({
   sheetSectionHeader: { color: '#888', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 12, marginBottom: 6 },
   sheetRow: { backgroundColor: '#222', borderRadius: 10, padding: 16, marginBottom: 8 },
   sheetRowText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  renameInput: { backgroundColor: '#1a1a1a', borderColor: '#333', borderWidth: 1, borderRadius: 10, color: '#fff', fontSize: 16, padding: 14, marginBottom: 10 },
   manageRow: { backgroundColor: '#1a1a1a', borderRadius: 10, padding: 14, marginBottom: 8, gap: 8 },
   manageDest: { color: '#fff', fontSize: 15, fontWeight: '700' },
   manageActions: { flexDirection: 'row', gap: 20 },
