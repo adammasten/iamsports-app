@@ -207,6 +207,23 @@ export async function loadContentFeed(
   }
   const wallKids = (key: string): string[] => [...(kidWalls.get(key) ?? [])];
 
+  // WALL-GATING. The home feed shows ONLY content that's been shared to a wall
+  // the user can see — team-audience shares for their teams + kid-wall shares.
+  // Anything sitting UNSHARED in the Film Room (a game not posted, a lowlight
+  // reel a coach hasn't shared) must NEVER appear here. This is what makes the
+  // home page "wall action, not film room action."
+  const sharedKeys = new Set<string>();
+  for (const [key] of kidWalls) sharedKeys.add(key);   // kid-wall (on_wall) shares
+  if (myTeamIds.length) {
+    const { data: teamShares } = await supabase
+      .from('shares')
+      .select('content_type, content_id')
+      .eq('audience', 'team')
+      .eq('visible', true)
+      .in('team_id', myTeamIds);
+    for (const s of (teamShares || []) as any[]) sharedKeys.add(`${s.content_type}:${s.content_id}`);
+  }
+
   // 2) VIDEOS — team footage OR kid-attached footage. Collapse a game's quarters
   //    into ONE 'game' item; game-less "loose" uploads stay individual.
   let videoErr: string | null = null;
@@ -231,6 +248,7 @@ export async function loadContentFeed(
       const teamId = (v.team_id as string) ?? (v.games?.team_id as string) ?? '';
       if (v.game_id) {
         const key = `game:${v.game_id}`;
+        if (!sharedKeys.has(key)) continue;   // wall-gate: unshared games stay in the Film Room
         const existing = gameItems.get(key);
         if (!existing) {
           gameItems.set(key, {
@@ -252,6 +270,7 @@ export async function loadContentFeed(
         }
       } else {
         const key = `video:${v.id}`;
+        if (!sharedKeys.has(key)) continue;   // wall-gate: unshared loose footage stays in the Film Room
         looseItems.push({
           key, kind: 'video', contentId: v.id,
           title: v.label ?? 'Video',
@@ -282,6 +301,7 @@ export async function loadContentFeed(
     reelErr = error?.message ?? null;
     for (const r of (data || []) as any[]) {
       const key = `reel:${r.id}`;
+      if (!sharedKeys.has(key)) continue;   // wall-gate: an unshared (e.g. lowlight) reel never hits the feed
       reelItems.push({
         key, kind: 'reel', contentId: r.id,
         title: r.name,

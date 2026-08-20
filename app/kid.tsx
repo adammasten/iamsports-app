@@ -76,6 +76,17 @@ export default function KidWallScreen() {
   const [wallLoading, setWallLoading] = useState(false);
   const [wallError, setWallError] = useState<string | null>(null);
 
+  // Games — team-audience shares (games/videos) posted to the kid's CURRENT
+  // teams' walls. This is the kid-profile "Games" section: the team's shared
+  // film, visible to every roster family (distinct from the guardian-curated Wall).
+  const [games, setGames] = useState<{
+    shareId: string; contentType: string; title: string; storagePath: string | null;
+    thumbnailPath: string | null; startTime: number | null; endTime: number | null;
+    teamName: string | null; createdAt: string; note: string | null;
+  }[]>([]);
+  const [gamesLoading, setGamesLoading] = useState(false);
+  const [gamesError, setGamesError] = useState<string | null>(null);
+
   // Viewer's teams where they can attach players (coaching roles), deduped.
   const coachingTeams = Array.from(
     new Map(
@@ -366,6 +377,43 @@ export default function KidWallScreen() {
     setWall(items);
     setWallLoading(false);
   }
+
+  // Games shared to this kid's current teams (team-audience game/video shares).
+  async function loadGames() {
+    if (!playerId) return;
+    const teamIds = kidTeams.map(t => t.team_id);
+    if (teamIds.length === 0) { setGames([]); setGamesLoading(false); return; }
+    setGamesLoading(true); setGamesError(null);
+    let rows: any[] | null; let error: any;
+    try {
+      ({ data: rows, error } = await withTimeout(supabase
+        .from('shares')
+        .select('id, content_type, team_id, created_at, note, teams ( name )')
+        .in('team_id', teamIds)
+        .eq('audience', 'team')
+        .in('content_type', ['game', 'video'])
+        .eq('visible', true)
+        .order('created_at', { ascending: false })));
+    } catch (e: any) { setGamesError(e?.message || 'Couldn’t load games.'); setGamesLoading(false); return; }
+    if (error) { setGamesError(error.message); setGamesLoading(false); return; }
+    const items = await Promise.all((rows || []).map(async (r: any) => {
+      const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
+      const c = Array.isArray(resolved) ? resolved[0] : null;
+      return {
+        shareId: r.id, contentType: r.content_type,
+        title: c?.title ?? 'Shared game', storagePath: c?.storage_path ?? null,
+        thumbnailPath: c?.thumbnail_path ?? null, startTime: c?.start_time ?? null, endTime: c?.end_time ?? null,
+        teamName: r.teams?.name ?? null, createdAt: r.created_at, note: (r.note as string) ?? null,
+      };
+    }));
+    setGames(items);
+    setGamesLoading(false);
+  }
+
+  useEffect(() => {
+    if (selectedTab === 'games') loadGames();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTab, playerId, kidTeams.map(t => t.team_id).join(',')]);
 
   useEffect(() => {
     if (selectedTab === 'wall') loadWall();
@@ -852,6 +900,31 @@ export default function KidWallScreen() {
                       onPlay={() => openShared(item)}
                       note={item.note ? { text: item.note } : undefined}
                       actions={[{ icon: 'trash-outline', label: 'Take off wall', onPress: () => takeOffWall(item.shareId, item.title) }]}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+          )
+        ) : selectedTab === 'games' ? (
+          gamesLoading ? (
+            <ActivityIndicator size="large" color="#534AB7" />
+          ) : gamesError ? (
+            <LoadError message={gamesError} onRetry={loadGames} />
+          ) : games.length === 0 ? (
+            <Text style={styles.empty}>No games shared to this kid’s teams yet.{'\n'}When a coach posts a game to the team wall, it shows up here.</Text>
+          ) : (
+            <View style={Platform.OS === 'web' ? styles.feedGrid : styles.inboxList}>
+              {games.map(item => {
+                const typeLabel = item.contentType.charAt(0).toUpperCase() + item.contentType.slice(1);
+                return (
+                  <View key={item.shareId} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
+                    <ContentCard
+                      content={{ id: item.shareId, kind: 'game', title: item.title, meta: `${item.teamName ?? 'Team'} · ${new Date(item.createdAt).toLocaleDateString()}`, typeLabel, thumbnailKey: item.thumbnailPath }}
+                      onOpen={() => openShared(item)}
+                      showPlayOnThumb
+                      onPlay={() => openShared(item)}
+                      note={item.note ? { text: item.note } : undefined}
                     />
                   </View>
                 );
