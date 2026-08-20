@@ -273,6 +273,9 @@ export default function MyWorkScreen() {
   // Inline rename (cross-platform modal) — reels + games rename the same way.
   const [renameSheet, setRenameSheet] = useState<{ kind: 'reel' | 'game'; id: string } | null>(null);
   const [renameText, setRenameText] = useState('');
+  // Overflow "⋯ More" menu — a web-safe modal replacing the long-press Alert
+  // menus (Alert's button list is native-only; it did nothing on the web app).
+  const [overflowSheet, setOverflowSheet] = useState<{ title: string; options: { label: string; destructive?: boolean; onPress: () => void }[] } | null>(null);
 
   async function submitNote(note: string) {
     if (!noteSheet) return;
@@ -1303,11 +1306,11 @@ export default function MyWorkScreen() {
                       thumbnailKey: reel.thumbnailPath,
                     }}
                     onOpen={() => openReel(reel)}
-                    onLongPress={() => Alert.alert(reel.name, undefined, [
-                      { text: 'Edit reel (rename)', onPress: () => router.push({ pathname: '/edit-reel', params: { id: reel.id } }) },
-                      { text: 'Delete reel', style: 'destructive', onPress: () => confirmDelete(reel) },
-                      { text: 'Cancel', style: 'cancel' },
-                    ])}
+                    onLongPress={() => setOverflowSheet({ title: reel.name, options: [
+                      { label: 'Rename', onPress: () => openRename('reel', reel.id, reel.name) },
+                      { label: 'Edit reel details (tags, team)', onPress: () => router.push({ pathname: '/edit-reel', params: { id: reel.id } }) },
+                      { label: 'Delete reel', destructive: true, onPress: () => confirmDelete(reel) },
+                    ] })}
                     shareStatus={deriveShareStatus(reel.destinations)}
                     actions={[
                       {
@@ -1345,13 +1348,13 @@ export default function MyWorkScreen() {
                         thumbnailKey: game.videos.find(v => v.thumbnailPath)?.thumbnailPath ?? null,
                       }}
                       onOpen={() => router.push({ pathname: '/game-detail', params: { id: game.id, title: game.title } })}
-                      onLongPress={() => Alert.alert(game.title, undefined, [
-                        { text: 'Edit game', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
-                        { text: 'Edit lineup (who played)', onPress: () => router.push({ pathname: '/edit-lineup', params: { gameId: game.id, gameTitle: game.title } }) },
-                        { text: 'Download', onPress: () => downloadGame(game) },
-                        { text: 'Delete game', style: 'destructive', onPress: () => confirmDeleteGame(game) },
-                        { text: 'Cancel', style: 'cancel' },
-                      ])}
+                      onLongPress={() => setOverflowSheet({ title: game.title, options: [
+                        { label: 'Rename', onPress: () => openRename('game', game.id, game.title) },
+                        { label: 'Edit game details', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
+                        { label: 'Edit lineup (who played)', onPress: () => router.push({ pathname: '/edit-lineup', params: { gameId: game.id, gameTitle: game.title } }) },
+                        { label: 'Download', onPress: () => downloadGame(game) },
+                        { label: 'Delete game', destructive: true, onPress: () => confirmDeleteGame(game) },
+                      ] })}
                       shareStatus={deriveShareStatus(game.destinations)}
                       actions={(() => {
                         // Same action set as a reel — share · download · edit ·
@@ -1369,7 +1372,7 @@ export default function MyWorkScreen() {
                             },
                           },
                           { icon: 'download-outline', label: 'Download', busy: downloadingId === game.id, onPress: () => downloadGame(game) },
-                          { icon: 'create-outline', label: 'Edit', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
+                          { icon: 'create-outline', label: 'Rename', onPress: () => openRename('game', game.id, game.title) },
                           { icon: 'trash-outline', label: 'Delete', onPress: () => confirmDeleteGame(game) },
                         ];
                         // Games can also be cached on-device for offline tagging — an extra beyond the shared four.
@@ -1469,6 +1472,27 @@ export default function MyWorkScreen() {
                 )}
               </ScrollView>
               <TouchableOpacity style={styles.sheetCancel} onPress={() => setTierReel(null)}>
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Overflow menu — web-safe modal (replaces the native-only Alert menus). */}
+      {overflowSheet && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setOverflowSheet(null)}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setOverflowSheet(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>{overflowSheet.title}</Text>
+              <ScrollView style={styles.sheetScroll}>
+                {overflowSheet.options.map((o, i) => (
+                  <TouchableOpacity key={i} style={styles.sheetRow} onPress={() => { const fn = o.onPress; setOverflowSheet(null); fn(); }}>
+                    <Text style={[styles.sheetRowText, o.destructive && { color: '#e2574a' }]}>{o.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity style={styles.sheetCancel} onPress={() => setOverflowSheet(null)}>
                 <Text style={styles.sheetCancelText}>Cancel</Text>
               </TouchableOpacity>
             </Pressable>
