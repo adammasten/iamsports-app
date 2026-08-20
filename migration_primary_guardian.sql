@@ -1,0 +1,11 @@
+-- Primary-guardian inbox — applied live 2026-08-20 via Supabase MCP (primary_guardian_inbox).
+-- Primary guardian = the FIRST guardian linked to a kid (earliest parent_player_link).
+-- Only they get the "Shared with you" inbox + approve-to-wall; other guardians
+-- (grandparents, etc.) are wall-only viewers.
+--
+--   * is_primary_guardian(player_id) helper (earliest link).
+--   * shares_read: player-audience INBOX (on_wall=false) is primary-only; the WALL
+--     (on_wall=true) stays visible to every linked guardian.
+--   * kid_guardians RPC: exposes is_primary per guardian.
+-- App (kid.tsx): "Shared with you" tab hidden for non-primary; default tab = wall
+-- (primary bumped to inbox); "Take off wall" gated to primary. Web + mobile (same file).

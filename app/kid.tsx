@@ -7,7 +7,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -40,7 +40,11 @@ export default function KidWallScreen() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [gradClass, setGradClass] = useState('');
-  const [selectedTab, setSelectedTab] = useState('shared');
+  // Default to the WALL (the clean, watch-only view a grandparent wants). Once
+  // guardians resolve, a PRIMARY guardian is bumped to their "Shared with you"
+  // inbox (they curate). Runs once so it never overrides a manual tap.
+  const [selectedTab, setSelectedTab] = useState('wall');
+  const initialTabRef = useRef(false);
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -50,7 +54,7 @@ export default function KidWallScreen() {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [jerseyInput, setJerseyInput] = useState('');
   const [attaching, setAttaching] = useState(false);
-  const [guardians, setGuardians] = useState<{ user_id: string; name: string; relationship: string; is_you: boolean }[]>([]);
+  const [guardians, setGuardians] = useState<{ user_id: string; name: string; relationship: string; is_you: boolean; is_primary: boolean }[]>([]);
   const [guardianCode, setGuardianCode] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [codeLastUsed, setCodeLastUsed] = useState<string | null>(null);
@@ -223,7 +227,15 @@ export default function KidWallScreen() {
     );
   }
 
-  const amPrimary = guardians.some(g => g.is_you && g.relationship === 'parent');
+  // PRIMARY guardian = the first person linked to this kid (the responsible
+  // party). Only they get the "Shared with you" inbox + approve-to-wall; other
+  // guardians (grandparents, etc.) are wall-only viewers.
+  const amPrimary = guardians.some(g => g.is_you && g.is_primary);
+  useEffect(() => {
+    if (initialTabRef.current || guardians.length === 0) return;
+    initialTabRef.current = true;
+    if (amPrimary) setSelectedTab('shared');
+  }, [guardians, amPrimary]);
   const totalCoaches = teamAudience.reduce((n, t) => n + (t.coaches?.length ?? 0), 0);
 
   // Refresh teams + guardians on every FOCUS, not just on mount. A parent can
@@ -832,7 +844,7 @@ export default function KidWallScreen() {
         contentContainerStyle={styles.filterBar}
         style={styles.filterBarWrap}
       >
-        {TABS.map(tab => {
+        {TABS.filter(tab => tab.key !== 'shared' || amPrimary).map(tab => {
           const active = selectedTab === tab.key;
           return (
             <TouchableOpacity key={tab.key} style={styles.tab} onPress={() => setSelectedTab(tab.key)}>
@@ -901,7 +913,7 @@ export default function KidWallScreen() {
                       showPlayOnThumb
                       onPlay={() => openShared(item)}
                       note={item.note ? { text: item.note } : undefined}
-                      actions={[{ icon: 'trash-outline', label: 'Take off wall', onPress: () => takeOffWall(item.shareId, item.title) }]}
+                      actions={amPrimary ? [{ icon: 'trash-outline', label: 'Take off wall', onPress: () => takeOffWall(item.shareId, item.title) }] : []}
                     />
                   </View>
                 );
