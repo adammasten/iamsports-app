@@ -1,0 +1,20 @@
+-- Level 2 visibility hardening — REELS. Applied live 2026-08-19 via Supabase MCP
+-- (level2_reel_visibility_hardening).
+--
+-- Problem: authorize_reel_playback Door 1 AND highlight_reels_read both allowed
+-- ANY team member (incl. a parent) to read + PLAY a reel regardless of sharing —
+-- so a private "lowlight" reel a coach never shared was watchable by the whole
+-- roster. Level 1 hid it from the home feed; this closes it at the data layer.
+--
+-- Fix: Door 1 narrowed is_team_member → is_team_coach in both the authorizer and
+-- the read policy, PLUS a share-based branch so a reel that WAS shared still
+-- reads/plays for its audience (mirrors the authorizer's Door 2 / shares_read).
+--
+-- Net: an unshared reel is now visible/playable only to its creator + coaches;
+-- everyone else needs an actual share. Coaches' Film Room + reel editing
+-- unaffected (is_team_coach). See the live function/policy for the exact bodies.
+--
+-- STILL TODO (separate, higher-risk migration): the same hardening for VIDEOS.
+-- Videos hinge on the `visibility` column + default-upload visibility + lineup-
+-- parent access and touch Film Room/game-detail/export — needs its own tested
+-- migration + a throwaway-account regression check before applying.
