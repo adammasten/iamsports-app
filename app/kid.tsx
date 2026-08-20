@@ -357,23 +357,24 @@ export default function KidWallScreen() {
         .order('created_at', { ascending: false })));
     } catch (e: any) { setWallError(e?.message || 'Couldn’t load the wall.'); setWallLoading(false); return; }
     if (error) { setWallError(error.message); setWallLoading(false); return; }
-    const items = await Promise.all((rows || []).map(async (r: any) => {
+    const items = (await Promise.all((rows || []).map(async (r: any) => {
       const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
       const c = Array.isArray(resolved) ? resolved[0] : null;
+      if (!c) return null;   // content deleted/orphaned → drop the card, don't render a dead placeholder
       return {
         shareId: r.id,
         contentType: r.content_type,
         audience: r.audience as string,
         teamName: r.teams?.name ?? null,
         createdAt: r.created_at,
-        title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
-        storagePath: c?.storage_path ?? null,
-        thumbnailPath: c?.thumbnail_path ?? null,
-        startTime: c?.start_time ?? null,
-        endTime: c?.end_time ?? null,
+        title: c.title,
+        storagePath: c.storage_path ?? null,
+        thumbnailPath: c.thumbnail_path ?? null,
+        startTime: c.start_time ?? null,
+        endTime: c.end_time ?? null,
         note: (r.note as string) ?? null,
       };
-    }));
+    }))).filter((x): x is NonNullable<typeof x> => x !== null);
     setWall(items);
     setWallLoading(false);
   }
@@ -396,16 +397,17 @@ export default function KidWallScreen() {
         .order('created_at', { ascending: false })));
     } catch (e: any) { setGamesError(e?.message || 'Couldn’t load games.'); setGamesLoading(false); return; }
     if (error) { setGamesError(error.message); setGamesLoading(false); return; }
-    const items = await Promise.all((rows || []).map(async (r: any) => {
+    const items = (await Promise.all((rows || []).map(async (r: any) => {
       const { data: resolved } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
       const c = Array.isArray(resolved) ? resolved[0] : null;
+      if (!c) return null;   // content deleted/orphaned → drop
       return {
         shareId: r.id, contentType: r.content_type,
-        title: c?.title ?? 'Shared game', storagePath: c?.storage_path ?? null,
-        thumbnailPath: c?.thumbnail_path ?? null, startTime: c?.start_time ?? null, endTime: c?.end_time ?? null,
+        title: c.title, storagePath: c.storage_path ?? null,
+        thumbnailPath: c.thumbnail_path ?? null, startTime: c.start_time ?? null, endTime: c.end_time ?? null,
         teamName: r.teams?.name ?? null, createdAt: r.created_at, note: (r.note as string) ?? null,
       };
-    }));
+    }))).filter((x): x is NonNullable<typeof x> => x !== null);
     setGames(items);
     setGamesLoading(false);
   }

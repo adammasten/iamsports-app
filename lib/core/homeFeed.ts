@@ -61,15 +61,21 @@ async function resolveAndDedup(rows: any[]): Promise<WallPost[]> {
     (data || []).forEach((p: any) => playerNames.set(p.id, p.name));
   }
 
-  const resolved = await Promise.all(rows.map(async (r: any) => {
+  const resolved = (await Promise.all(rows.map(async (r: any) => {
     const { data: res } = await supabase.rpc('resolve_shared_content', { p_share_id: r.id });
     const c = Array.isArray(res) ? res[0] : null;
+    // If the content no longer resolves — hard-deleted (orphaned share) or, once
+    // soft-delete ships, deleted_at set — DROP the post. Previously this rendered
+    // a dead placeholder card ("Shared game" / "(content unavailable)") with a null
+    // storagePath: the orphaned-wall-card bug. A share whose content can't resolve
+    // is invalid, so it must not appear on any wall.
+    if (!c) return null;
     return {
       shareId: r.id, contentType: r.content_type, contentId: r.content_id, createdAt: r.created_at,
-      title: c?.title ?? (r.content_type === 'game' ? 'Shared game' : '(content unavailable)'),
-      storagePath: c?.storage_path ?? null,
-      thumbnailPath: c?.thumbnail_path ?? null,
-      startTime: c?.start_time ?? null, endTime: c?.end_time ?? null,
+      title: c.title,
+      storagePath: c.storage_path ?? null,
+      thumbnailPath: c.thumbnail_path ?? null,
+      startTime: c.start_time ?? null, endTime: c.end_time ?? null,
       sharedByUserId: (r.shared_by_user_id as string) ?? null,
       note: (r.note as string) ?? null,
       teamId: (r.team_id as string) ?? '',
@@ -81,7 +87,7 @@ async function resolveAndDedup(rows: any[]): Promise<WallPost[]> {
         ? (r.teams?.name ?? 'Team')
         : (playerNames.get(r.target_player_id) ?? 'Family'),
     };
-  }));
+  }))).filter((x): x is NonNullable<typeof x> => x !== null);
 
   const byKey = new Map<string, WallPost>();
   for (const r of resolved) {
