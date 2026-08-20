@@ -6,7 +6,7 @@
 import PlayPlayer from '@/components/PlayPlayer';
 import { useTeamContext } from '@/context';
 import { fetchCoachTeams, type CoachTeam } from '@/lib/core/playbook/installs';
-import { attachToTeam, fetchLibraryPlays, type LibraryPlay } from '@/lib/core/playbook/library';
+import { attachToTeam, deleteLibraryPlay, fetchLibraryPlays, type LibraryPlay } from '@/lib/core/playbook/library';
 import { tagColor } from '@/lib/core/playbook/tags';
 import { goBackOrHome } from '@/lib/nav';
 import { router } from 'expo-router';
@@ -41,6 +41,13 @@ export default function MyPlaybook() {
       setDone(d => ({ ...d, [play.id]: `Attached to ${team.name}` }));
     } catch (e: any) { setErr(e?.message ?? String(e)); }
     finally { setBusyKey(null); }
+  }
+
+  async function del(p: LibraryPlay) {
+    const label = p.doc?.name ?? p.name;
+    if (Platform.OS === 'web' && !window.confirm(`Delete “${label}” from My Playbook?\n\nTeams you've already attached it to keep their own copy.`)) return;
+    try { await deleteLibraryPlay(p.id); setPlays(list => (list ?? []).filter(x => x.id !== p.id)); }
+    catch (e: any) { setErr(e?.message ?? String(e)); }
   }
 
   const allTags = plays ? Array.from(new Set(plays.flatMap(p => p.tags))).sort() : [];
@@ -113,6 +120,11 @@ export default function MyPlaybook() {
                     {done[p.id] ? <Text style={styles.doneTxt}>✓ {done[p.id]}</Text> : null}
                   </View>
                 ) : null}
+
+                <View style={styles.cardActions}>
+                  <Pressable onPress={() => router.push({ pathname: '/playbook-edit', params: { editId: p.id } })}><Text style={styles.editLink}>✎ Edit</Text></Pressable>
+                  <Pressable onPress={() => del(p)}><Text style={styles.deleteLink}>Delete</Text></Pressable>
+                </View>
               </View>
             ))}
           </View>
@@ -155,6 +167,9 @@ const styles = StyleSheet.create({
   attachTeamBtn: { backgroundColor: '#0e1b2c', borderColor: '#534AB7', borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   attachTeamTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
   doneTxt: { color: '#3ec48c', fontSize: 13, fontWeight: '700' },
+  cardActions: { flexDirection: 'row', justifyContent: 'space-between', borderTopColor: '#25333f', borderTopWidth: 1, paddingTop: 10 },
+  editLink: { color: '#ff6a2c', fontSize: 13.5, fontWeight: '800' },
+  deleteLink: { color: '#c0392b', fontSize: 13.5, fontWeight: '700' },
   empty: { color: '#9db0bd', fontSize: 14, marginTop: 20, lineHeight: 20 },
   errBox: { backgroundColor: '#2a1416', borderColor: '#5c2a2a', borderWidth: 1, borderRadius: 12, padding: 14, marginTop: 12 },
   errTxt: { color: '#ffb4a8', fontSize: 13.5, lineHeight: 19 },

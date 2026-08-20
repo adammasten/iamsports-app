@@ -3,10 +3,13 @@
 
 import PlayEditor from '@/components/PlayEditor';
 import { goBackOrHome } from '@/lib/nav';
+import { useLocalSearchParams } from 'expo-router';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import WebTopNav from './components/WebTopNav';
 
 export default function PlaybookEditScreen() {
+  const params = useLocalSearchParams();
+  const editId = Array.isArray(params.editId) ? params.editId[0] : params.editId;
   return (
     <View style={styles.root}>
       {Platform.OS === 'web' ? <WebTopNav /> : null}
@@ -14,11 +17,11 @@ export default function PlaybookEditScreen() {
         <Pressable onPress={() => goBackOrHome()} hitSlop={8} style={styles.back}>
           <Text style={styles.backTxt}>← Back</Text>
         </Pressable>
-        <Text style={styles.eyebrow}>PLAYBOOK</Text>
-        <Text style={styles.h1}>New play</Text>
-        <Text style={styles.sub}>Drag your players into a formation, draw their routes, tag it, and save it to your team.</Text>
+        <Text style={styles.eyebrow}>MY PLAYBOOK</Text>
+        <Text style={styles.h1}>{editId ? 'Edit play' : 'New play'}</Text>
+        <Text style={styles.sub}>Drag players into a formation, draw their routes, tag it, and save it to your library. {editId ? 'Saving also updates every team you’ve attached it to.' : 'Attach it to teams from My Playbook.'}</Text>
         <View style={{ height: 14 }} />
-        <PlayEditor />
+        <PlayEditor editId={editId} />
         <View style={{ height: 60 }} />
       </ScrollView>
     </View>

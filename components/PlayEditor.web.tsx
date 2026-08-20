@@ -7,7 +7,7 @@
 
 import { useTeamContext } from '@/context';
 import { surfaceSize } from '@/lib/core/playbook/court';
-import { fetchCoachTags, saveLibraryPlay } from '@/lib/core/playbook/library';
+import { fetchCoachTags, fetchLibraryPlay, propagateToTeams, saveLibraryPlay, updateLibraryPlay } from '@/lib/core/playbook/library';
 import type { Action, ActionType, PlayDoc, Token } from '@/lib/core/playbook/playDoc';
 import { renderPlaySvg } from '@/lib/core/playbook/renderPlay';
 import { ALL_PLAY_TAGS, PLAY_TAG_GROUPS, tagColor } from '@/lib/core/playbook/tags';
@@ -30,7 +30,7 @@ const ACTION_TYPES: { type: ActionType; label: string }[] = [
   { type: 'screen', label: 'Screen' },
 ];
 
-export default function PlayEditor() {
+export default function PlayEditor({ editId }: { editId?: string }) {
   const { userId } = useTeamContext();
   const surface = 'half' as const;
   const { w, h } = surfaceSize(surface);
@@ -58,6 +58,15 @@ export default function PlayEditor() {
   const dragId = useRef<string | null>(null);
 
   useEffect(() => { if (userId) fetchCoachTags(userId).then(setCoachTags).catch(() => {}); }, [userId]);
+  // Edit mode: preload the existing library play.
+  useEffect(() => {
+    if (!editId) return;
+    fetchLibraryPlay(editId).then(p => {
+      if (!p.doc) return;
+      setTokens(p.doc.tokens); setActions(p.doc.actions ?? []);
+      setName(p.doc.name ?? ''); setNote(p.doc.note ?? ''); setTags(p.tags);
+    }).catch(e => setErr(e?.message ?? String(e)));
+  }, [editId]);
   const addTag = (t: string) => { const v = t.trim(); if (!v) return; setTags(s => (s.some(x => x.toLowerCase() === v.toLowerCase()) ? s : [...s, v])); setTagQuery(''); };
 
   // Live document = committed actions + the in-progress route (so you see it draw).
@@ -116,8 +125,14 @@ export default function PlayEditor() {
     setSaving(true);
     try {
       const finalDoc: PlayDoc = { schema_version: 1, sport: 'basketball', surface, name: name.trim(), note: note.trim() || undefined, tokens, actions };
-      await saveLibraryPlay({ doc: finalDoc, tags, userId });
-      setSaved('Saved to My Playbook.');
+      if (editId) {
+        await updateLibraryPlay({ id: editId, doc: finalDoc, tags });
+        const n = await propagateToTeams({ libraryPlayId: editId, doc: finalDoc, tags, userId });
+        setSaved(`Updated in My Playbook${n > 0 ? ` — and pushed to ${n} team${n === 1 ? '' : 's'}` : ''}.`);
+      } else {
+        await saveLibraryPlay({ doc: finalDoc, tags, userId });
+        setSaved('Saved to My Playbook.');
+      }
     } catch (e: any) { setErr(e?.message ?? String(e)); }
     finally { setSaving(false); }
   }
@@ -246,7 +261,7 @@ export default function PlayEditor() {
           </div>
         ) : null}
 
-        <button onClick={save} disabled={saving} style={{ ...S.primary, opacity: saving ? 0.6 : 1 }}>{saving ? 'Saving…' : 'Save play'}</button>
+        <button onClick={save} disabled={saving} style={{ ...S.primary, opacity: saving ? 0.6 : 1 }}>{saving ? 'Saving…' : editId ? 'Update play' : 'Save play'}</button>
         <button onClick={() => { setTokens(startTokens()); setActions([]); setName(''); setNote(''); setTags([]); setSaved(null); setErr(null); setCurrentBeat(1); }} style={S.ghost}>Reset</button>
       </div>
     </div>

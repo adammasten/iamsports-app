@@ -46,6 +46,45 @@ export async function saveLibraryPlay(opts: { doc: PlayDoc; tags: string[]; user
   return (data as any).id as string;
 }
 
+export async function updateLibraryPlay(opts: { id: string; doc: PlayDoc; tags: string[] }): Promise<void> {
+  const { id, doc, tags } = opts;
+  const { error } = await supabase
+    .from('library_plays')
+    .update({ name: doc.name ?? 'Untitled play', doc, tags })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+// Deleting a library play leaves any attached TEAM copies intact (their
+// library_play_id just goes null) — teams keep running what they were given.
+export async function deleteLibraryPlay(id: string): Promise<void> {
+  const { error } = await supabase.from('library_plays').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// Push a library edit out to every team copy derived from it: updates the team
+// play's current diagram + tags and appends a NEW version. Published installs
+// keep their pinned older version (immutability), so history stays intact while
+// the live team playbook reflects the edit. Returns how many teams were updated.
+export async function propagateToTeams(opts: { libraryPlayId: string; doc: PlayDoc; tags: string[]; userId: string }): Promise<number> {
+  const { libraryPlayId, doc, tags, userId } = opts;
+  const { data: teamPlays, error } = await supabase
+    .from('plays')
+    .select('id, latest_version')
+    .eq('library_play_id', libraryPlayId);
+  if (error) throw error;
+  let n = 0;
+  for (const tp of (teamPlays ?? []) as any[]) {
+    const newV = (tp.latest_version ?? 1) + 1;
+    const { error: e1 } = await supabase.from('plays').update({ name: doc.name ?? 'Untitled play', doc, tags, latest_version: newV }).eq('id', tp.id);
+    if (e1) throw e1;
+    const { error: e2 } = await supabase.from('play_versions').insert({ play_id: tp.id, version: newV, doc, created_by: userId });
+    if (e2) throw e2;
+    n++;
+  }
+  return n;
+}
+
 // Instantiate a library play onto a team: an independent team `plays` row +
 // its first version, carrying provenance (library_play_id). Film is NOT copied.
 // RLS: requires is_team_coach(teamId).

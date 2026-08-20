@@ -2,7 +2,8 @@
 // DOM controls). On device, point coaches to the web app to author plays.
 import { StyleSheet, Text, View } from 'react-native';
 
-export default function PlayEditor() {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export default function PlayEditor({ editId }: { editId?: string } = {}) {
   return (
     <View style={styles.wrap}>
       <Text style={styles.txt}>The play editor is available on the web app for now.{'\n'}Open iamsports.com on a computer to draw plays.</Text>
