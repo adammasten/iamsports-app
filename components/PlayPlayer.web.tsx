@@ -10,6 +10,10 @@ import { surfaceSize } from '@/lib/core/playbook/court';
 import type { PlayDoc } from '@/lib/core/playbook/playDoc';
 import { renderPlayFrameSvg } from '@/lib/core/playbook/renderPlay';
 import { useEffect, useRef, useState } from 'react';
+// react-dom ships no bundled types in this RN project; it's present at runtime
+// on web (this is a .web.tsx file). Portal lifts the fullscreen overlay above
+// every card's stacking context.
+// @ts-ignore
 import { createPortal } from 'react-dom';
 
 const DURATION_MS = 4200; // full play, start → finish
