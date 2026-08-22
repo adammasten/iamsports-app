@@ -29,8 +29,10 @@ type DupePair = {
 
 export default function RosterScreen() {
   const insets = useSafeAreaInsets();
-  const { activeTeam, activeRole, userId } = useTeamContext();
+  const { activeTeam, activeRole, userId, refreshTeams } = useTeamContext();
   const isCoach = !!activeRole && COACH_ROLES.includes(activeRole);
+  const [editingTeamName, setEditingTeamName] = useState(false);
+  const [teamNameInput, setTeamNameInput] = useState('');
 
   const [players, setPlayers] = useState<RosterPlayer[]>([]);
   const [teamCode, setTeamCode] = useState<string | null>(null);
@@ -267,6 +269,19 @@ export default function RosterScreen() {
   }
   const roleLabel = (r: string) => r === 'admin' ? 'Admin' : r === 'head_coach' ? 'Head coach' : 'Coach';
 
+  // Rename the team (RLS: is_team_coach). Updates the shared context so the name
+  // changes everywhere (home rail, feed, etc.), not just this screen.
+  async function saveTeamName() {
+    if (!activeTeam) return;
+    const name = teamNameInput.trim();
+    if (!name) { Alert.alert('Team name', 'Enter a team name.'); return; }
+    if (name === activeTeam.name) { setEditingTeamName(false); return; }
+    const { error } = await supabase.from('teams').update({ name }).eq('id', activeTeam.id);
+    if (error) { Alert.alert('Rename team', error.message); return; }
+    setEditingTeamName(false);
+    await refreshTeams();
+  }
+
   if (!activeTeam) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
@@ -277,7 +292,31 @@ export default function RosterScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingTop: insets.top + 12, paddingHorizontal: 16, paddingBottom: 40 }}>
-      <Text style={styles.title}>{activeTeam.name}</Text>
+      {editingTeamName ? (
+        <View style={styles.teamNameEditRow}>
+          <TextInput
+            style={styles.teamNameInput}
+            value={teamNameInput}
+            onChangeText={setTeamNameInput}
+            autoFocus
+            placeholder="Team name"
+            placeholderTextColor="#666"
+            onSubmitEditing={saveTeamName}
+            returnKeyType="done"
+          />
+          <TouchableOpacity onPress={saveTeamName}><Text style={styles.teamNameSave}>Save</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => setEditingTeamName(false)}><Text style={styles.teamNameCancel}>Cancel</Text></TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.teamNameRow}>
+          <Text style={styles.title}>{activeTeam.name}</Text>
+          {isCoach ? (
+            <TouchableOpacity onPress={() => { setTeamNameInput(activeTeam.name); setEditingTeamName(true); }} hitSlop={8}>
+              <Text style={styles.teamNameEdit}>✎ Edit</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      )}
       <Text style={styles.subtitle}>Roster</Text>
 
       {isCoach && teamCode && (
@@ -500,6 +539,12 @@ const styles = StyleSheet.create({
   mergeOptionMeta: { color: '#9fa4af', fontSize: 13, marginTop: 4 },
   title: { fontSize: 22, fontWeight: '800', color: '#f4f4f6' },
   subtitle: { fontSize: 14, fontWeight: '600', color: '#9096a3', marginBottom: 16 },
+  teamNameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  teamNameEdit: { color: '#8b7bff', fontSize: 13, fontWeight: '700' },
+  teamNameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  teamNameInput: { flex: 1, backgroundColor: '#17171d', color: '#f4f4f6', fontSize: 20, fontWeight: '800', borderRadius: 8, borderWidth: 1, borderColor: '#333', paddingHorizontal: 12, paddingVertical: 8 },
+  teamNameSave: { color: '#3ec48c', fontSize: 14, fontWeight: '800' },
+  teamNameCancel: { color: '#9096a3', fontSize: 14, fontWeight: '700' },
   empty: { color: '#9096a3', fontSize: 15, textAlign: 'center', marginTop: 24 },
 
   codeCard: { backgroundColor: '#16161a', borderRadius: 12, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#2a2a32' },
