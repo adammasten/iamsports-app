@@ -10,6 +10,7 @@ import { surfaceSize } from '@/lib/core/playbook/court';
 import type { PlayDoc } from '@/lib/core/playbook/playDoc';
 import { renderPlayFrameSvg } from '@/lib/core/playbook/renderPlay';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 const DURATION_MS = 4200; // full play, start → finish
 
@@ -77,18 +78,21 @@ export default function PlayPlayer({ doc, allowFullscreen = true }: { doc: PlayD
         {allowFullscreen ? <button onClick={() => setFs(true)} style={btnGhost} title="Full screen" aria-label="Full screen">⛶</button> : null}
       </div>
 
-      {fs ? (
-        <div
-          onClick={() => setFs(false)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(6,12,20,0.92)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-        >
-          <div onClick={e => e.stopPropagation()} style={{ width: 'min(94vw, 1100px)', maxHeight: '92vh', overflow: 'auto', position: 'relative' }}>
-            {doc.name ? <div style={{ color: '#f1f4f6', fontSize: 18, fontWeight: 800, marginBottom: 10, paddingRight: 40 }}>{doc.name}</div> : null}
-            <button onClick={() => setFs(false)} style={{ ...btnGhost, position: 'absolute', top: 0, right: 0, fontSize: 18, padding: '4px 12px' }} aria-label="Close full screen">✕</button>
-            <PlayPlayer doc={doc} allowFullscreen={false} />
-          </div>
-        </div>
-      ) : null}
+      {fs && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              onClick={() => setFs(false)}
+              style={{ position: 'fixed', inset: 0, background: 'rgba(6,12,20,0.92)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+            >
+              <div onClick={e => e.stopPropagation()} style={{ width: 'min(94vw, 1100px)', maxHeight: '92vh', overflow: 'auto', position: 'relative' }}>
+                {doc.name ? <div style={{ color: '#f1f4f6', fontSize: 18, fontWeight: 800, marginBottom: 10, paddingRight: 40 }}>{doc.name}</div> : null}
+                <button onClick={() => setFs(false)} style={{ ...btnGhost, position: 'absolute', top: 0, right: 0, fontSize: 18, padding: '4px 12px' }} aria-label="Close full screen">✕</button>
+                <PlayPlayer doc={doc} allowFullscreen={false} />
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
