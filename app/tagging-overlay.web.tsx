@@ -36,7 +36,8 @@ const PLAYBACK_SPEEDS = [1, 1.2, 1.5, 2];
 
 type Tag = { id: string; name: string; category: string };
 type Built = { id: string; name: string; category: string };
-type ClipRow = { id: string; start: number; end: number; groups: { name: string; category: string }[][]; starred: boolean; poe: boolean; editTags: { id: string; name: string; category: string }[] };
+type ClipRow = { id: string; start: number; end: number; groups: { name: string; category: string }[][]; starred: boolean; poe: boolean; editTags: { id: string; name: string; category: string }[]; fb?: FbSummary | null };
+type FbSummary = { odk: Odk; down: number | null; distance: number | null; formation: string | null; play: string | null; result: string | null };
 
 function fmt(s: number) {
   if (!isFinite(s) || s < 0) s = 0;
@@ -51,6 +52,23 @@ function fmt(s: number) {
 function orderTags<T extends { category: string }>(tags: T[]): T[] {
   return [...tags].sort((a, b) => (a.category === 'players' ? 1 : 0) - (b.category === 'players' ? 1 : 0));
 }
+
+// ── Football tagger vocab ──────────────────────────────────────────────
+// Single-select chips that fill the structured clip_football fields. Same look
+// as the basketball tag board; different content + one-per-column behaviour.
+const FB_FORMATIONS = ['Shotgun', 'Under Center', 'Pistol', 'Empty', 'I-Form', 'Trips', 'Bunch'];
+const FB_PLAY_TYPES = ['Run Inside', 'Run Outside', 'Pass', 'Play Action', 'Screen', 'RPO', 'QB Run'];
+const FB_RESULT_OFF = ['1st Down', 'TD', 'Complete', 'Incomplete', 'Rush', 'Sack', 'Fumble', 'INT', 'Penalty', 'No Gain'];
+const FB_FRONTS = ['4-3', '3-4', '4-2-5', 'Nickel', 'Bear', '3-3 Stack'];
+const FB_COVERAGES = ['Cover 0', 'Cover 1', 'Cover 2', 'Cover 3', 'Cover 4', 'Man', 'Zone'];
+const FB_RESULT_DEF = ['Stop', 'TFL', 'Sack', 'INT', 'PBU', 'Forced Fumble', '1st Down Allowed', 'TD Allowed', 'Penalty'];
+const FB_ST_UNITS = ['Kickoff', 'Punt', 'FG', 'PAT', 'Return', 'Onside'];
+const FB_RESULT_ST = ['Good', 'Miss', 'Return TD', 'Block', 'Muff', 'Downed'];
+
+type Odk = 'offense' | 'defense' | 'kicking';
+type FbCtx = { odk: Odk; down: number | null; distance: number | null; drive: number };
+type FbSel = { formation: string | null; play: string | null; result: string | null };
+const ODK_SHORT: Record<Odk, string> = { offense: 'OFF', defense: 'DEF', kicking: 'K' };
 
 export default function TaggingStudioWeb() {
   const { userId, activeTeam } = useTeamContext();
@@ -88,6 +106,10 @@ export default function TaggingStudioWeb() {
   const [vbox, setVbox] = useState({ w: 0, h: 0 });
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false); // brief "Saved ✓" after each clip commits
+  // Football situation — sticky, carries forward across clips. fbSel = this clip's
+  // single-select descriptors (formation/play/result). Only used when isFootball.
+  const [fbCtx, setFbCtx] = useState<FbCtx>({ odk: 'offense', down: 1, distance: 10, drive: 1 });
+  const [fbSel, setFbSel] = useState<FbSel>({ formation: null, play: null, result: null });
 
   // ── player ──
   const cachedPath = videoId ? getCachedPathSync(videoId) : null;
@@ -138,6 +160,17 @@ export default function TaggingStudioWeb() {
   }, [videoId]);
 
   const tagSport = sport ?? activeTeam?.sport ?? null;
+  const isFootball = (tagSport ?? '').toLowerCase() === 'football';
+
+  // Flip the ODK unit → new drive (possession changed); clear this clip's picks.
+  const setOdk = useCallback((odk: Odk) => {
+    setFbCtx(c => (c.odk === odk ? c : { ...c, odk, drive: c.drive + 1 }));
+    setFbSel({ formation: null, play: null, result: null });
+  }, []);
+  const fbPick = useCallback((field: keyof FbSel, val: string) => {
+    setFbSel(s => ({ ...s, [field]: s[field] === val ? null : val }));
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -167,7 +200,7 @@ export default function TaggingStudioWeb() {
   const loadClips = useCallback(async () => {
     const { data } = await supabase
       .from('clips')
-      .select('id, start_time, end_time, clip_tags ( bundle_number, tags ( id, name, category ) )')
+      .select('id, start_time, end_time, clip_tags ( bundle_number, tags ( id, name, category ) ), clip_football ( odk, down, distance, off_formation, def_front, play_type, result )')
       .eq('video_id', videoId)
       .order('start_time', { ascending: false });
     setClips((data || []).map((c: any) => {
@@ -187,7 +220,12 @@ export default function TaggingStudioWeb() {
       const groups = [...byBundle.entries()].sort((a, b) => a[0] - b[0]).map(([, t]) => t);
       // Non-special tags, to reload into the board when editing this clip.
       const editTags = allTags.filter((t: any) => t.category !== 'special').map((t: any) => ({ id: t.id, name: t.name, category: t.category }));
-      return { id: c.id, start: c.start_time, end: c.end_time, starred, poe, groups, editTags };
+      const cfRaw = Array.isArray(c.clip_football) ? c.clip_football[0] : c.clip_football;
+      const fb: FbSummary | null = cfRaw ? {
+        odk: cfRaw.odk, down: cfRaw.down, distance: cfRaw.distance,
+        formation: cfRaw.off_formation ?? cfRaw.def_front ?? null, play: cfRaw.play_type ?? null, result: cfRaw.result ?? null,
+      } : null;
+      return { id: c.id, start: c.start_time, end: c.end_time, starred, poe, groups, editTags, fb };
     }));
   }, [videoId, special]);
   useEffect(() => { loadClips(); }, [loadClips]);
@@ -289,7 +327,9 @@ export default function TaggingStudioWeb() {
     // Requires an explicit Start+End window. bundle_number: clip-level=0, groups=1,2,3…
     if (!useMarks) return;
     const bundles = [...stagedBundles, ...(building.length > 0 ? [building] : [])];
-    if (bundles.length === 0) return;
+    // Basketball needs at least one tag group; a football clip can be just the
+    // ODK breakdown (no player tags), so it may save with no bundles.
+    if (bundles.length === 0 && !isFootball) return;
     setSaving(true);
     const { data: clip, error } = await supabase
       .from('clips')
@@ -301,12 +341,33 @@ export default function TaggingStudioWeb() {
     if (isStar && special.highlight) rows.push({ clip_id: clip.id, tag_id: special.highlight, bundle_number: 0 });
     if (isPoe && special.poe) rows.push({ clip_id: clip.id, tag_id: special.poe, bundle_number: 0 });
     if (rows.length) await supabase.from('clip_tags').insert(rows);
+    if (isFootball) {
+      const { error: cfErr } = await supabase.from('clip_football').insert({
+        clip_id: clip.id,
+        odk: fbCtx.odk,
+        down: fbCtx.down,
+        distance: fbCtx.distance,
+        play_type: fbSel.play,
+        off_formation: fbCtx.odk === 'offense' ? fbSel.formation : null,
+        def_front: fbCtx.odk === 'defense' ? fbSel.formation : null,
+        result: fbSel.result,
+        drive_id: fbCtx.drive,
+      });
+      if (cfErr) console.error('[football] clip_football insert failed', cfErr.message);
+    }
     setSaving(false);
     setMarkIn(null); setMarkOut(null); setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false);
+    if (isFootball) {
+      // Carry the situation forward: a 1st down / TD resets to 1st & 10, else the
+      // down bumps. The coach can always tap to correct it.
+      const scored = fbSel.result === '1st Down' || fbSel.result === 'TD';
+      setFbSel({ formation: null, play: null, result: null });
+      setFbCtx(c => ({ ...c, down: scored ? 1 : Math.min(4, (c.down ?? 1) + 1), distance: scored ? 10 : c.distance }));
+    }
     loadClips();
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1600);
-  }, [building, stagedBundles, saving, userId, videoId, teamId, isStar, isPoe, special, markIn, markOut, editingId, loadClips]);
+  }, [building, stagedBundles, saving, userId, videoId, teamId, isStar, isPoe, special, markIn, markOut, editingId, loadClips, isFootball, fbCtx, fbSel]);
 
   // Latest-commit ref, assigned DURING RENDER (not in an effect). Space/arrows
   // worked because they only touch the stable `player`; Enter called a stale
@@ -369,7 +430,7 @@ export default function TaggingStudioWeb() {
   const hasWindow = markIn != null && markOut != null && markOut > markIn;
   const groupCount = stagedBundles.length + (building.length > 0 ? 1 : 0);
   const canAddGroup = building.length > 0 && !saving && !editingId;
-  const canSave = !saving && (editingId ? (building.length > 0 && hasWindow) : (hasWindow && groupCount > 0));
+  const canSave = !saving && (editingId ? (building.length > 0 && hasWindow) : (hasWindow && (isFootball || groupCount > 0)));
   const windowLabel = (markIn != null || markOut != null)
     ? `${markIn != null ? fmt(markIn) : '—'} → ${markOut != null ? fmt(markOut) : '—'}`
     : 'Mark Start + End';
@@ -392,6 +453,28 @@ export default function TaggingStudioWeb() {
       <View style={styles.chipWrap}>{tags[key].map(t => tagButton(t, key))}</View>
     </View>
   );
+
+  // Football board column — single-select chips filling one clip_football field.
+  // Same chip styling as the basketball board (styles.chip), so it feels identical.
+  const FB_COL_COLOR: Record<keyof FbSel, string> = { formation: C.offense, play: C.plays, result: C.defense };
+  const fbCategory = (field: keyof FbSel, title: string, options: string[]) => {
+    const col = FB_COL_COLOR[field];
+    return (
+      <View style={[styles.catCol, { flex: 1 }]}>
+        <View style={styles.catHead}><View style={[styles.cdot, { backgroundColor: col }]} /><Text style={[styles.catTitle, { color: col }]}>{title}</Text></View>
+        <View style={styles.chipWrap}>
+          {options.map(opt => {
+            const on = fbSel[field] === opt;
+            return (
+              <Pressable key={opt} focusable={false} onPress={() => fbPick(field, opt)} style={[styles.chip, { borderColor: on ? col : col + 'aa', backgroundColor: on ? col : col + '1c' }]}>
+                <Text style={[styles.chipTxt, { color: on ? '#0a1210' : C.text }]} numberOfLines={1}>{opt}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
 
   return (
     <GestureHandlerRootView style={styles.app}>
@@ -526,16 +609,58 @@ export default function TaggingStudioWeb() {
             </Pressable>
           </View>
 
-          {/* tag board */}
-          <View style={styles.board}>
-            {category('players', 'Players', true)}
-            <View style={styles.vdiv} />
-            {category('offense', 'Offense', true)}
-            <View style={styles.vdiv} />
-            {category('defense', 'Defense', true)}
-            <View style={styles.vdiv} />
-            {category('plays', 'Plays', true)}
-          </View>
+          {/* tag board — football adds a sticky situation strip + football columns */}
+          {isFootball ? (
+            <>
+              <View style={styles.fbStrip}>
+                <View style={styles.fbGroup}>
+                  <Text style={styles.fbLbl}>BALL</Text>
+                  {(['offense', 'defense', 'kicking'] as Odk[]).map(o => (
+                    <Pressable key={o} focusable={false} onPress={() => setOdk(o)} style={[styles.fbCtl, fbCtx.odk === o && styles.fbCtlOn]}>
+                      <Text style={[styles.fbCtlTxt, fbCtx.odk === o && styles.fbCtlTxtOn]}>{ODK_SHORT[o]}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={styles.fbGroup}>
+                  <Text style={styles.fbLbl}>DOWN</Text>
+                  {[1, 2, 3, 4].map(d => (
+                    <Pressable key={d} focusable={false} onPress={() => setFbCtx(c => ({ ...c, down: d }))} style={[styles.fbCtl, fbCtx.down === d && styles.fbCtlOn]}>
+                      <Text style={[styles.fbCtlTxt, fbCtx.down === d && styles.fbCtlTxtOn]}>{d}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={styles.fbGroup}>
+                  <Text style={styles.fbLbl}>DIST</Text>
+                  <Pressable focusable={false} onPress={() => setFbCtx(c => ({ ...c, distance: Math.max(0, (c.distance ?? 0) - 1) }))} style={styles.fbStep}><Text style={styles.fbStepTxt}>–</Text></Pressable>
+                  <Text style={styles.fbNum}>{fbCtx.distance ?? '—'}</Text>
+                  <Pressable focusable={false} onPress={() => setFbCtx(c => ({ ...c, distance: (c.distance ?? 0) + 1 }))} style={styles.fbStep}><Text style={styles.fbStepTxt}>+</Text></Pressable>
+                </View>
+                <View style={styles.fbGroup}>
+                  <Text style={styles.fbLbl}>DRIVE</Text>
+                  <Text style={styles.fbNum}>{fbCtx.drive}</Text>
+                  <Pressable focusable={false} onPress={() => setFbCtx(c => ({ ...c, drive: c.drive + 1 }))} style={styles.fbStep}><Text style={styles.fbStepTxt}>+ new</Text></Pressable>
+                </View>
+              </View>
+              <View style={styles.board}>
+                {fbCategory('formation', fbCtx.odk === 'defense' ? 'Front' : fbCtx.odk === 'kicking' ? 'Unit' : 'Formation', fbCtx.odk === 'defense' ? FB_FRONTS : fbCtx.odk === 'kicking' ? FB_ST_UNITS : FB_FORMATIONS)}
+                {fbCtx.odk !== 'kicking' ? <><View style={styles.vdiv} />{fbCategory('play', fbCtx.odk === 'defense' ? 'Coverage' : 'Play', fbCtx.odk === 'defense' ? FB_COVERAGES : FB_PLAY_TYPES)}</> : null}
+                <View style={styles.vdiv} />
+                {fbCategory('result', 'Result', fbCtx.odk === 'offense' ? FB_RESULT_OFF : fbCtx.odk === 'defense' ? FB_RESULT_DEF : FB_RESULT_ST)}
+                <View style={styles.vdiv} />
+                {category('players', 'Players', true)}
+              </View>
+            </>
+          ) : (
+            <View style={styles.board}>
+              {category('players', 'Players', true)}
+              <View style={styles.vdiv} />
+              {category('offense', 'Offense', true)}
+              <View style={styles.vdiv} />
+              {category('defense', 'Defense', true)}
+              <View style={styles.vdiv} />
+              {category('plays', 'Plays', true)}
+            </View>
+          )}
 
           <View style={styles.shortcuts}>
             <Text style={styles.scTxt}>Space play/pause · ←→ ±1s · ↑↓ ±5s · I / O = clip start / end · number = player · letter = event · ↵ done · ⌫ clear</Text>
@@ -573,6 +698,13 @@ export default function TaggingStudioWeb() {
                     </View>
                   </View>
                 ))}
+                {c.fb ? (
+                  <Text style={styles.clipFb} numberOfLines={2}>
+                    {ODK_SHORT[c.fb.odk]}
+                    {c.fb.down ? ` · ${c.fb.down}${['', 'st', 'nd', 'rd', 'th'][c.fb.down] ?? 'th'}${c.fb.distance != null ? ` & ${c.fb.distance}` : ''}` : ''}
+                    {c.fb.formation ? ` · ${c.fb.formation}` : ''}{c.fb.play ? ` · ${c.fb.play}` : ''}{c.fb.result ? ` · ${c.fb.result}` : ''}
+                  </Text>
+                ) : null}
                 {c.starred || c.poe ? <Text style={styles.clipFoot}>{c.starred ? '★ Highlight  ' : ''}{c.poe ? '◎ POE' : ''}</Text> : null}
               </View>
             ))}
@@ -650,6 +782,19 @@ const styles = StyleSheet.create({
   doneTxt: { color: '#fff', fontSize: 13, fontWeight: '800' },
   addGroupBtn: { backgroundColor: '#1D9E75', borderRadius: 9, height: 36, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
   addGroupTxt: { color: '#fff', fontSize: 13, fontWeight: '800' },
+
+  // Football situation strip (BALL / DOWN / DIST / DRIVE) — sits above the board.
+  fbStrip: { backgroundColor: C.panel2, borderTopWidth: 1, borderTopColor: C.line, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 18, paddingHorizontal: 18, paddingVertical: 8 },
+  fbGroup: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  fbLbl: { fontSize: 10, fontWeight: '800', letterSpacing: 1, color: C.faint, marginRight: 2 },
+  fbCtl: { backgroundColor: C.panel, borderWidth: 1, borderColor: C.line, borderRadius: 8, minWidth: 34, height: 30, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  fbCtlOn: { backgroundColor: C.accent, borderColor: C.accent },
+  fbCtlTxt: { color: C.text, fontSize: 13, fontWeight: '800' },
+  fbCtlTxtOn: { color: '#fff' },
+  fbStep: { backgroundColor: C.panel, borderWidth: 1, borderColor: C.line, borderRadius: 8, height: 30, minWidth: 30, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  fbStepTxt: { color: C.dim, fontSize: 13, fontWeight: '800' },
+  fbNum: { color: C.text, fontSize: 15, fontWeight: '800', minWidth: 20, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  clipFb: { marginTop: 7, fontSize: 11, fontWeight: '700', color: C.offense },
 
   board: { backgroundColor: C.bg, flexDirection: 'row', gap: 14, paddingHorizontal: 18, paddingTop: 11, paddingBottom: 13 },
   catCol: { minWidth: 0 },
