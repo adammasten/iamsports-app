@@ -54,7 +54,7 @@ export default function MyPlaybook() {
 
   // Sport / side present across the library (drive which filters to show).
   const sportsPresent = plays ? Array.from(new Set(plays.map(p => p.doc?.sport).filter(Boolean) as string[])).sort() : [];
-  const sidesPresent = plays ? Array.from(new Set(plays.map(p => p.doc?.side ?? 'offense'))) : [];
+  const sidesPresent: string[] = plays ? Array.from(new Set(plays.map(p => (p.doc?.side ?? 'offense') as string))) : [];
   const SIDE_ORDER = ['offense', 'defense', 'special_teams'];
   const sideLabel = (s: string) => s === 'offense' ? 'Offense' : s === 'defense' ? 'Defense' : 'Special Teams';
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
