@@ -53,13 +53,14 @@ function orderTags<T extends { category: string }>(tags: T[]): T[] {
 }
 
 export default function TaggingStudioWeb() {
-  const { userId } = useTeamContext();
+  const { userId, activeTeam } = useTeamContext();
   const params = useLocalSearchParams();
   const videoId = (Array.isArray(params.videoId) ? params.videoId[0] : params.videoId) as string;
   const remoteUrl = (Array.isArray(params.url) ? params.url[0] : params.url) as string;
   const label = ((Array.isArray(params.label) ? params.label[0] : params.label) as string) ?? 'Tagging';
 
   const [teamId, setTeamId] = useState<string | null>(null);
+  const [sport, setSport] = useState<string | null>(null);
   const [tags, setTags] = useState<Record<string, Tag[]>>({ players: [], offense: [], defense: [], plays: [] });
   const [special, setSpecial] = useState<{ highlight: string | null; poe: string | null }>({ highlight: null, poe: null });
   const [clips, setClips] = useState<ClipRow[]>([]);
@@ -130,16 +131,25 @@ export default function TaggingStudioWeb() {
 
   // ── team + tags + clips ──
   useEffect(() => {
-    supabase.from('videos').select('team_id').eq('id', videoId).maybeSingle().then(({ data }) => setTeamId((data?.team_id as string) ?? null));
+    supabase.from('videos').select('team_id, sport').eq('id', videoId).maybeSingle().then(({ data }) => {
+      setTeamId((data?.team_id as string) ?? null);
+      setSport((data?.sport as string) ?? null);
+    });
   }, [videoId]);
 
+  const tagSport = sport ?? activeTeam?.sport ?? null;
   useEffect(() => {
     let cancelled = false;
     (async () => {
       let q = supabase.from('tags').select('*').order('sort_order');
+      // Global tags are sport-scoped (sport=null is universal, e.g. ★/POE);
+      // team tags belong to the team regardless of sport. Mirrors the mobile tagger.
+      const globalBranch = tagSport
+        ? `and(scope.eq.global,or(sport.is.null,sport.eq.${tagSport}))`
+        : `scope.eq.global`;
       q = teamId
-        ? q.or(`scope.eq.global,and(scope.eq.team,team_id.eq.${teamId})`)
-        : q.eq('scope', 'global');
+        ? q.or(`${globalBranch},and(scope.eq.team,team_id.eq.${teamId})`)
+        : q.or(globalBranch);
       const { data } = await q;
       if (cancelled) return;
       const grouped: Record<string, Tag[]> = { players: [], offense: [], defense: [], plays: [] };
@@ -152,7 +162,7 @@ export default function TaggingStudioWeb() {
       setSpecial({ highlight, poe });
     })();
     return () => { cancelled = true; };
-  }, [teamId]);
+  }, [teamId, tagSport]);
 
   const loadClips = useCallback(async () => {
     const { data } = await supabase

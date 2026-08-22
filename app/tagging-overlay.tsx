@@ -229,15 +229,23 @@ export default function TaggingOverlayScreen() {
   // video on team B showed team A's (or no) players, so a rostered kid wouldn't
   // appear to tag, and clips were misfiled. Resolve it from the video.
   const [videoTeamId, setVideoTeamId] = useState<string | null>(null);
+  const [videoSport, setVideoSport] = useState<string | null>(null);
   useEffect(() => {
     if (!videoId) return;
     let cancelled = false;
-    supabase.from('videos').select('team_id').eq('id', videoId).maybeSingle()
-      .then(({ data }) => { if (!cancelled) setVideoTeamId((data?.team_id as string) ?? null); });
+    supabase.from('videos').select('team_id, sport').eq('id', videoId).maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setVideoTeamId((data?.team_id as string) ?? null);
+        setVideoSport((data?.sport as string) ?? null);
+      });
     return () => { cancelled = true; };
   }, [videoId]);
   // Team to scope tags + save clips against. Personal mode forces null (global only).
   const tagTeamId = isPersonal ? null : (videoTeamId ?? (activeTeam ? activeTeam.id : null));
+  // Sport that scopes the tag palette: this video's sport, else the video team's
+  // (or active team's) sport. null = unknown → show all global tags (safe default).
+  const tagSport = videoSport ?? activeTeam?.sport ?? null;
 
   // F.4 tag mode. 'compact' (default) = tag region above bottom controls.
   // 'fullscreen' = tag region also covers the video area between top bar and
@@ -407,10 +415,17 @@ export default function TaggingOverlayScreen() {
     let cancelled = false;
     (async () => {
       let query = supabase.from('tags').select('*').order('sort_order');
+      // Global tags are sport-scoped: sport=null is universal (★ Highlight / POE),
+      // otherwise it must match this content's sport, so a football team never
+      // sees basketball tags. Team tags belong to the team regardless of sport —
+      // keep that branch EXACTLY as-is (getting it wrong leaks tags across teams).
+      const globalBranch = tagSport
+        ? `and(scope.eq.global,or(sport.is.null,sport.eq.${tagSport}))`
+        : `scope.eq.global`;
       if (tagTeamId) {
-        query = query.or(`scope.eq.global,and(scope.eq.team,team_id.eq.${tagTeamId})`);
+        query = query.or(`${globalBranch},and(scope.eq.team,team_id.eq.${tagTeamId})`);
       } else {
-        query = query.eq('scope', 'global');
+        query = query.or(globalBranch);
       }
       const { data, error } = await query;
       if (cancelled) return;
@@ -437,7 +452,7 @@ export default function TaggingOverlayScreen() {
       setPeriodTags(periods);
     })();
     return () => { cancelled = true; };
-  }, [tagTeamId]);
+  }, [tagTeamId, tagSport]);
 
   function toggleTag(tagId: string) {
     setBuilding(prev => prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]);

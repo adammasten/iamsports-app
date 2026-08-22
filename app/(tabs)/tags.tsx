@@ -28,10 +28,16 @@ export default function TagsScreen() {
     // V3 tag scope is global | team only. Global tags are visible to every
     // team; team tags are visible only when activeTeam is set and matches.
     let query = supabase.from('tags').select('*').order('sort_order');
+    // Global tags are sport-scoped: sport=null is universal, otherwise it must
+    // match this team's sport — so a football team manages football tags, not
+    // basketball ones. Team tags belong to the team regardless of sport.
+    const globalBranch = activeTeam?.sport
+      ? `and(scope.eq.global,or(sport.is.null,sport.eq.${activeTeam.sport}))`
+      : `scope.eq.global`;
     if (activeTeam) {
-      query = query.or(`scope.eq.global,and(scope.eq.team,team_id.eq.${activeTeam.id})`);
+      query = query.or(`${globalBranch},and(scope.eq.team,team_id.eq.${activeTeam.id})`);
     } else {
-      query = query.eq('scope', 'global');
+      query = query.or(globalBranch);
     }
     const { data } = await query;
     if (!data) return;
@@ -51,6 +57,9 @@ export default function TagsScreen() {
     // unconditional; team_id is set IFF scope='team' (DB CHECK enforces this).
     const tagData: any = { name: newTagName, category: addingTo, sort_order: existing.length, scope: newTagScope };
     if (newTagScope === 'team' && activeTeam) tagData.team_id = activeTeam.id;
+    // Stamp the tag with the team's sport so it only surfaces for that sport
+    // (a football coach's new tag is football-scoped, not shown to basketball).
+    if (activeTeam?.sport) tagData.sport = activeTeam.sport;
     const { error } = await supabase.from('tags').insert(tagData);
     if (error) Alert.alert('Error', error.message);
     else { fetchTags(); setNewTagName(''); setAddingTo(null); }
