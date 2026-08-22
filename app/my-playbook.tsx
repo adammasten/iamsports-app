@@ -23,6 +23,8 @@ export default function MyPlaybook() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [done, setDone] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<string | null>(null);
+  const [sportFilter, setSportFilter] = useState<string>('all');
+  const [sideFilter, setSideFilter] = useState<string>('all');
 
   useEffect(() => {
     if (!userId) return;
@@ -50,8 +52,20 @@ export default function MyPlaybook() {
     catch (e: any) { setErr(e?.message ?? String(e)); }
   }
 
-  const allTags = plays ? Array.from(new Set(plays.flatMap(p => p.tags))).sort() : [];
-  const filtered = plays ? (filter ? plays.filter(p => p.tags.includes(filter)) : plays) : [];
+  // Sport / side present across the library (drive which filters to show).
+  const sportsPresent = plays ? Array.from(new Set(plays.map(p => p.doc?.sport).filter(Boolean) as string[])).sort() : [];
+  const sidesPresent = plays ? Array.from(new Set(plays.map(p => p.doc?.side ?? 'offense'))) : [];
+  const SIDE_ORDER = ['offense', 'defense', 'special_teams'];
+  const sideLabel = (s: string) => s === 'offense' ? 'Offense' : s === 'defense' ? 'Defense' : 'Special Teams';
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+  // Apply sport + side first, so the tag chips reflect what's visible.
+  const scoped = plays ? plays.filter(p =>
+    (sportFilter === 'all' || p.doc?.sport === sportFilter) &&
+    (sideFilter === 'all' || (p.doc?.side ?? 'offense') === sideFilter),
+  ) : [];
+  const allTags = Array.from(new Set(scoped.flatMap(p => p.tags))).sort();
+  const filtered = filter ? scoped.filter(p => p.tags.includes(filter)) : scoped;
 
   return (
     <View style={styles.root}>
@@ -66,10 +80,36 @@ export default function MyPlaybook() {
           <Text style={styles.newBtnTxt}>＋  New play</Text>
         </Pressable>
 
+        {plays && sportsPresent.length > 1 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={styles.chipRowInner}>
+            <Pressable onPress={() => setSportFilter('all')} style={[styles.chip, sportFilter === 'all' && styles.chipOn]}>
+              <Text style={[styles.chipTxt, sportFilter === 'all' && styles.chipTxtOn]}>All sports</Text>
+            </Pressable>
+            {sportsPresent.map(s => (
+              <Pressable key={s} onPress={() => setSportFilter(f => (f === s ? 'all' : s))} style={[styles.chip, sportFilter === s && styles.chipOn]}>
+                <Text style={[styles.chipTxt, sportFilter === s && styles.chipTxtOn]}>{cap(s)}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
+
+        {plays && sidesPresent.length > 1 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={styles.chipRowInner}>
+            <Pressable onPress={() => setSideFilter('all')} style={[styles.chip, sideFilter === 'all' && styles.chipOn]}>
+              <Text style={[styles.chipTxt, sideFilter === 'all' && styles.chipTxtOn]}>All sides</Text>
+            </Pressable>
+            {SIDE_ORDER.filter(s => sidesPresent.includes(s)).map(s => (
+              <Pressable key={s} onPress={() => setSideFilter(f => (f === s ? 'all' : s))} style={[styles.chip, sideFilter === s && styles.chipOn]}>
+                <Text style={[styles.chipTxt, sideFilter === s && styles.chipTxtOn]}>{sideLabel(s)}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
+
         {plays && allTags.length > 0 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={styles.chipRowInner}>
             <Pressable onPress={() => setFilter(null)} style={[styles.chip, !filter && styles.chipOn]}>
-              <Text style={[styles.chipTxt, !filter && styles.chipTxtOn]}>All ({plays.length})</Text>
+              <Text style={[styles.chipTxt, !filter && styles.chipTxtOn]}>All ({scoped.length})</Text>
             </Pressable>
             {allTags.map(t => (
               <Pressable key={t} onPress={() => setFilter(f => (f === t ? null : t))} style={[styles.chip, filter === t && styles.chipOn]}>
