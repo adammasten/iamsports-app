@@ -13,9 +13,10 @@ import { useEffect, useRef, useState } from 'react';
 
 const DURATION_MS = 4200; // full play, start → finish
 
-export default function PlayPlayer({ doc }: { doc: PlayDoc }) {
+export default function PlayPlayer({ doc, allowFullscreen = true }: { doc: PlayDoc; allowFullscreen?: boolean }) {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [fs, setFs] = useState(false);
   const holder = useRef<HTMLDivElement | null>(null);
   const raf = useRef<number | undefined>(undefined);
   const last = useRef(0);
@@ -42,6 +43,14 @@ export default function PlayPlayer({ doc }: { doc: PlayDoc }) {
     return () => { if (raf.current) cancelAnimationFrame(raf.current); };
   }, [playing]);
 
+  // Close fullscreen on Escape.
+  useEffect(() => {
+    if (!fs) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFs(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fs]);
+
   const { w, h } = surfaceSize(doc.surface);
   const playPause = () => { setT(p => (p >= 1 ? 0 : p)); setPlaying(p => !p); };
   const reset = () => { setPlaying(false); setT(0); };
@@ -49,7 +58,12 @@ export default function PlayPlayer({ doc }: { doc: PlayDoc }) {
 
   return (
     <div style={{ width: '100%' }}>
-      <div ref={holder} style={{ width: '100%', aspectRatio: `${w} / ${h}`, borderRadius: 10, overflow: 'hidden', background: doc.surface === 'field' ? '#2f6b3a' : '#f4ead4' }} />
+      <div
+        ref={holder}
+        onDoubleClick={() => { if (allowFullscreen) setFs(true); }}
+        title={allowFullscreen ? 'Double-click for full screen' : undefined}
+        style={{ width: '100%', aspectRatio: `${w} / ${h}`, borderRadius: 10, overflow: 'hidden', background: doc.surface === 'field' ? '#2f6b3a' : '#f4ead4', cursor: allowFullscreen ? 'zoom-in' : 'default' }}
+      />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
         <button onClick={playPause} style={btnPrimary}>{playing ? '❚❚ Pause' : t >= 1 ? '↻ Replay' : '▶ Play'}</button>
         <input
@@ -60,7 +74,21 @@ export default function PlayPlayer({ doc }: { doc: PlayDoc }) {
         />
         <button onClick={step} style={btnGhost}>Step</button>
         <button onClick={reset} style={btnGhost}>Reset</button>
+        {allowFullscreen ? <button onClick={() => setFs(true)} style={btnGhost} title="Full screen" aria-label="Full screen">⛶</button> : null}
       </div>
+
+      {fs ? (
+        <div
+          onClick={() => setFs(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(6,12,20,0.92)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ width: 'min(94vw, 1100px)', maxHeight: '92vh', overflow: 'auto', position: 'relative' }}>
+            {doc.name ? <div style={{ color: '#f1f4f6', fontSize: 18, fontWeight: 800, marginBottom: 10, paddingRight: 40 }}>{doc.name}</div> : null}
+            <button onClick={() => setFs(false)} style={{ ...btnGhost, position: 'absolute', top: 0, right: 0, fontSize: 18, padding: '4px 12px' }} aria-label="Close full screen">✕</button>
+            <PlayPlayer doc={doc} allowFullscreen={false} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
