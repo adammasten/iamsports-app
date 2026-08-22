@@ -34,6 +34,8 @@ export default function RosterScreen() {
 
   const [players, setPlayers] = useState<RosterPlayer[]>([]);
   const [teamCode, setTeamCode] = useState<string | null>(null);
+  const [coachCode, setCoachCode] = useState<string | null>(null);
+  const [staff, setStaff] = useState<{ user_id: string; display_name: string; role: string }[]>([]);
   const [dupes, setDupes] = useState<DupePair[]>([]);
   // Merge chooser (cross-platform: Alert.alert's buttons are dead on web).
   const [mergePair, setMergePair] = useState<DupePair | null>(null);
@@ -51,8 +53,13 @@ export default function RosterScreen() {
     setLoading(true);
     const teamId = activeTeam.id;
 
-    const { data: team } = await supabase.from('teams').select('join_code').eq('id', teamId).maybeSingle();
+    const { data: team } = await supabase.from('teams').select('join_code, coach_code').eq('id', teamId).maybeSingle();
     setTeamCode(team?.join_code ?? null);
+    setCoachCode((team as any)?.coach_code ?? null);
+
+    // Team staff (coach-tier members) for the Coaches section.
+    const { data: st } = await supabase.rpc('list_team_staff', { p_team_id: teamId });
+    setStaff((st as any[]) ?? []);
 
     const { data: pt } = await supabase
       .from('player_teams')
@@ -243,6 +250,23 @@ export default function RosterScreen() {
     setPlayers(prev => prev.map(p => p.playerId === playerId ? { ...p, guardianCode: data as string } : p));
   }
 
+  // Coach access: a team code that grants the coach role (Coaches' Corner + tools).
+  async function makeCoachCode() {
+    if (!activeTeam) return;
+    const { data, error } = await supabase.rpc('regenerate_coach_code', { p_team_id: activeTeam.id });
+    if (error) { Alert.alert('Error', error.message); return; }
+    setCoachCode(data as string);
+  }
+  async function removeCoach(uid: string, name: string) {
+    if (!activeTeam) return;
+    const ok = await confirm({ title: `Remove ${name}?`, message: `Remove ${name}'s coach access to ${activeTeam.name}? Their own parent access (if any) is kept.`, confirmText: 'Remove', destructive: true });
+    if (!ok) return;
+    const { error } = await supabase.rpc('remove_team_coach', { p_team_id: activeTeam.id, p_user_id: uid });
+    if (error) { Alert.alert('Remove coach', error.message); return; }
+    load();
+  }
+  const roleLabel = (r: string) => r === 'admin' ? 'Admin' : r === 'head_coach' ? 'Head coach' : 'Coach';
+
   if (!activeTeam) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + 24 }]}>
@@ -281,6 +305,44 @@ export default function RosterScreen() {
           <TouchableOpacity style={styles.shareBtn} onPress={generateCode}>
             <Text style={styles.shareBtnText}>Generate join code</Text>
           </TouchableOpacity>
+        </View>
+      )}
+
+      {isCoach && (
+        <View style={styles.codeCard}>
+          <Text style={styles.codeCardLabel}>Coaches</Text>
+          {staff.length > 0 ? staff.map(s => (
+            <View key={s.user_id} style={styles.staffRow}>
+              <Text style={styles.staffName} numberOfLines={1}>{s.display_name}</Text>
+              <Text style={styles.staffRole}>{roleLabel(s.role)}</Text>
+              {activeRole === 'admin' && s.role !== 'admin' && s.user_id !== userId ? (
+                <TouchableOpacity onPress={() => removeCoach(s.user_id, s.display_name)} hitSlop={6}>
+                  <Text style={styles.staffRemove}>Remove</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          )) : <Text style={[styles.hint, { marginTop: 6 }]}>No coaches yet.</Text>}
+
+          {coachCode ? (
+            <>
+              <View style={[styles.codeRow, { marginTop: 12 }]}>
+                <Text style={styles.codeBig}>{coachCode}</Text>
+                <View style={styles.codeBtns}>
+                  <TouchableOpacity style={styles.shareBtn} onPress={() => shareCode(`Coach access to ${activeTeam.name} on IamSports`, coachCode)}>
+                    <Text style={styles.shareBtnText}>Share</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.resetBtn} onPress={makeCoachCode}>
+                    <Text style={styles.resetBtnText}>Reset</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <Text style={styles.hint}>Share this coach code. Whoever enters it (Home → “Join as coach”) gets coach access — Coaches’ Corner + tools. A coach can also be a parent of their own kid.</Text>
+            </>
+          ) : (
+            <TouchableOpacity style={[styles.shareBtn, { marginTop: 12, alignSelf: 'flex-start' }]} onPress={makeCoachCode}>
+              <Text style={styles.shareBtnText}>Create a coach code</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -450,6 +512,10 @@ const styles = StyleSheet.create({
   resetBtn: { backgroundColor: '#24242c', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#2a2a32' },
   resetBtnText: { color: '#c9ccd3', fontWeight: '700' },
   hint: { fontSize: 12, color: '#62626c', marginTop: 8, lineHeight: 16 },
+  staffRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7 },
+  staffName: { flex: 1, color: '#f4f4f6', fontSize: 15, fontWeight: '700' },
+  staffRole: { color: '#8b7bff', fontSize: 12, fontWeight: '700' },
+  staffRemove: { color: '#c0392b', fontSize: 13, fontWeight: '700' },
 
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#2a2a32', gap: 12 },
   jersey: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#24242c', alignItems: 'center', justifyContent: 'center' },
