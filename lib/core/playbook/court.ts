@@ -9,6 +9,7 @@
 // Layout: basket(s) at the baseline(s); ~10px per foot; 50ft-wide court.
 
 import type { Surface, Vec } from './playDoc';
+import { FIELD_W, FIELD_H } from './field';
 
 export const COURT_W = 500;                 // 50 ft
 export const HALF_H = 470;                  // 47 ft (half of 94)
@@ -27,6 +28,7 @@ export const DEFAULT_THEME: Theme = {
 };
 
 export function surfaceSize(surface: Surface) {
+  if (surface === 'field') return { w: FIELD_W, h: FIELD_H };
   return { w: COURT_W, h: surface === 'full' ? FULL_H : HALF_H };
 }
 

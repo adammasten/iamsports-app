@@ -13,7 +13,13 @@
 //   handoff solid line + short cross-bar (dribble hand-off)
 
 import { courtSvg, DEFAULT_THEME, project, surfaceSize, type Theme } from './court';
+import { fieldSvg } from './field';
 import type { Action, PlayDoc, Surface, Vec } from './playDoc';
+
+// The playing surface behind the play — a football field or a basketball court.
+function surfaceSvg(s: Surface, t: Theme): string {
+  return s === 'field' ? fieldSvg() : courtSvg(s, t);
+}
 
 const px = (v: Vec, s: Surface) => project(v, s);
 
@@ -115,7 +121,7 @@ const MARKERS = `
 export function renderPlaySvg(doc: PlayDoc, theme: Theme = DEFAULT_THEME): string {
   const s = doc.surface;
   const { w, h } = surfaceSize(s);
-  const court = courtSvg(s, theme);
+  const court = surfaceSvg(s, theme);
   const actions = doc.actions.map(a => renderAction(a, s, theme)).join('');
   const tokens = doc.tokens.map(tk => renderToken(tk.id, tk.kind, tk.label ?? '', px(tk.pos, s), theme)).join('');
   const notes = (doc.annotations ?? []).map(an => {
@@ -184,7 +190,7 @@ export function tokenPosAt(doc: PlayDoc, tokenId: string, t: number): Vec {
 export function renderPlayFrameSvg(doc: PlayDoc, t: number, theme: Theme = DEFAULT_THEME): string {
   const s = doc.surface;
   const { w, h } = surfaceSize(s);
-  const court = courtSvg(s, theme);
+  const court = surfaceSvg(s, theme);
   const routes = `<g opacity="0.3">${doc.actions.map(a => renderAction(a, s, theme)).join('')}</g>`;
   const tokens = doc.tokens.map(tk => renderToken(tk.id, tk.kind, tk.label ?? '', px(tokenPosAt(doc, tk.id, t), s), theme)).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:100%;display:block">${MARKERS}${court}${routes}${tokens}</svg>`;

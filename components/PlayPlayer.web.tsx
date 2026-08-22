@@ -49,7 +49,7 @@ export default function PlayPlayer({ doc }: { doc: PlayDoc }) {
 
   return (
     <div style={{ width: '100%' }}>
-      <div ref={holder} style={{ width: '100%', aspectRatio: `${w} / ${h}`, borderRadius: 10, overflow: 'hidden', background: '#f4ead4' }} />
+      <div ref={holder} style={{ width: '100%', aspectRatio: `${w} / ${h}`, borderRadius: 10, overflow: 'hidden', background: doc.surface === 'field' ? '#2f6b3a' : '#f4ead4' }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
         <button onClick={playPause} style={btnPrimary}>{playing ? '❚❚ Pause' : t >= 1 ? '↻ Replay' : '▶ Play'}</button>
         <input

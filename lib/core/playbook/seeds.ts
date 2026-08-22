@@ -77,4 +77,44 @@ export const BLOB_BOX: PlayDoc = {
   ],
 };
 
-export const SEED_PLAYS: PlayDoc[] = [HORNS, GIVE_AND_GO, BLOB_BOX];
+// ── Football ──────────────────────────────────────────────────────────
+// First football play — proves the field surface + renderer. Coords normalised
+// 0..1: y=0.6 is the line of scrimmage (offense lines up on it), y=1 is the
+// backfield, y=0 is downfield; x=0 left sideline, x=1 right sideline. O-line are
+// plain circles on the LOS; skill players carry position letters.
+export const FB_GUN_TRIPS_VERTS: PlayDoc = {
+  schema_version: 1,
+  sport: 'football',
+  surface: 'field',
+  name: 'Gun Trips Right — 4 Verticals',
+  note: 'Base pass concept. Four receivers release vertical off the snap; QB reads the slot (Y) up the seam first, then works outside to Z. RB checks protection, then leaks to the flat as the checkdown.',
+  tokens: [
+    // Offensive line (on the LOS) — plain circles.
+    { id: 'lt', kind: 'offense', pos: { x: 0.36, y: 0.60 } },
+    { id: 'lg', kind: 'offense', pos: { x: 0.43, y: 0.60 } },
+    { id: 'c',  kind: 'offense', pos: { x: 0.50, y: 0.60 } },
+    { id: 'rg', kind: 'offense', pos: { x: 0.57, y: 0.60 } },
+    { id: 'rt', kind: 'offense', pos: { x: 0.64, y: 0.60 } },
+    // Backfield (shotgun).
+    { id: 'qb', kind: 'offense', label: 'QB', pos: { x: 0.50, y: 0.75 } },
+    { id: 'rb', kind: 'offense', label: 'RB', pos: { x: 0.41, y: 0.80 } },
+    // Receivers — X isolated left, trips right (Y slot, H, Z outside).
+    { id: 'x',  kind: 'offense', label: 'X', pos: { x: 0.10, y: 0.595 } },
+    { id: 'y',  kind: 'offense', label: 'Y', pos: { x: 0.71, y: 0.585 } },
+    { id: 'h',  kind: 'offense', label: 'H', pos: { x: 0.80, y: 0.585 } },
+    { id: 'z',  kind: 'offense', label: 'Z', pos: { x: 0.90, y: 0.595 } },
+    { id: 'ball', kind: 'ball', pos: { x: 0.50, y: 0.63 } },
+  ],
+  actions: [
+    // Off the snap (beat 1): four verticals + the RB to the flat.
+    { id: 'rx',  type: 'move', fromToken: 'x', step: 1, path: [{ x: 0.10, y: 0.595 }, { x: 0.09, y: 0.10 }] },
+    { id: 'ry',  type: 'move', fromToken: 'y', step: 1, path: [{ x: 0.71, y: 0.585 }, { x: 0.69, y: 0.10 }] },
+    { id: 'rh',  type: 'move', fromToken: 'h', step: 1, path: [{ x: 0.80, y: 0.585 }, { x: 0.80, y: 0.12 }] },
+    { id: 'rz',  type: 'move', fromToken: 'z', step: 1, path: [{ x: 0.90, y: 0.595 }, { x: 0.91, y: 0.10 }] },
+    { id: 'rrb', type: 'move', fromToken: 'rb', step: 1, path: [{ x: 0.41, y: 0.80 }, { x: 0.19, y: 0.70 }] },
+    // Beat 2: the throw up the seam to Y.
+    { id: 'pass', type: 'pass', fromToken: 'qb', toToken: 'y', step: 2, path: [{ x: 0.50, y: 0.74 }, { x: 0.69, y: 0.12 }] },
+  ],
+};
+
+export const SEED_PLAYS: PlayDoc[] = [HORNS, GIVE_AND_GO, BLOB_BOX, FB_GUN_TRIPS_VERTS];

@@ -15,8 +15,9 @@
 
 export type Vec = { x: number; y: number };
 
-// Basketball surfaces for v1. `full` is for press-break / transition plays.
-export type Surface = 'half' | 'full';
+// Drawing surface. Basketball: `half` (default) / `full` (press-break /
+// transition). Football: `field` (a slice of field with the line of scrimmage).
+export type Surface = 'half' | 'full' | 'field';
 
 export type TokenKind = 'offense' | 'defense' | 'ball' | 'coach' | 'cone';
 
@@ -57,7 +58,7 @@ export type Annotation = {
 
 export type PlayDoc = {
   schema_version: 1;
-  sport: 'basketball';
+  sport: 'basketball' | 'football';
   surface: Surface;
   name?: string;
   note?: string;   // coach's teaching note, shown under the diagram
@@ -79,8 +80,11 @@ export function validatePlayDoc(doc: unknown): string[] {
 
   if (d.schema_version !== CURRENT_SCHEMA_VERSION)
     errs.push(`schema_version must be ${CURRENT_SCHEMA_VERSION} (got ${String(d.schema_version)})`);
-  if (d.sport !== 'basketball') errs.push(`sport must be "basketball" (got ${String(d.sport)})`);
-  if (d.surface !== 'half' && d.surface !== 'full') errs.push(`surface must be "half" or "full" (got ${String(d.surface)})`);
+  if (d.sport !== 'basketball' && d.sport !== 'football') errs.push(`sport must be "basketball" or "football" (got ${String(d.sport)})`);
+  if (d.surface !== 'half' && d.surface !== 'full' && d.surface !== 'field') errs.push(`surface must be "half", "full" or "field" (got ${String(d.surface)})`);
+  // Sport ↔ surface must agree: football draws on a field, basketball on a court.
+  if (d.sport === 'football' && d.surface !== 'field') errs.push(`football plays must use surface "field" (got ${String(d.surface)})`);
+  if (d.sport === 'basketball' && d.surface === 'field') errs.push('basketball plays cannot use surface "field"');
 
   const inUnit = (v: Vec | undefined, where: string) => {
     if (!v || typeof v.x !== 'number' || typeof v.y !== 'number') { errs.push(`${where}: missing/invalid position`); return; }
