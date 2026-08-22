@@ -5,8 +5,11 @@
 //
 // This gates ONLY the Playbook. Upload, playback, sharing, tagging, and the
 // content feed are all sport-neutral and must never be gated by this.
-export const PLAYBOOK_SPORTS = ['Basketball', 'Football'] as const;
+import { isFootballSport } from '@/lib/core/upload-meta';
 
+// Basketball plus the whole football family (Football / 7-on-7 / Flag) have a
+// renderer today. Add a sport here the moment its field/court renderer ships.
 export function sportHasPlaybook(sport: string | null | undefined): boolean {
-  return !!sport && (PLAYBOOK_SPORTS as readonly string[]).includes(sport);
+  if (!sport) return false;
+  return sport.toLowerCase() === 'basketball' || isFootballSport(sport);
 }

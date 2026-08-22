@@ -321,7 +321,11 @@ export default function SelectTeamScreen() {
         <View style={{ marginBottom: 12 }}>
           <Dropdown value={newTeamSport} options={SPORT_OPTIONS} onSelect={setNewTeamSport} placeholder="Sport" />
         </View>
-        <TouchableOpacity style={styles.saveBtn} onPress={createTeam} disabled={creating}>
+        <TouchableOpacity
+          style={[styles.saveBtn, (!newTeamName.trim() || creating) && { opacity: 0.5 }]}
+          onPress={createTeam}
+          disabled={creating || !newTeamName.trim()}
+        >
           <Text style={styles.saveBtnText}>{creating ? 'Creating…' : 'Create Team'}</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setShowNewTeam(false)} disabled={creating}>

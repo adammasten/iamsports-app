@@ -6,6 +6,7 @@
 // are the "★ Highlight" / "POE" special tags), so exports/filters stay valid.
 // See docs/WEB_TAGGING_STUDIO_PLAN.md + docs/tagging-studio-prototype.html.
 import { useTeamContext } from '@/context';
+import { isFootballSport } from '@/lib/core/upload-meta';
 import { getCachedPathSync } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
@@ -160,7 +161,7 @@ export default function TaggingStudioWeb() {
   }, [videoId]);
 
   const tagSport = sport ?? activeTeam?.sport ?? null;
-  const isFootball = (tagSport ?? '').toLowerCase() === 'football';
+  const isFootball = isFootballSport(tagSport);
 
   // Flip the ODK unit → new drive (possession changed); clear this clip's picks.
   const setOdk = useCallback((odk: Odk) => {

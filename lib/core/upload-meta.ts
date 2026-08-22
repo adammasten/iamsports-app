@@ -20,6 +20,8 @@ export const EVENT_TYPES: { value: EventTypeKey; label: string }[] = [
 export const SPORTS: { value: string; label: string }[] = [
   { value: 'Basketball', label: 'Basketball' },
   { value: 'Football', label: 'Football' },
+  { value: '7-on-7', label: '7-on-7' },
+  { value: 'Flag Football', label: 'Flag Football' },
   { value: 'Soccer', label: 'Soccer' },
   { value: 'Baseball', label: 'Baseball' },
   { value: 'Softball', label: 'Softball' },
@@ -27,6 +29,14 @@ export const SPORTS: { value: string; label: string }[] = [
   { value: 'Lacrosse', label: 'Lacrosse' },
   { value: 'Other', label: 'Other' },
 ];
+
+// The football family — Football, 7-on-7, and Flag all diagram on a field and tag
+// with the ODK breakdown, so they route through the same football code paths.
+// Compared case-insensitively (teams.sport is 'Football', a play doc's is 'football').
+export const FOOTBALL_SPORTS = ['Football', '7-on-7', 'Flag Football'];
+export function isFootballSport(sport: string | null | undefined): boolean {
+  return !!sport && FOOTBALL_SPORTS.some(s => s.toLowerCase() === sport.toLowerCase());
+}
 
 export const SEASON_TERMS = ['Fall', 'Winter', 'Spring', 'Summer'] as const;
 

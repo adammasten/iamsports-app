@@ -4,6 +4,7 @@
 // NEVER film — clips stay team-scoped).
 
 import { supabase } from '@/supabase';
+import { isFootballSport } from '@/lib/core/upload-meta';
 import type { PlayDoc } from './playDoc';
 
 export type LibraryPlay = { id: string; name: string; doc: PlayDoc | null; tags: string[] };
@@ -95,8 +96,13 @@ export async function attachToTeam(opts: { libraryPlayId: string; doc: PlayDoc; 
   // capitalized label ('Football'); doc.sport is lowercase ('football').
   const { data: team, error: te } = await supabase.from('teams').select('sport').eq('id', teamId).single();
   if (te) throw te;
-  if (team?.sport && (team.sport as string).toLowerCase() !== doc.sport) {
-    throw new Error(`This is a ${doc.sport} play — it can’t be added to a ${team.sport} team.`);
+  if (team?.sport) {
+    // Football plays deploy to any football-family team (Football / 7-on-7 / Flag);
+    // otherwise the sport must match exactly.
+    const compatible = doc.sport === 'football'
+      ? isFootballSport(team.sport as string)
+      : (team.sport as string).toLowerCase() === doc.sport;
+    if (!compatible) throw new Error(`This is a ${doc.sport} play — it can’t be added to a ${team.sport} team.`);
   }
   const { data: play, error } = await supabase
     .from('plays')
