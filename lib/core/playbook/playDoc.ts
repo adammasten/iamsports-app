@@ -34,6 +34,10 @@ export type Token = {
 // Teams is football-only (kickoff/punt/FG units).
 export type PlaySide = 'offense' | 'defense' | 'special_teams';
 
+// Football format: full-contact 11-man ('tackle', default) or pass-only 7-on-7
+// (no line, 7 players a side). Basketball plays ignore this.
+export type PlayFormat = 'tackle' | '7on7';
+
 // Movement / relationship between spots on the floor. `path` is the drawn line
 // (>=2 normalised points); `type` picks the line style + terminator so the
 // diagram reads in standard coaching notation.
@@ -66,7 +70,8 @@ export type PlayDoc = {
   schema_version: 1;
   sport: 'basketball' | 'football';
   surface: Surface;
-  side?: PlaySide;   // offense (default) / defense / special_teams
+  side?: PlaySide;      // offense (default) / defense / special_teams
+  format?: PlayFormat;  // football only: 'tackle' (default) / '7on7'
   name?: string;
   note?: string;   // coach's teaching note, shown under the diagram
   tokens: Token[];
@@ -95,6 +100,10 @@ export function validatePlayDoc(doc: unknown): string[] {
   if (d.side !== undefined && d.side !== 'offense' && d.side !== 'defense' && d.side !== 'special_teams')
     errs.push(`side must be "offense", "defense" or "special_teams" (got ${String(d.side)})`);
   if (d.side === 'special_teams' && d.sport !== 'football') errs.push('special_teams is football-only');
+  if (d.format !== undefined && d.format !== 'tackle' && d.format !== '7on7')
+    errs.push(`format must be "tackle" or "7on7" (got ${String(d.format)})`);
+  if (d.format === '7on7' && d.sport !== 'football') errs.push('7on7 is football-only');
+  if (d.format === '7on7' && d.side === 'special_teams') errs.push('7on7 has no special teams');
 
   const inUnit = (v: Vec | undefined, where: string) => {
     if (!v || typeof v.x !== 'number' || typeof v.y !== 'number') { errs.push(`${where}: missing/invalid position`); return; }

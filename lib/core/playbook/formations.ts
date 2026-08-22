@@ -6,7 +6,7 @@
 // the surface); the scout opponent lines up above it. Scout tokens carry
 // scout:true (rendered faded) and 's_'-prefixed ids so they never collide.
 
-import type { PlaySide, Token } from './playDoc';
+import type { PlayFormat, PlaySide, Token } from './playDoc';
 
 type Sport = 'basketball' | 'football';
 
@@ -118,9 +118,49 @@ const FB_SCOUT_DEFENSE = (): Token[] => [
   T('s_rc', 'defense', { x: 0.86, y: 0.34 }, undefined, true),
 ];
 
-// The coach's own starting unit for a (sport, side).
-export function startFormation(sport: Sport, side: PlaySide): Token[] {
+// ── Football 7-on-7 (pass-only, 7 a side, no line) ─────────────────────
+const FB7_OFFENSE = (): Token[] => [
+  T('c',  'offense', { x: 0.50, y: 0.60 }, 'C'),
+  T('qb', 'offense', { x: 0.50, y: 0.72 }, 'QB'),
+  T('h',  'offense', { x: 0.28, y: 0.585 }, 'H'),
+  T('x',  'offense', { x: 0.10, y: 0.595 }, 'X'),
+  T('y',  'offense', { x: 0.72, y: 0.585 }, 'Y'),
+  T('z',  'offense', { x: 0.90, y: 0.595 }, 'Z'),
+  T('rb', 'offense', { x: 0.42, y: 0.76 }, 'RB'),
+  T('ball', 'ball', { x: 0.50, y: 0.63 }),
+];
+const FB7_DEFENSE = (): Token[] => [
+  T('wl', 'defense', { x: 0.35, y: 0.66 }, 'L'),
+  T('ml', 'defense', { x: 0.50, y: 0.66 }, 'L'),
+  T('sl', 'defense', { x: 0.65, y: 0.66 }, 'L'),
+  T('lc', 'defense', { x: 0.12, y: 0.77 }, 'C'),
+  T('fs', 'defense', { x: 0.38, y: 0.79 }, 'S'),
+  T('ss', 'defense', { x: 0.62, y: 0.79 }, 'S'),
+  T('rc', 'defense', { x: 0.88, y: 0.77 }, 'C'),
+];
+const FB7_SCOUT_OFFENSE = (): Token[] => [
+  T('s_c',  'offense', { x: 0.50, y: 0.53 }, undefined, true),
+  T('s_qb', 'offense', { x: 0.50, y: 0.45 }, 'QB', true),
+  T('s_h',  'offense', { x: 0.28, y: 0.535 }, 'H', true),
+  T('s_x',  'offense', { x: 0.10, y: 0.535 }, 'X', true),
+  T('s_y',  'offense', { x: 0.72, y: 0.535 }, 'Y', true),
+  T('s_z',  'offense', { x: 0.90, y: 0.535 }, 'Z', true),
+  T('s_rb', 'offense', { x: 0.42, y: 0.46 }, 'RB', true),
+];
+const FB7_SCOUT_DEFENSE = (): Token[] => [
+  T('s_wl', 'defense', { x: 0.35, y: 0.50 }, undefined, true),
+  T('s_ml', 'defense', { x: 0.50, y: 0.50 }, undefined, true),
+  T('s_sl', 'defense', { x: 0.65, y: 0.50 }, undefined, true),
+  T('s_lc', 'defense', { x: 0.12, y: 0.38 }, undefined, true),
+  T('s_fs', 'defense', { x: 0.38, y: 0.36 }, undefined, true),
+  T('s_ss', 'defense', { x: 0.62, y: 0.36 }, undefined, true),
+  T('s_rc', 'defense', { x: 0.88, y: 0.38 }, undefined, true),
+];
+
+// The coach's own starting unit for a (sport, side, format).
+export function startFormation(sport: Sport, side: PlaySide, format: PlayFormat = 'tackle'): Token[] {
   if (sport === 'football') {
+    if (format === '7on7') return side === 'defense' ? FB7_DEFENSE() : FB7_OFFENSE();
     if (side === 'defense') return FB_DEFENSE();
     if (side === 'special_teams') return FB_SPECIAL();
     return FB_OFFENSE();
@@ -130,8 +170,9 @@ export function startFormation(sport: Sport, side: PlaySide): Token[] {
 
 // The opposing (scout) unit for a play of this side — the other team.
 // Offense play → scout defense; defense/ST play → scout offense.
-export function scoutUnit(sport: Sport, side: PlaySide): Token[] {
+export function scoutUnit(sport: Sport, side: PlaySide, format: PlayFormat = 'tackle'): Token[] {
   if (sport === 'football') {
+    if (format === '7on7') return side === 'offense' ? FB7_SCOUT_DEFENSE() : FB7_SCOUT_OFFENSE();
     return side === 'offense' ? FB_SCOUT_DEFENSE() : FB_SCOUT_OFFENSE();
   }
   return side === 'offense' ? BB_SCOUT_DEFENSE() : BB_SCOUT_OFFENSE();

@@ -9,7 +9,7 @@ import { useTeamContext } from '@/context';
 import { surfaceSize } from '@/lib/core/playbook/court';
 import { scoutUnit, startFormation } from '@/lib/core/playbook/formations';
 import { fetchCoachTags, fetchLibraryPlay, propagateToTeams, saveLibraryPlay, updateLibraryPlay } from '@/lib/core/playbook/library';
-import type { Action, ActionType, PlayDoc, PlaySide, Surface, Token } from '@/lib/core/playbook/playDoc';
+import type { Action, ActionType, PlayDoc, PlayFormat, PlaySide, Surface, Token } from '@/lib/core/playbook/playDoc';
 import { renderPlaySvg } from '@/lib/core/playbook/renderPlay';
 import { allPlayTags, playTagGroups, tagColor } from '@/lib/core/playbook/tags';
 import { router } from 'expo-router';
@@ -37,6 +37,7 @@ export default function PlayEditor({ editId }: { editId?: string }) {
   const { userId } = useTeamContext();
   const [sport, setSport] = useState<Sport>('basketball');
   const [side, setSide] = useState<PlaySide>('offense');
+  const [format, setFormat] = useState<PlayFormat>('tackle');
   const surface: Surface = sport === 'football' ? 'field' : 'half';
   const { w, h } = surfaceSize(surface);
   const actionTypes = ACTION_TYPES_BY_SPORT[sport];
@@ -72,14 +73,15 @@ export default function PlayEditor({ editId }: { editId?: string }) {
       if (!p.doc) return;
       if (p.doc.sport === 'football' || p.doc.sport === 'basketball') setSport(p.doc.sport);
       if (p.doc.side) setSide(p.doc.side);
+      if (p.doc.format) setFormat(p.doc.format);
       setTokens(p.doc.tokens); setActions(p.doc.actions ?? []);
       setName(p.doc.name ?? ''); setNote(p.doc.note ?? ''); setTags(p.tags);
     }).catch(e => setErr(e?.message ?? String(e)));
   }, [editId]);
 
-  // Reset the canvas to a fresh (sport, side) formation.
-  function resetFormation(s: Sport, sd: PlaySide) {
-    setTokens(startFormation(s, sd));
+  // Reset the canvas to a fresh (sport, side, format) formation.
+  function resetFormation(s: Sport, sd: PlaySide, fmt: PlayFormat) {
+    setTokens(startFormation(s, sd, fmt));
     setActions([]);
     setDrawFor(null); setDrawPts([]); setDrawType('move'); setCurrentBeat(1);
   }
@@ -89,18 +91,26 @@ export default function PlayEditor({ editId }: { editId?: string }) {
     if (s === sport) return;
     const nextSide: PlaySide = s === 'basketball' && side === 'special_teams' ? 'offense' : side;
     setSport(s); setSide(nextSide);
-    resetFormation(s, nextSide);
+    resetFormation(s, nextSide, format);
+  }
+  // Switch football format (11-man tackle vs 7-on-7). 7-on-7 has no special
+  // teams, so that side drops back to Offense.
+  function changeFormat(f: PlayFormat) {
+    if (f === format) return;
+    const nextSide: PlaySide = f === '7on7' && side === 'special_teams' ? 'offense' : side;
+    setFormat(f); setSide(nextSide);
+    resetFormation(sport, nextSide, f);
   }
   // Switch side (offense/defense/special teams) — swaps your starting unit.
   function changeSide(sd: PlaySide) {
     if (sd === side) return;
     setSide(sd);
-    resetFormation(sport, sd);
+    resetFormation(sport, sd, format);
   }
   // Add / remove the scout (opposing) unit.
   function toggleScout() {
     if (hasScout) setTokens(ts => ts.filter(t => !t.scout));
-    else setTokens(ts => [...ts, ...scoutUnit(sport, side)]);
+    else setTokens(ts => [...ts, ...scoutUnit(sport, side, format)]);
   }
   const addTag = (t: string) => { const v = t.trim(); if (!v) return; setTags(s => (s.some(x => x.toLowerCase() === v.toLowerCase()) ? s : [...s, v])); setTagQuery(''); };
 
@@ -109,8 +119,8 @@ export default function PlayEditor({ editId }: { editId?: string }) {
     const draft: Action[] = drawFor && drawPts.length >= 1
       ? [{ id: 'draft', type: drawType, fromToken: drawFor, step: currentBeat, path: drawPts.length >= 2 ? drawPts : [tokens.find(t => t.id === drawFor)!.pos, drawPts[0]] }]
       : [];
-    return { schema_version: 1, sport, surface, side, name: name || 'Untitled play', tokens, actions: [...actions, ...draft] };
-  }, [sport, surface, side, name, tokens, actions, drawFor, drawPts, drawType, currentBeat]);
+    return { schema_version: 1, sport, surface, side, ...(sport === 'football' ? { format } : {}), name: name || 'Untitled play', tokens, actions: [...actions, ...draft] };
+  }, [sport, surface, side, format, name, tokens, actions, drawFor, drawPts, drawType, currentBeat]);
 
   useEffect(() => {
     if (!boxRef.current) return;
@@ -159,7 +169,7 @@ export default function PlayEditor({ editId }: { editId?: string }) {
     if (!userId) { setErr('You’re not signed in.'); return; }
     setSaving(true);
     try {
-      const finalDoc: PlayDoc = { schema_version: 1, sport, surface, side, name: name.trim(), note: note.trim() || undefined, tokens, actions };
+      const finalDoc: PlayDoc = { schema_version: 1, sport, surface, side, ...(sport === 'football' ? { format } : {}), name: name.trim(), note: note.trim() || undefined, tokens, actions };
       if (editId) {
         await updateLibraryPlay({ id: editId, doc: finalDoc, tags });
         const n = await propagateToTeams({ libraryPlayId: editId, doc: finalDoc, tags, userId });
@@ -210,10 +220,25 @@ export default function PlayEditor({ editId }: { editId?: string }) {
           <span style={S.beatHint}>{editId ? 'Sport is fixed once a play is created.' : 'Switching sport starts a fresh formation.'}</span>
         </div>
 
+        {sport === 'football' ? (
+          <div style={S.field}>
+            <label style={S.label}>Format</label>
+            <div style={S.chipRow}>
+              {(['tackle', '7on7'] as PlayFormat[]).map(f => (
+                <button
+                  key={f}
+                  onClick={() => { if (!editId) changeFormat(f); }}
+                  style={{ ...S.chip, ...(format === f ? S.chipOn : {}), ...(editId ? { cursor: 'default', opacity: format === f ? 1 : 0.35 } : {}) }}
+                >{f === '7on7' ? '7-on-7' : '11-man (Tackle)'}</button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div style={S.field}>
           <label style={S.label}>Side</label>
           <div style={S.chipRow}>
-            {(['offense', 'defense', ...(sport === 'football' ? ['special_teams'] : [])] as PlaySide[]).map(sd => (
+            {(['offense', 'defense', ...(sport === 'football' && format !== '7on7' ? ['special_teams'] : [])] as PlaySide[]).map(sd => (
               <button
                 key={sd}
                 onClick={() => { if (!editId) changeSide(sd); }}
@@ -330,7 +355,7 @@ export default function PlayEditor({ editId }: { editId?: string }) {
         ) : null}
 
         <button onClick={save} disabled={saving} style={{ ...S.primary, opacity: saving ? 0.6 : 1 }}>{saving ? 'Saving…' : editId ? 'Update play' : 'Save play'}</button>
-        <button onClick={() => { resetFormation(sport, side); setName(''); setNote(''); setTags([]); setSaved(null); setErr(null); }} style={S.ghost}>Reset</button>
+        <button onClick={() => { resetFormation(sport, side, format); setName(''); setNote(''); setTags([]); setSaved(null); setErr(null); }} style={S.ghost}>Reset</button>
       </div>
     </div>
   );
