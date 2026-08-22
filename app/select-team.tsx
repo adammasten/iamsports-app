@@ -3,6 +3,7 @@ import { TeamLogo } from '@/components/team-logo';
 import { SkeletonCards } from '@/components/skeleton-cards';
 import { DebugPanel } from '@/components/debug-panel';
 import { loadContentFeed, type ContentFeedDebug, type FeedItem } from '@/lib/core/homeFeed';
+import { SPORTS } from '@/lib/core/upload-meta';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,11 @@ import FadeRail from './components/FadeRail';
 import WebTopNav from './components/WebTopNav';
 
 // Type + Sort dropdowns for the home content feed's FilterBar (mirrors Film Room).
+// Sport picker for New Team — a controlled dropdown (not free text) so the value
+// always matches a known sport; the sport drives tagging, the Playbook, and tag
+// scoping, so a typo here would silently break those.
+const SPORT_OPTIONS: DropdownOption[] = SPORTS.map(s => ({ value: s.value, label: s.label }));
+
 const TYPE_OPTIONS: DropdownOption[] = [
   { value: 'all', label: 'All' },
   { value: 'game', label: 'Games' },
@@ -311,14 +317,10 @@ export default function SelectTeamScreen() {
           autoFocus
           editable={!creating}
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Sport (e.g. Basketball)"
-          placeholderTextColor="#888"
-          value={newTeamSport}
-          onChangeText={setNewTeamSport}
-          editable={!creating}
-        />
+        <Text style={styles.formLabel}>Sport</Text>
+        <View style={{ marginBottom: 12 }}>
+          <Dropdown value={newTeamSport} options={SPORT_OPTIONS} onSelect={setNewTeamSport} placeholder="Sport" />
+        </View>
         <TouchableOpacity style={styles.saveBtn} onPress={createTeam} disabled={creating}>
           <Text style={styles.saveBtnText}>{creating ? 'Creating…' : 'Create Team'}</Text>
         </TouchableOpacity>
@@ -630,6 +632,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a', borderRadius: 8, padding: 14, marginBottom: 12,
     fontSize: 16, borderWidth: 1, borderColor: '#333', color: '#fff',
   },
+  formLabel: { color: '#888', fontSize: 12, fontWeight: '700', marginBottom: 6, marginLeft: 2 },
   saveBtn: { backgroundColor: '#534AB7', borderRadius: 8, padding: 16, alignItems: 'center', marginTop: 8, marginBottom: 12 },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   cancel: { textAlign: 'center', color: '#888', fontSize: 14 },
