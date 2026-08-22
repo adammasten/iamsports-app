@@ -703,6 +703,13 @@ export default function MyWorkScreen() {
     () => [{ value: 'all', label: 'All teams' }, ...[...teamNameById].map(([value, label]) => ({ value, label }))],
     [teamNameById],
   );
+  // Sport lookup (team → sport) for the Sport filter. A game's sport is its
+  // team's sport; reels carry no team, so they drop out when a sport is picked.
+  const sportByTeamId = useMemo(() => {
+    const m = new Map<string, string>();
+    userTeams.forEach(t => { if (!m.has(t.team_id)) m.set(t.team_id, t.sport); });
+    return m;
+  }, [userTeams]);
 
   // Extra FilterBar dimensions, built from what's actually present across the
   // games. Event & Season show only when there are 2+ to choose between (a
@@ -710,6 +717,13 @@ export default function MyWorkScreen() {
   // you can isolate "just the tournament games" from everything else.
   const extraFilters = useMemo(() => {
     const out: { key: string; label: string; options: DropdownOption[] }[] = [];
+
+    // Sport — shown once the Film Room spans 2+ sports (e.g. a basketball AND a
+    // football team), so a coach can isolate one sport's games.
+    const sports = new Set(games.map(g => sportByTeamId.get(g.teamId)).filter(Boolean) as string[]);
+    if (sports.size >= 2) {
+      out.push({ key: 'sport', label: 'Sport', options: [{ value: 'all', label: 'All sports' }, ...[...sports].sort().map(s => ({ value: s, label: s }))] });
+    }
 
     const events = new Set(games.map(g => g.eventType).filter(Boolean) as string[]);
     if (events.size >= 2) {
@@ -739,7 +753,7 @@ export default function MyWorkScreen() {
     }
 
     return out;
-  }, [games]);
+  }, [games, sportByTeamId]);
 
   // Map reels + games → FilterableItem for FilterBar. Reels carry no team
   // (teamId/teamName empty); games carry game.teamId + its team name. Games have
@@ -756,10 +770,10 @@ export default function MyWorkScreen() {
       ...games.map(g => ({
         id: g.id, teamId: g.teamId, teamName: teamNameById.get(g.teamId) ?? '',
         contentType: 'game', title: g.title, createdAt: g.createdAt,
-        extra: { eventType: g.eventType ?? '', seasonId: g.seasonId ?? '', tournamentId: g.tournamentId ?? '' },
+        extra: { sport: sportByTeamId.get(g.teamId) ?? '', eventType: g.eventType ?? '', seasonId: g.seasonId ?? '', tournamentId: g.tournamentId ?? '' },
       })),
     ],
-    [reels, games, teamNameById],
+    [reels, games, teamNameById, sportByTeamId],
   );
   const reelsById = useMemo(() => new Map(reels.map(r => [r.id, r])), [reels]);
   const gamesById = useMemo(() => new Map(games.map(g => [g.id, g])), [games]);

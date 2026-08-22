@@ -15,8 +15,16 @@ export const EVENT_TYPES: { value: EventTypeKey; label: string }[] = [
 ];
 
 // Sport is plain text; extend this list to add sports (no migration, no retrofit).
+// The value is what's written to teams.sport / videos.sport and matched on when
+// filtering by sport — keep values stable once content exists under them.
 export const SPORTS: { value: string; label: string }[] = [
   { value: 'Basketball', label: 'Basketball' },
+  { value: 'Football', label: 'Football' },
+  { value: 'Soccer', label: 'Soccer' },
+  { value: 'Baseball', label: 'Baseball' },
+  { value: 'Softball', label: 'Softball' },
+  { value: 'Volleyball', label: 'Volleyball' },
+  { value: 'Lacrosse', label: 'Lacrosse' },
   { value: 'Other', label: 'Other' },
 ];
 

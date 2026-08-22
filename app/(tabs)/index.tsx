@@ -9,6 +9,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { loadTeamWall, type WallPost } from '@/lib/core/homeFeed';
+import { sportHasPlaybook } from '@/lib/core/playbook/capability';
 import { showContentActions } from '../moderationActions';
 import ContentCard from '@/components/content-card/ContentCard';
 import { type DropdownOption } from '../components/Dropdown';
@@ -68,6 +69,11 @@ export default function HomeScreen() {
     // creating/editing stays web-only. So the viewer entry shows on both.
     const team = activeTeam;
     if (!team) { setHasPlaybook(false); return; }
+    // Sport gate: the Playbook only has a renderer for some sports (basketball
+    // today). Hide the entry entirely for a football/soccer/etc. team until its
+    // field renderer ships — rather than open a court-only screen. Skip the
+    // query too, since a non-playbook sport can't show the button regardless.
+    if (!sportHasPlaybook(team.sport)) { setHasPlaybook(false); return; }
     let alive = true;
     supabase
       .from('installs')

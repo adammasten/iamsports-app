@@ -116,6 +116,13 @@ export default function SelectTeamScreen() {
     userTeams.forEach(t => { if (!m.has(t.team_id)) m.set(t.team_id, t.name); });
     return m;
   }, [userTeams]);
+  // Sport lookup (team → sport) so the feed can be filtered by sport. Every team
+  // has a sport (teams.sport is NOT NULL); an item's sport is its team's sport.
+  const sportByTeamId = useMemo(() => {
+    const m = new Map<string, string>();
+    userTeams.forEach(t => { if (!m.has(t.team_id)) m.set(t.team_id, t.sport); });
+    return m;
+  }, [userTeams]);
   const teamOptions = useMemo<DropdownOption[]>(
     () => [{ value: 'all', label: 'All teams' }, ...[...teamNameById].map(([value, label]) => ({ value, label }))],
     [teamNameById],
@@ -137,6 +144,12 @@ export default function SelectTeamScreen() {
   // player-scoped items (Event & Season need 2+ to partition; Tournament with 1).
   const extraFilters = useMemo(() => {
     const out: { key: string; label: string; options: DropdownOption[] }[] = [];
+    // Sport — shown once the user's content spans 2+ sports (e.g. a basketball
+    // team AND a football team), so "show me just my football stuff" is one tap.
+    const sports = new Set(scopedItems.map(it => sportByTeamId.get(it.teamId)).filter(Boolean) as string[]);
+    if (sports.size >= 2) {
+      out.push({ key: 'sport', label: 'Sport', options: [{ value: 'all', label: 'All sports' }, ...[...sports].sort().map(s => ({ value: s, label: s }))] });
+    }
     // Year — the load-bearing axis for a multi-year archive. Derived from each
     // item's date so it spans games, reels, and loose footage alike. Only shown
     // once content spans 2+ years.
@@ -159,7 +172,7 @@ export default function SelectTeamScreen() {
       out.push({ key: 'tournamentId', label: 'Tournament', options: [{ value: 'all', label: 'All' }, ...[...tours].map(([value, label]) => ({ value, label }))] });
     }
     return out;
-  }, [scopedItems]);
+  }, [scopedItems, sportByTeamId]);
 
   // Player-scoped items → FilterableItem for FilterBar. game (video attached to a
   // game) → 'game', loose video → 'video', reels → 'reel' — so the Type filter can
@@ -169,9 +182,9 @@ export default function SelectTeamScreen() {
       id: it.key, teamId: it.teamId, teamName: teamNameById.get(it.teamId) ?? '',
       contentType: it.kind === 'reel' ? 'reel' : it.kind === 'game' ? 'game' : 'video',
       title: it.title, createdAt: it.createdAt, durationSeconds: it.durationSeconds,
-      extra: { year: new Date(it.createdAt).getFullYear().toString(), eventType: it.eventType ?? '', seasonId: it.seasonId ?? '', tournamentId: it.tournamentId ?? '' },
+      extra: { sport: sportByTeamId.get(it.teamId) ?? '', year: new Date(it.createdAt).getFullYear().toString(), eventType: it.eventType ?? '', seasonId: it.seasonId ?? '', tournamentId: it.tournamentId ?? '' },
     })),
-    [scopedItems, teamNameById],
+    [scopedItems, teamNameById, sportByTeamId],
   );
   const itemsByKey = useMemo(() => new Map(items.map(it => [it.key, it])), [items]);
 
