@@ -39,7 +39,7 @@ export async function saveLibraryPlay(opts: { doc: PlayDoc; tags: string[]; user
   const { doc, tags, userId } = opts;
   const { data, error } = await supabase
     .from('library_plays')
-    .insert({ owner_user_id: userId, sport: doc.sport, name: doc.name ?? 'Untitled play', doc, tags })
+    .insert({ owner_user_id: userId, sport: doc.sport, side: doc.side ?? 'offense', name: doc.name ?? 'Untitled play', doc, tags })
     .select('id')
     .single();
   if (error) throw error;
@@ -100,7 +100,7 @@ export async function attachToTeam(opts: { libraryPlayId: string; doc: PlayDoc; 
   }
   const { data: play, error } = await supabase
     .from('plays')
-    .insert({ team_id: teamId, sport: doc.sport, name: doc.name ?? 'Untitled play', doc, tags, latest_version: 1, created_by: userId, library_play_id: libraryPlayId })
+    .insert({ team_id: teamId, sport: doc.sport, side: doc.side ?? 'offense', name: doc.name ?? 'Untitled play', doc, tags, latest_version: 1, created_by: userId, library_play_id: libraryPlayId })
     .select('id')
     .single();
   if (error) throw error;

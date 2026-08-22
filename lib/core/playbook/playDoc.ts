@@ -26,7 +26,13 @@ export type Token = {
   kind: TokenKind;
   label?: string;   // "1".."5", "PG", "X1" — short; rendered inside the token
   pos: Vec;
+  scout?: boolean;  // true = the opposing (scout) unit — rendered faded so the
+                    // coach's own unit stands out.
 };
+
+// Which unit the play diagrams. Offense/Defense apply to every sport; Special
+// Teams is football-only (kickoff/punt/FG units).
+export type PlaySide = 'offense' | 'defense' | 'special_teams';
 
 // Movement / relationship between spots on the floor. `path` is the drawn line
 // (>=2 normalised points); `type` picks the line style + terminator so the
@@ -60,6 +66,7 @@ export type PlayDoc = {
   schema_version: 1;
   sport: 'basketball' | 'football';
   surface: Surface;
+  side?: PlaySide;   // offense (default) / defense / special_teams
   name?: string;
   note?: string;   // coach's teaching note, shown under the diagram
   tokens: Token[];
@@ -85,6 +92,9 @@ export function validatePlayDoc(doc: unknown): string[] {
   // Sport ↔ surface must agree: football draws on a field, basketball on a court.
   if (d.sport === 'football' && d.surface !== 'field') errs.push(`football plays must use surface "field" (got ${String(d.surface)})`);
   if (d.sport === 'basketball' && d.surface === 'field') errs.push('basketball plays cannot use surface "field"');
+  if (d.side !== undefined && d.side !== 'offense' && d.side !== 'defense' && d.side !== 'special_teams')
+    errs.push(`side must be "offense", "defense" or "special_teams" (got ${String(d.side)})`);
+  if (d.side === 'special_teams' && d.sport !== 'football') errs.push('special_teams is football-only');
 
   const inUnit = (v: Vec | undefined, where: string) => {
     if (!v || typeof v.x !== 'number' || typeof v.y !== 'number') { errs.push(`${where}: missing/invalid position`); return; }

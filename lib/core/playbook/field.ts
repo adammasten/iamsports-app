@@ -15,8 +15,10 @@ import type { Vec } from './playDoc';
 
 const PX_PER_YARD = 10;
 export const FIELD_W = 534;                 // ~53.3 yd wide
-export const FIELD_H = 240;                 // ~24 yd of depth shown
-// Line of scrimmage as a fraction of depth (lower third → room for routes).
+export const FIELD_H = 300;                 // ~30 yd deep — room for a scout unit
+                                            // above the LOS + routes developing.
+// Line of scrimmage as a fraction of depth (lower third → room for routes and,
+// when a scout opponent is added, their side above the line).
 export const LOS_Y = 0.6;
 
 export type FieldTheme = { turf: string; line: string; hash: string; los: string };

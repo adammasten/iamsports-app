@@ -85,7 +85,9 @@ function renderAction(a: Action, s: Surface, t: Theme): string {
   }
 }
 
-function renderToken(id: string, kind: string, label: string, p: { x: number; y: number }, t: Theme): string {
+function renderToken(id: string, kind: string, label: string, p: { x: number; y: number }, t: Theme, scout = false): string {
+  // Scout (opposing) tokens render faded so the coach's own unit reads as primary.
+  if (scout) return `<g opacity="0.4">${renderToken(id, kind, label, p, t, false)}</g>`;
   const r = 15;
   const txt = (fill: string) =>
     `<text x="${p.x}" y="${p.y}" text-anchor="middle" dominant-baseline="central" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="${fill}">${label}</text>`;
@@ -123,7 +125,7 @@ export function renderPlaySvg(doc: PlayDoc, theme: Theme = DEFAULT_THEME): strin
   const { w, h } = surfaceSize(s);
   const court = surfaceSvg(s, theme);
   const actions = doc.actions.map(a => renderAction(a, s, theme)).join('');
-  const tokens = doc.tokens.map(tk => renderToken(tk.id, tk.kind, tk.label ?? '', px(tk.pos, s), theme)).join('');
+  const tokens = doc.tokens.map(tk => renderToken(tk.id, tk.kind, tk.label ?? '', px(tk.pos, s), theme, tk.scout)).join('');
   const notes = (doc.annotations ?? []).map(an => {
     const p = px(an.pos, s);
     return `<text x="${p.x}" y="${p.y}" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-style="italic" fill="${theme.ink}">${an.text}</text>`;
@@ -192,6 +194,6 @@ export function renderPlayFrameSvg(doc: PlayDoc, t: number, theme: Theme = DEFAU
   const { w, h } = surfaceSize(s);
   const court = surfaceSvg(s, theme);
   const routes = `<g opacity="0.3">${doc.actions.map(a => renderAction(a, s, theme)).join('')}</g>`;
-  const tokens = doc.tokens.map(tk => renderToken(tk.id, tk.kind, tk.label ?? '', px(tokenPosAt(doc, tk.id, t), s), theme)).join('');
+  const tokens = doc.tokens.map(tk => renderToken(tk.id, tk.kind, tk.label ?? '', px(tokenPosAt(doc, tk.id, t), s), theme, tk.scout)).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" style="width:100%;height:100%;display:block">${MARKERS}${court}${routes}${tokens}</svg>`;
 }
