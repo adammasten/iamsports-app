@@ -5,7 +5,7 @@
 //
 // This gates ONLY the Playbook. Upload, playback, sharing, tagging, and the
 // content feed are all sport-neutral and must never be gated by this.
-export const PLAYBOOK_SPORTS = ['Basketball'] as const;
+export const PLAYBOOK_SPORTS = ['Basketball', 'Football'] as const;
 
 export function sportHasPlaybook(sport: string | null | undefined): boolean {
   return !!sport && (PLAYBOOK_SPORTS as readonly string[]).includes(sport);

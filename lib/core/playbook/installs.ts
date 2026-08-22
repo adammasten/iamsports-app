@@ -97,7 +97,7 @@ export async function savePlay(opts: { teamId: string; doc: PlayDoc; tags: strin
   const { teamId, doc, tags, userId } = opts;
   const { data: play, error } = await supabase
     .from('plays')
-    .insert({ team_id: teamId, sport: 'basketball', name: doc.name ?? 'Untitled play', doc, latest_version: 1, created_by: userId, tags })
+    .insert({ team_id: teamId, sport: doc.sport, name: doc.name ?? 'Untitled play', doc, latest_version: 1, created_by: userId, tags })
     .select('id')
     .single();
   if (error) throw error;

@@ -8,13 +8,16 @@
 import { useTeamContext } from '@/context';
 import { surfaceSize } from '@/lib/core/playbook/court';
 import { fetchCoachTags, fetchLibraryPlay, propagateToTeams, saveLibraryPlay, updateLibraryPlay } from '@/lib/core/playbook/library';
-import type { Action, ActionType, PlayDoc, Token } from '@/lib/core/playbook/playDoc';
+import type { Action, ActionType, PlayDoc, Surface, Token } from '@/lib/core/playbook/playDoc';
 import { renderPlaySvg } from '@/lib/core/playbook/renderPlay';
 import { ALL_PLAY_TAGS, PLAY_TAG_GROUPS, tagColor } from '@/lib/core/playbook/tags';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-const startTokens = (): Token[] => ([
+type Sport = 'basketball' | 'football';
+
+// Starting formation per sport — a neutral set the coach then drags into place.
+const BASKETBALL_TOKENS = (): Token[] => ([
   { id: 'p1', kind: 'offense', label: '1', pos: { x: 0.50, y: 0.80 } },
   { id: 'p2', kind: 'offense', label: '2', pos: { x: 0.15, y: 0.55 } },
   { id: 'p3', kind: 'offense', label: '3', pos: { x: 0.85, y: 0.55 } },
@@ -23,19 +26,49 @@ const startTokens = (): Token[] => ([
   { id: 'ball', kind: 'ball', pos: { x: 0.53, y: 0.79 } },
 ]);
 
-const ACTION_TYPES: { type: ActionType; label: string }[] = [
-  { type: 'move', label: 'Cut' },
-  { type: 'dribble', label: 'Dribble' },
-  { type: 'pass', label: 'Pass' },
-  { type: 'screen', label: 'Screen' },
-];
+// Football: 5 O-line on the LOS (plain circles) + QB/RB + X/Y/Z/TE — a balanced
+// spread the coach rearranges into whatever formation they want.
+const FOOTBALL_TOKENS = (): Token[] => ([
+  { id: 'lt', kind: 'offense', pos: { x: 0.36, y: 0.60 } },
+  { id: 'lg', kind: 'offense', pos: { x: 0.43, y: 0.60 } },
+  { id: 'c',  kind: 'offense', pos: { x: 0.50, y: 0.60 } },
+  { id: 'rg', kind: 'offense', pos: { x: 0.57, y: 0.60 } },
+  { id: 'rt', kind: 'offense', pos: { x: 0.64, y: 0.60 } },
+  { id: 'qb', kind: 'offense', label: 'QB', pos: { x: 0.50, y: 0.75 } },
+  { id: 'rb', kind: 'offense', label: 'RB', pos: { x: 0.42, y: 0.80 } },
+  { id: 'te', kind: 'offense', label: 'TE', pos: { x: 0.30, y: 0.595 } },
+  { id: 'x',  kind: 'offense', label: 'X', pos: { x: 0.10, y: 0.595 } },
+  { id: 'y',  kind: 'offense', label: 'Y', pos: { x: 0.74, y: 0.585 } },
+  { id: 'z',  kind: 'offense', label: 'Z', pos: { x: 0.90, y: 0.595 } },
+  { id: 'ball', kind: 'ball', pos: { x: 0.50, y: 0.63 } },
+]);
+
+const startTokens = (sport: Sport): Token[] => (sport === 'football' ? FOOTBALL_TOKENS() : BASKETBALL_TOKENS());
+
+// Notation choices per sport (both map to the shared ActionType renderer).
+const ACTION_TYPES_BY_SPORT: Record<Sport, { type: ActionType; label: string }[]> = {
+  basketball: [
+    { type: 'move', label: 'Cut' },
+    { type: 'dribble', label: 'Dribble' },
+    { type: 'pass', label: 'Pass' },
+    { type: 'screen', label: 'Screen' },
+  ],
+  football: [
+    { type: 'move', label: 'Route' },
+    { type: 'pass', label: 'Pass' },
+    { type: 'screen', label: 'Block' },
+    { type: 'handoff', label: 'Handoff' },
+  ],
+};
 
 export default function PlayEditor({ editId }: { editId?: string }) {
   const { userId } = useTeamContext();
-  const surface = 'half' as const;
+  const [sport, setSport] = useState<Sport>('basketball');
+  const surface: Surface = sport === 'football' ? 'field' : 'half';
   const { w, h } = surfaceSize(surface);
+  const actionTypes = ACTION_TYPES_BY_SPORT[sport];
 
-  const [tokens, setTokens] = useState<Token[]>(startTokens);
+  const [tokens, setTokens] = useState<Token[]>(() => startTokens('basketball'));
   const [actions, setActions] = useState<Action[]>([]);
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
@@ -63,10 +96,21 @@ export default function PlayEditor({ editId }: { editId?: string }) {
     if (!editId) return;
     fetchLibraryPlay(editId).then(p => {
       if (!p.doc) return;
+      if (p.doc.sport === 'football' || p.doc.sport === 'basketball') setSport(p.doc.sport);
       setTokens(p.doc.tokens); setActions(p.doc.actions ?? []);
       setName(p.doc.name ?? ''); setNote(p.doc.note ?? ''); setTags(p.tags);
     }).catch(e => setErr(e?.message ?? String(e)));
   }, [editId]);
+
+  // Switch sport (new play only) — swap to that sport's surface + starting
+  // formation. Discards the current formation/routes, so it's a fresh start.
+  function changeSport(s: Sport) {
+    if (s === sport) return;
+    setSport(s);
+    setTokens(startTokens(s));
+    setActions([]);
+    setDrawFor(null); setDrawPts([]); setDrawType('move'); setCurrentBeat(1);
+  }
   const addTag = (t: string) => { const v = t.trim(); if (!v) return; setTags(s => (s.some(x => x.toLowerCase() === v.toLowerCase()) ? s : [...s, v])); setTagQuery(''); };
 
   // Live document = committed actions + the in-progress route (so you see it draw).
@@ -74,8 +118,8 @@ export default function PlayEditor({ editId }: { editId?: string }) {
     const draft: Action[] = drawFor && drawPts.length >= 1
       ? [{ id: 'draft', type: drawType, fromToken: drawFor, step: currentBeat, path: drawPts.length >= 2 ? drawPts : [tokens.find(t => t.id === drawFor)!.pos, drawPts[0]] }]
       : [];
-    return { schema_version: 1, sport: 'basketball', surface, name: name || 'Untitled play', tokens, actions: [...actions, ...draft] };
-  }, [surface, name, tokens, actions, drawFor, drawPts, drawType]);
+    return { schema_version: 1, sport, surface, name: name || 'Untitled play', tokens, actions: [...actions, ...draft] };
+  }, [sport, surface, name, tokens, actions, drawFor, drawPts, drawType, currentBeat]);
 
   useEffect(() => {
     if (!boxRef.current) return;
@@ -124,7 +168,7 @@ export default function PlayEditor({ editId }: { editId?: string }) {
     if (!userId) { setErr('You’re not signed in.'); return; }
     setSaving(true);
     try {
-      const finalDoc: PlayDoc = { schema_version: 1, sport: 'basketball', surface, name: name.trim(), note: note.trim() || undefined, tokens, actions };
+      const finalDoc: PlayDoc = { schema_version: 1, sport, surface, name: name.trim(), note: note.trim() || undefined, tokens, actions };
       if (editId) {
         await updateLibraryPlay({ id: editId, doc: finalDoc, tags });
         const n = await propagateToTeams({ libraryPlayId: editId, doc: finalDoc, tags, userId });
@@ -145,7 +189,7 @@ export default function PlayEditor({ editId }: { editId?: string }) {
       <div style={S.courtCol}>
         <div
           ref={boxRef}
-          style={{ ...S.court, aspectRatio: `${w} / ${h}`, cursor: drawFor ? 'crosshair' : 'grab' }}
+          style={{ ...S.court, background: surface === 'field' ? '#2f6b3a' : '#f4ead4', aspectRatio: `${w} / ${h}`, cursor: drawFor ? 'crosshair' : 'grab' }}
           onPointerDown={onDown}
           onPointerMove={onMove}
           onPointerUp={onUp}
@@ -153,13 +197,27 @@ export default function PlayEditor({ editId }: { editId?: string }) {
         />
         <div style={S.hint}>
           {drawFor
-            ? `Click points on the court to trace ${drawType} for ${tokens.find(t => t.id === drawFor)?.label ?? ''} — then Finish route.`
+            ? `Click points on the ${surface === 'field' ? 'field' : 'court'} to trace the ${actionTypes.find(a => a.type === drawType)?.label ?? drawType} for ${tokens.find(t => t.id === drawFor)?.label || tokens.find(t => t.id === drawFor)?.id.toUpperCase() || ''} — then Finish route.`
             : 'Drag players & the ball to set your formation. Then pick a player below to draw a route.'}
         </div>
       </div>
 
       {/* Controls */}
       <div style={S.panel}>
+        <div style={S.field}>
+          <label style={S.label}>Sport</label>
+          <div style={S.chipRow}>
+            {(['basketball', 'football'] as Sport[]).map(s => (
+              <button
+                key={s}
+                onClick={() => { if (!editId) changeSport(s); }}
+                style={{ ...S.chip, ...(sport === s ? S.chipOn : {}), ...(editId ? { cursor: 'default', opacity: sport === s ? 1 : 0.35 } : {}) }}
+              >{s === 'football' ? '🏈 Football' : '🏀 Basketball'}</button>
+            ))}
+          </div>
+          <span style={S.beatHint}>{editId ? 'Sport is fixed once a play is created.' : 'Switching sport starts a fresh formation.'}</span>
+        </div>
+
         <div style={S.field}>
           <label style={S.label}>Play name</label>
           <input style={S.input} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Horns — quick hitter" />
@@ -176,7 +234,7 @@ export default function PlayEditor({ editId }: { editId?: string }) {
           {drawFor ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={S.chipRow}>
-                {ACTION_TYPES.map(a => (
+                {actionTypes.map(a => (
                   <button key={a.type} onClick={() => setDrawType(a.type)} style={{ ...S.chip, ...(drawType === a.type ? S.chipOn : {}) }}>{a.label}</button>
                 ))}
               </div>
@@ -189,7 +247,7 @@ export default function PlayEditor({ editId }: { editId?: string }) {
           ) : (
             <div style={S.chipRow}>
               {playerTokens.map(t => (
-                <button key={t.id} onClick={() => { setDrawFor(t.id); setDrawPts([]); }} style={S.chip}>Player {t.label}</button>
+                <button key={t.id} onClick={() => { setDrawFor(t.id); setDrawPts([]); }} style={S.chip}>{t.label ? t.label : t.id.toUpperCase()}</button>
               ))}
             </div>
           )}
@@ -262,7 +320,7 @@ export default function PlayEditor({ editId }: { editId?: string }) {
         ) : null}
 
         <button onClick={save} disabled={saving} style={{ ...S.primary, opacity: saving ? 0.6 : 1 }}>{saving ? 'Saving…' : editId ? 'Update play' : 'Save play'}</button>
-        <button onClick={() => { setTokens(startTokens()); setActions([]); setName(''); setNote(''); setTags([]); setSaved(null); setErr(null); setCurrentBeat(1); }} style={S.ghost}>Reset</button>
+        <button onClick={() => { setTokens(startTokens(sport)); setActions([]); setName(''); setNote(''); setTags([]); setSaved(null); setErr(null); setCurrentBeat(1); setDrawFor(null); setDrawPts([]); }} style={S.ghost}>Reset</button>
       </div>
     </div>
   );
