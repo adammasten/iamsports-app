@@ -37,7 +37,7 @@ const PLAYBACK_SPEEDS = [1, 1.2, 1.5, 2];
 type Tag = { id: string; name: string; category: string };
 type Built = { id: string; name: string; category: string };
 type ClipRow = { id: string; start: number; end: number; groups: { name: string; category: string }[][]; starred: boolean; poe: boolean; editTags: { id: string; name: string; category: string }[]; fb?: FbSummary | null };
-type FbSummary = { odk: Odk; down: number | null; distance: number | null; formation: string | null; play: string | null; result: string | null };
+type FbSummary = { odk: Odk; down: number | null; distance: number | null; formation: string | null; play: string | null; result: string | null; drive: number | null };
 
 function fmt(s: number) {
   if (!isFinite(s) || s < 0) s = 0;
@@ -200,7 +200,7 @@ export default function TaggingStudioWeb() {
   const loadClips = useCallback(async () => {
     const { data } = await supabase
       .from('clips')
-      .select('id, start_time, end_time, clip_tags ( bundle_number, tags ( id, name, category ) ), clip_football ( odk, down, distance, off_formation, def_front, play_type, result )')
+      .select('id, start_time, end_time, clip_tags ( bundle_number, tags ( id, name, category ) ), clip_football ( odk, down, distance, off_formation, def_front, play_type, result, drive_id )')
       .eq('video_id', videoId)
       .order('start_time', { ascending: false });
     setClips((data || []).map((c: any) => {
@@ -224,6 +224,7 @@ export default function TaggingStudioWeb() {
       const fb: FbSummary | null = cfRaw ? {
         odk: cfRaw.odk, down: cfRaw.down, distance: cfRaw.distance,
         formation: cfRaw.off_formation ?? cfRaw.def_front ?? null, play: cfRaw.play_type ?? null, result: cfRaw.result ?? null,
+        drive: cfRaw.drive_id ?? null,
       } : null;
       return { id: c.id, start: c.start_time, end: c.end_time, starred, poe, groups, editTags, fb };
     }));
@@ -274,6 +275,12 @@ export default function TaggingStudioWeb() {
     setMarkIn(c.start); setMarkOut(c.end);
     setIsStar(c.starred); setIsPoe(c.poe);
     setStagedBundles([]);
+    // Reload the football breakdown onto the situation strip + board so editing
+    // reflects (and can change) what was tagged.
+    if (c.fb) {
+      setFbCtx(cur => ({ odk: c.fb!.odk, down: c.fb!.down, distance: c.fb!.distance, drive: c.fb!.drive ?? cur.drive }));
+      setFbSel({ formation: c.fb.formation, play: c.fb.play, result: c.fb.result });
+    }
     try { player.currentTime = Math.max(0, c.start); } catch {}
   }, [player]);
   const cancelEdit = useCallback(() => {
@@ -306,7 +313,8 @@ export default function TaggingStudioWeb() {
     // EDIT MODE: overwrite the existing clip's window + tags (flattened to one group
     // + clip-level ★/POE). Replaces all clip_tags for the clip.
     if (editingId) {
-      if (building.length === 0 || !useMarks) return;
+      // A football clip may have no player tags, so don't require a build group there.
+      if ((building.length === 0 && !isFootball) || !useMarks) return;
       setSaving(true);
       await supabase.from('clips').update({ start_time: markIn as number, end_time: markOut as number }).eq('id', editingId);
       await supabase.from('clip_tags').delete().eq('clip_id', editingId);
@@ -314,6 +322,17 @@ export default function TaggingStudioWeb() {
       if (isStar && special.highlight) rows.push({ clip_id: editingId, tag_id: special.highlight, bundle_number: 0 });
       if (isPoe && special.poe) rows.push({ clip_id: editingId, tag_id: special.poe, bundle_number: 0 });
       if (rows.length) await supabase.from('clip_tags').insert(rows);
+      if (isFootball) {
+        const { error: cfErr } = await supabase.from('clip_football').upsert({
+          clip_id: editingId,
+          odk: fbCtx.odk, down: fbCtx.down, distance: fbCtx.distance,
+          play_type: fbSel.play,
+          off_formation: fbCtx.odk === 'offense' ? fbSel.formation : null,
+          def_front: fbCtx.odk === 'defense' ? fbSel.formation : null,
+          result: fbSel.result, drive_id: fbCtx.drive,
+        }, { onConflict: 'clip_id' });
+        if (cfErr) console.error('[football] clip_football upsert failed', cfErr.message);
+      }
       setSaving(false);
       setEditingId(null);
       setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null);
@@ -430,7 +449,7 @@ export default function TaggingStudioWeb() {
   const hasWindow = markIn != null && markOut != null && markOut > markIn;
   const groupCount = stagedBundles.length + (building.length > 0 ? 1 : 0);
   const canAddGroup = building.length > 0 && !saving && !editingId;
-  const canSave = !saving && (editingId ? (building.length > 0 && hasWindow) : (hasWindow && (isFootball || groupCount > 0)));
+  const canSave = !saving && (editingId ? ((building.length > 0 || isFootball) && hasWindow) : (hasWindow && (isFootball || groupCount > 0)));
   const windowLabel = (markIn != null || markOut != null)
     ? `${markIn != null ? fmt(markIn) : '—'} → ${markOut != null ? fmt(markOut) : '—'}`
     : 'Mark Start + End';
