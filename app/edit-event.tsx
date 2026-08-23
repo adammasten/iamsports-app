@@ -187,6 +187,11 @@ export default function EditEventScreen() {
       <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={onSave} disabled={saving}>
         <Text style={styles.saveTxt}>{saving ? 'Saving…' : editing ? 'Save changes' : 'Create event'}</Text>
       </TouchableOpacity>
+      {editing && gameFamily && existing?.gameId ? (
+        <TouchableOpacity style={styles.linkBtn} onPress={() => router.push({ pathname: '/box-score', params: { gameId: existing.gameId!, title: existing.title ?? 'Game' } })}>
+          <Text style={styles.linkTxt}>View box score &amp; stats →</Text>
+        </TouchableOpacity>
+      ) : null}
       {editing ? (
         <TouchableOpacity style={styles.cancelBtn} onPress={onCancelEvent}>
           <Text style={styles.cancelTxt}>Cancel this event</Text>
@@ -212,6 +217,8 @@ const styles = StyleSheet.create({
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },
   saveBtn: { backgroundColor: '#ff6a2c', borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 28 },
   saveTxt: { color: '#160b02', fontSize: 16, fontWeight: '800' },
+  linkBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 14 },
+  linkTxt: { color: '#8b7bff', fontSize: 14, fontWeight: '800' },
   cancelBtn: { alignItems: 'center', paddingVertical: 14, marginTop: 6 },
   cancelTxt: { color: '#c0392b', fontSize: 14, fontWeight: '700' },
 });
