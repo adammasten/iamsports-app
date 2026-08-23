@@ -60,11 +60,13 @@ export type ScheduleEvent = {
   opponentScore: number | null;
 };
 
-export async function loadEvents(teamId: string): Promise<ScheduleEvent[]> {
+export async function loadEvents(teamIds: string | string[]): Promise<ScheduleEvent[]> {
+  const ids = Array.isArray(teamIds) ? teamIds : [teamIds];
+  if (ids.length === 0) return [];
   const { data, error } = await supabase
     .from('events')
     .select('id, team_id, event_type, title, local_date, starts_at, ends_at, arrival_at, event_timezone, time_status, home_away, venue_name, venue_address, status, uniform, notes, tournament_id, season_id, version, games(id, opponent, team_score, opponent_score, deleted_at)')
-    .eq('team_id', teamId)
+    .in('team_id', ids)
     .order('local_date', { ascending: true });
   if (error) throw error;
   return (data ?? []).map((r: any) => {
@@ -155,4 +157,36 @@ export async function saveEvent(input: EventInput, userId: string): Promise<void
 export async function cancelEvent(eventId: string): Promise<void> {
   const { error } = await supabase.from('events').update({ status: 'canceled' }).eq('id', eventId);
   if (error) throw error;
+}
+
+// ── RSVP / attendance ──────────────────────────────────────────────────
+export type RsvpStatus = 'going' | 'maybe' | 'out';
+export type Attendance = { eventId: string; playerId: string; status: RsvpStatus };
+
+export async function loadAttendance(eventIds: string[]): Promise<Attendance[]> {
+  if (eventIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('event_attendance').select('event_id, player_id, rsvp_status').in('event_id', eventIds);
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({ eventId: r.event_id, playerId: r.player_id, status: r.rsvp_status }));
+}
+
+// Upsert a player's RSVP for an event (keyed to player_id; records the responder).
+export async function setRsvp(eventId: string, playerId: string, status: RsvpStatus, userId: string): Promise<void> {
+  const { error } = await supabase.from('event_attendance').upsert(
+    { event_id: eventId, player_id: playerId, rsvp_status: status, responder_user_id: userId, updated_at: new Date().toISOString() },
+    { onConflict: 'event_id,player_id' },
+  );
+  if (error) throw error;
+}
+
+// Active-roster player count per team (denominator for the "no answer" headcount).
+export async function loadRosterCounts(teamIds: string[]): Promise<Record<string, number>> {
+  if (teamIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('player_teams').select('team_id').in('team_id', teamIds).is('left_at', null);
+  if (error) throw error;
+  const out: Record<string, number> = {};
+  (data ?? []).forEach((r: any) => { out[r.team_id] = (out[r.team_id] ?? 0) + 1; });
+  return out;
 }
