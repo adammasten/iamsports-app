@@ -8,6 +8,7 @@ import {
   type Attendance, type RsvpStatus, type ScheduleEvent, type ScheduleFilter,
 } from '@/lib/core/schedule';
 import type { UserKidRow } from '@/context';
+import { sendTeamPush } from '@/lib/core/push';
 import { addEventsToDeviceCalendar } from '@/lib/native/deviceCalendar';
 import { supabase } from '@/supabase';
 import * as ImagePicker from 'expo-image-picker';
@@ -192,11 +193,27 @@ export default function ScheduleScreen() {
     if (isGameFamily(ev.eventType) && ev.gameId) router.push({ pathname: '/box-score', params: { gameId: ev.gameId, title: ev.title ?? 'Game' } });
   }
 
+  // Coach taps "Remind to RSVP" → push the whole team about this event.
+  const remindRsvp = useCallback(async (ev: ScheduleEvent) => {
+    const label = ev.title || (isGameFamily(ev.eventType) && ev.opponent ? `vs ${ev.opponent}` : eventTypeLabel(ev.eventType));
+    const teamName = teamNameById.get(ev.teamId) ?? 'Team';
+    try {
+      const r = await sendTeamPush({
+        teamId: ev.teamId, title: `🔔 ${teamName}: please RSVP`,
+        body: `${label} on ${fmtDate(ev.localDate)} — tap to let us know if you're coming.`, data: { url: '/schedule' },
+      });
+      Alert.alert('Reminder sent', r.note ?? `Sent to ${r.recipients} member${r.recipients === 1 ? '' : 's'}.`);
+    } catch (e: any) {
+      Alert.alert('Remind to RSVP', e?.message ?? 'Could not send the reminder.');
+    }
+  }, [teamNameById]);
+
   const renderRow = (ev: ScheduleEvent, canRsvp: boolean) => (
     <Row key={ev.id} ev={ev} onPress={() => openEvent(ev)} canRsvp={canRsvp}
       teamLabel={scope === 'all' ? teamNameById.get(ev.teamId) : undefined}
       isCoach={isCoach} myKids={canRsvp ? userKids.filter(k => k.team_id === ev.teamId) : []}
-      att={attendance.filter(a => a.eventId === ev.id)} rosterCount={rosterCounts[ev.teamId] ?? 0} onRsvp={onRsvp} />
+      att={attendance.filter(a => a.eventId === ev.id)} rosterCount={rosterCounts[ev.teamId] ?? 0} onRsvp={onRsvp}
+      onRemind={isCoach && canRsvp ? () => remindRsvp(ev) : undefined} />
   );
 
   const renderAgenda = (list: ScheduleEvent[], canRsvp: boolean, dir: 'asc' | 'desc') =>
@@ -318,10 +335,11 @@ function TournamentGroup({ name, range, count, collapsed, onToggle, onAddGame, c
 
 const RSVP_ON: Record<RsvpStatus, object> = { going: { backgroundColor: '#3ec46d', borderColor: '#3ec46d' }, maybe: { backgroundColor: '#e0a52e', borderColor: '#e0a52e' }, out: { backgroundColor: '#c0392b', borderColor: '#c0392b' } };
 
-function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsvp, onRsvp }: {
+function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsvp, onRsvp, onRemind }: {
   ev: ScheduleEvent; onPress: () => void; teamLabel?: string; isCoach: boolean;
   myKids: UserKidRow[]; att: Attendance[]; rosterCount: number; canRsvp: boolean;
   onRsvp: (eventId: string, playerId: string, status: RsvpStatus) => void;
+  onRemind?: () => void;
 }) {
   const canceled = ev.status === 'canceled';
   const dir = !canceled ? mapsUrl(ev) : null;
@@ -375,7 +393,14 @@ function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsv
       ) : null}
 
       {isCoach && canRsvp ? (
-        <Text style={styles.headcount}>{going} going · {maybe} maybe · {out} out{noAnswer > 0 ? ` · ${noAnswer} no answer` : ''}</Text>
+        <View style={styles.coachFoot}>
+          <Text style={styles.headcount}>{going} going · {maybe} maybe · {out} out{noAnswer > 0 ? ` · ${noAnswer} no answer` : ''}</Text>
+          {onRemind ? (
+            <TouchableOpacity onPress={onRemind} hitSlop={6} style={styles.remindPill}>
+              <Text style={styles.remindTxt}>🔔 Remind to RSVP</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
@@ -419,7 +444,10 @@ const styles = StyleSheet.create({
   rsvpPill: { borderWidth: 1, borderColor: '#2a3a48', borderRadius: 999, paddingHorizontal: 13, paddingVertical: 6 },
   rsvpTxt: { color: '#c7d2dc', fontSize: 12.5, fontWeight: '700' },
   rsvpTxtOn: { color: '#0a1210' },
-  headcount: { color: '#8b96a3', fontSize: 12, fontWeight: '700', marginTop: 8 },
+  headcount: { color: '#8b96a3', fontSize: 12, fontWeight: '700' },
+  coachFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 8, flexWrap: 'wrap' },
+  remindPill: { borderWidth: 1, borderColor: '#534AB7', borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5 },
+  remindTxt: { color: '#8b7bff', fontSize: 12, fontWeight: '800' },
   dirPill: { alignSelf: 'flex-start', marginTop: 8, borderWidth: 1, borderColor: '#2a3a48', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
   dirTxt: { color: '#6ea8ff', fontSize: 12.5, fontWeight: '700' },
   badge: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4, minWidth: 66, alignItems: 'center' },

@@ -6,6 +6,7 @@ import {
   cancelEvent, cancelSeries, createPracticeSeries, createTournament, EVENT_TYPES, eventTypeLabel, isGameFamily, loadTournaments, saveEvent, updateSeriesForward,
   type EventInput, type EventType, type ScheduleEvent, type Tournament,
 } from '@/lib/core/schedule';
+import { sendTeamPush } from '@/lib/core/push';
 import { goBackOrHome } from '@/lib/nav';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -41,6 +42,12 @@ function combine(ymd: string, t: { h: number; m: number }): string {
 function fmtTimeInput(iso: string | null, tz: string): string {
   if (!iso) return '';
   try { return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz }); } catch { return ''; }
+}
+// "Sat, Aug 30" from a YYYY-MM-DD (parsed as local, no UTC shift).
+function fmtNice(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return ymd;
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 export default function EditEventScreen() {
@@ -91,6 +98,32 @@ export default function EditEventScreen() {
     if (!activeTeam) return;
     loadTournaments([activeTeam.id]).then(setTournaments).catch(() => {});
   }, [activeTeam]);
+
+  // Ask the coach whether to push the team about a change; resolves to their choice.
+  function confirmNotify(kind: 'update' | 'canceled'): Promise<boolean> {
+    const q = kind === 'canceled' ? 'Notify the team this event is canceled?' : 'Notify the team about this change?';
+    return new Promise(resolve => {
+      if (Platform.OS === 'web') { resolve(window.confirm(q)); return; }
+      Alert.alert('Notify the team?', q, [
+        { text: 'Not now', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Notify', onPress: () => resolve(true) },
+      ]);
+    });
+  }
+  // On a coach's confirmation, push the whole team about this edit/cancel.
+  async function offerChangeNotify(kind: 'update' | 'canceled') {
+    if (!activeTeam) return;
+    if (!(await confirmNotify(kind))) return;
+    const label = title.trim() || (gameFamily && opponent.trim() ? `vs ${opponent.trim()}` : eventTypeLabel(type));
+    const when = `${fmtNice(date)}${!timeTbd && startTime.trim() ? ` · ${startTime.trim()}` : ''}`;
+    const pushTitle = kind === 'canceled' ? `❌ ${activeTeam.name}` : `🗓️ ${activeTeam.name}`;
+    const pushBody = kind === 'canceled' ? `${label} on ${fmtNice(date)} is canceled.` : `Update: ${label} — ${when}.`;
+    try {
+      await sendTeamPush({ teamId: activeTeam.id, title: pushTitle, body: pushBody, data: { url: '/schedule' } });
+    } catch (e: any) {
+      Alert.alert('Notify team', e?.message ?? 'Could not send the notification.');
+    }
+  }
 
   async function onSave() {
     if (!activeTeam || !userId) { Alert.alert('Not ready', 'No team selected.'); return; }
@@ -164,6 +197,7 @@ export default function EditEventScreen() {
         version: existing?.version, gameId: existing?.gameId ?? null,
       };
       await saveEvent(input, userId);
+      if (editing) await offerChangeNotify('update');
       router.back();
     } catch (e: any) {
       Alert.alert('Save event', e?.message ?? String(e));
@@ -183,17 +217,17 @@ export default function EditEventScreen() {
     ]);
   }
 
+  async function doCancel() {
+    if (!existing) return;
+    try { await cancelEvent(existing.id); await offerChangeNotify('canceled'); router.back(); }
+    catch (e: any) { Alert.alert('Cancel event', e?.message ?? String(e)); }
+  }
   async function onCancelEvent() {
     if (!existing) return;
-    const ok = Platform.OS === 'web' ? window.confirm(`Cancel “${existing.title ?? 'this event'}”? It stays on the schedule marked canceled.`) : true;
-    if (Platform.OS !== 'web') {
-      Alert.alert('Cancel event', `Mark “${existing.title ?? 'this event'}” canceled? It stays on the schedule, struck through.`, [
-        { text: 'Keep it' }, { text: 'Cancel event', style: 'destructive', onPress: async () => { await cancelEvent(existing.id); router.back(); } },
-      ]);
-      return;
-    }
-    if (!ok) return;
-    try { await cancelEvent(existing.id); router.back(); } catch (e: any) { Alert.alert('Cancel event', e?.message ?? String(e)); }
+    if (Platform.OS === 'web') { if (window.confirm(`Cancel “${existing.title ?? 'this event'}”? It stays on the schedule marked canceled.`)) await doCancel(); return; }
+    Alert.alert('Cancel event', `Mark “${existing.title ?? 'this event'}” canceled? It stays on the schedule, struck through.`, [
+      { text: 'Keep it', style: 'cancel' }, { text: 'Cancel event', style: 'destructive', onPress: doCancel },
+    ]);
   }
 
   return (
