@@ -3,12 +3,12 @@
 // Game-family types create/update a linked games row so film/tagging/stats attach.
 import { useTeamContext } from '@/context';
 import {
-  cancelEvent, EVENT_TYPES, eventTypeLabel, isGameFamily, saveEvent,
-  type EventInput, type EventType, type ScheduleEvent,
+  cancelEvent, createTournament, EVENT_TYPES, eventTypeLabel, isGameFamily, loadTournaments, saveEvent,
+  type EventInput, type EventType, type ScheduleEvent, type Tournament,
 } from '@/lib/core/schedule';
 import { goBackOrHome } from '@/lib/nav';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -51,9 +51,13 @@ export default function EditEventScreen() {
     try { return raw ? (JSON.parse(raw as string) as ScheduleEvent) : null; } catch { return null; }
   }, [params.event]);
   const editing = !!existing;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+  const prefillType = one(params.type) as EventType | undefined;
+  const prefillDate = one(params.date);
+  const prefillTournamentId = one(params.tournamentId);
 
-  const [type, setType] = useState<EventType>(existing?.eventType ?? 'game');
-  const [date, setDate] = useState(existing?.localDate ?? todayYMD());
+  const [type, setType] = useState<EventType>(existing?.eventType ?? prefillType ?? 'game');
+  const [date, setDate] = useState(existing?.localDate ?? prefillDate ?? todayYMD());
   const [timeTbd, setTimeTbd] = useState(existing ? existing.timeStatus === 'tbd' : false);
   const tz = existing?.eventTimezone ?? DEVICE_TZ;
   const [startTime, setStartTime] = useState(fmtTimeInput(existing?.startsAt ?? null, tz));
@@ -68,7 +72,17 @@ export default function EditEventScreen() {
   const [title, setTitle] = useState(existing?.title ?? '');
   const [saving, setSaving] = useState(false);
 
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [tournamentId, setTournamentId] = useState<string | null>(existing?.tournamentId ?? prefillTournamentId ?? null);
+  const [newTournament, setNewTournament] = useState('');
+  const [addingTournament, setAddingTournament] = useState(false);
+
   const gameFamily = isGameFamily(type);
+
+  useEffect(() => {
+    if (!activeTeam) return;
+    loadTournaments([activeTeam.id]).then(setTournaments).catch(() => {});
+  }, [activeTeam]);
 
   async function onSave() {
     if (!activeTeam || !userId) { Alert.alert('Not ready', 'No team selected.'); return; }
@@ -85,18 +99,23 @@ export default function EditEventScreen() {
       arrivalAt = at ? combine(date, at) : null;
       endsAt = et ? combine(date, et) : null;
     }
-    const input: EventInput = {
-      id: existing?.id, teamId: activeTeam.id, eventType: type, title: title.trim() || null,
-      localDate: date.trim(), startsAt, endsAt, arrivalAt,
-      eventTimezone: tz, timeStatus: timeTbd ? 'tbd' : 'confirmed',
-      homeAway: gameFamily ? homeAway : null,
-      venueName, venueAddress, uniform, notes,
-      tournamentId: existing?.tournamentId ?? null, seasonId: existing?.seasonId ?? null,
-      opponent: gameFamily ? opponent : null,
-      version: existing?.version, gameId: existing?.gameId ?? null,
-    };
     setSaving(true);
     try {
+      // A game-family event can carry a tournament; create one on the fly if named.
+      let resolvedTournamentId = gameFamily ? tournamentId : null;
+      if (gameFamily && addingTournament && newTournament.trim()) {
+        resolvedTournamentId = await createTournament(activeTeam.id, newTournament, userId);
+      }
+      const input: EventInput = {
+        id: existing?.id, teamId: activeTeam.id, eventType: type, title: title.trim() || null,
+        localDate: date.trim(), startsAt, endsAt, arrivalAt,
+        eventTimezone: tz, timeStatus: timeTbd ? 'tbd' : 'confirmed',
+        homeAway: gameFamily ? homeAway : null,
+        venueName, venueAddress, uniform, notes,
+        tournamentId: resolvedTournamentId, seasonId: existing?.seasonId ?? null,
+        opponent: gameFamily ? opponent : null,
+        version: existing?.version, gameId: existing?.gameId ?? null,
+      };
       await saveEvent(input, userId);
       router.back();
     } catch (e: any) {
@@ -166,6 +185,34 @@ export default function EditEventScreen() {
               </TouchableOpacity>
             ))}
           </View>
+
+          <Text style={styles.label}>Tournament (optional)</Text>
+          <View style={styles.typeRow}>
+            <TouchableOpacity
+              onPress={() => { setTournamentId(null); setAddingTournament(false); }}
+              style={[styles.typeChip, tournamentId === null && !addingTournament && styles.typeChipOn]}
+            >
+              <Text style={[styles.typeTxt, tournamentId === null && !addingTournament && styles.typeTxtOn]}>None</Text>
+            </TouchableOpacity>
+            {tournaments.map(t => (
+              <TouchableOpacity
+                key={t.id}
+                onPress={() => { setTournamentId(t.id); setAddingTournament(false); }}
+                style={[styles.typeChip, tournamentId === t.id && !addingTournament && styles.typeChipOn]}
+              >
+                <Text style={[styles.typeTxt, tournamentId === t.id && !addingTournament && styles.typeTxtOn]}>{t.name}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              onPress={() => { setAddingTournament(true); setTournamentId(null); }}
+              style={[styles.typeChip, addingTournament && styles.typeChipOn]}
+            >
+              <Text style={[styles.typeTxt, addingTournament && styles.typeTxtOn]}>+ New</Text>
+            </TouchableOpacity>
+          </View>
+          {addingTournament ? (
+            <TextInput style={[styles.input, { marginTop: 8 }]} value={newTournament} onChangeText={setNewTournament} placeholder="Tournament name (e.g. Labor Day Classic)" placeholderTextColor="#666" />
+          ) : null}
         </>
       ) : (
         <>

@@ -4,14 +4,14 @@
 // Dark-themed to match the app. Slice 1 of the scheduling build.
 import { COACH_ROLES, useTeamContext } from '@/context';
 import {
-  buildICS, eventTypeLabel, isGameFamily, loadAttendance, loadEvents, loadRosterCounts, matchesFilter, setRsvp,
+  buildICS, eventTypeLabel, isGameFamily, loadAttendance, loadEvents, loadRosterCounts, loadTournaments, matchesFilter, setRsvp,
   type Attendance, type RsvpStatus, type ScheduleEvent, type ScheduleFilter,
 } from '@/lib/core/schedule';
 import type { UserKidRow } from '@/context';
 import { supabase } from '@/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebTopNav from '../components/WebTopNav';
@@ -40,6 +40,34 @@ const TYPE_COLOR: Record<string, string> = {
   game: '#ff6a2c', scrimmage: '#e0a52e', tournament_game: '#e2574a', practice: '#3ec46d', team_event: '#4a90e2',
 };
 
+// A schedule row is either a standalone event or a tournament (a dated group of
+// its games). Tournament groups are anchored by their earliest (asc) / latest
+// (desc) date so they slot chronologically among the standalone events.
+type AgendaItem =
+  | { kind: 'event'; date: string; ev: ScheduleEvent }
+  | { kind: 'tourn'; date: string; id: string; name: string; events: ScheduleEvent[] };
+
+function buildAgenda(list: ScheduleEvent[], names: Map<string, string>, dir: 'asc' | 'desc'): AgendaItem[] {
+  const groups = new Map<string, ScheduleEvent[]>();
+  const items: AgendaItem[] = [];
+  for (const ev of list) {
+    if (ev.tournamentId) { const g = groups.get(ev.tournamentId) ?? []; g.push(ev); groups.set(ev.tournamentId, g); }
+    else items.push({ kind: 'event', date: ev.localDate, ev });
+  }
+  for (const [id, evs] of groups) {
+    const dates = evs.map(e => e.localDate).sort();
+    evs.sort((a, b) => a.localDate.localeCompare(b.localDate));
+    items.push({ kind: 'tourn', date: dir === 'asc' ? dates[0] : dates[dates.length - 1], id, name: names.get(id) ?? 'Tournament', events: evs });
+  }
+  items.sort((a, b) => (dir === 'asc' ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date)));
+  return items;
+}
+
+function fmtRange(dates: string[]): string {
+  const lo = dates[0], hi = dates[dates.length - 1];
+  return lo === hi ? fmtDate(lo) : `${fmtDate(lo)} – ${fmtDate(hi)}`;
+}
+
 const FILTERS: { key: ScheduleFilter; label: string }[] = [
   { key: 'all', label: 'All' }, { key: 'games', label: 'Games' },
   { key: 'practices', label: 'Practices' }, { key: 'events', label: 'Events' },
@@ -56,6 +84,11 @@ export default function ScheduleScreen() {
   const [filter, setFilter] = useState<ScheduleFilter>('all');
   const [scope, setScope] = useState<'team' | 'all'>('team');
   const [importing, setImporting] = useState(false);
+  const [tournamentNames, setTournamentNames] = useState<Map<string, string>>(new Map());
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleTournament = useCallback((id: string) => {
+    setCollapsed(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }, []);
 
   const teamNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -71,8 +104,9 @@ export default function ScheduleScreen() {
     if (scopeTeamIds.length === 0) { setEvents([]); setAttendance([]); setLoading(false); return; }
     setLoading(true);
     try {
-      const [evs, rc] = await Promise.all([loadEvents(scopeTeamIds), loadRosterCounts(scopeTeamIds)]);
+      const [evs, rc, tourns] = await Promise.all([loadEvents(scopeTeamIds), loadRosterCounts(scopeTeamIds), loadTournaments(scopeTeamIds)]);
       setEvents(evs); setRosterCounts(rc);
+      setTournamentNames(new Map(tourns.map(t => [t.id, t.name])));
       setAttendance(await loadAttendance(evs.map(e => e.id)));
     } catch { setEvents([]); setAttendance([]); }
     setLoading(false);
@@ -138,6 +172,26 @@ export default function ScheduleScreen() {
     if (isGameFamily(ev.eventType) && ev.gameId) router.push({ pathname: '/box-score', params: { gameId: ev.gameId, title: ev.title ?? 'Game' } });
   }
 
+  const renderRow = (ev: ScheduleEvent, canRsvp: boolean) => (
+    <Row key={ev.id} ev={ev} onPress={() => openEvent(ev)} canRsvp={canRsvp}
+      teamLabel={scope === 'all' ? teamNameById.get(ev.teamId) : undefined}
+      isCoach={isCoach} myKids={canRsvp ? userKids.filter(k => k.team_id === ev.teamId) : []}
+      att={attendance.filter(a => a.eventId === ev.id)} rosterCount={rosterCounts[ev.teamId] ?? 0} onRsvp={onRsvp} />
+  );
+
+  const renderAgenda = (list: ScheduleEvent[], canRsvp: boolean, dir: 'asc' | 'desc') =>
+    buildAgenda(list, tournamentNames, dir).map(it =>
+      it.kind === 'event' ? renderRow(it.ev, canRsvp) : (
+        <TournamentGroup
+          key={it.id} name={it.name} range={fmtRange(it.events.map(e => e.localDate))} count={it.events.length}
+          collapsed={collapsed.has(it.id)} onToggle={() => toggleTournament(it.id)}
+          onAddGame={isCoach && scope === 'team' ? () => router.push({ pathname: '/edit-event', params: { type: 'tournament_game', tournamentId: it.id, date: it.date } }) : undefined}
+        >
+          {it.events.map(ev => renderRow(ev, canRsvp))}
+        </TournamentGroup>
+      ),
+    );
+
   if (!activeTeam) {
     return (
       <View style={styles.root}>
@@ -199,27 +253,40 @@ export default function ScheduleScreen() {
           {upcoming.length > 0 ? (
             <>
               <Text style={styles.section}>Upcoming</Text>
-              {upcoming.map(ev => (
-                <Row key={ev.id} ev={ev} onPress={() => openEvent(ev)} canRsvp
-                  teamLabel={scope === 'all' ? teamNameById.get(ev.teamId) : undefined}
-                  isCoach={isCoach} myKids={userKids.filter(k => k.team_id === ev.teamId)}
-                  att={attendance.filter(a => a.eventId === ev.id)} rosterCount={rosterCounts[ev.teamId] ?? 0} onRsvp={onRsvp} />
-              ))}
+              {renderAgenda(upcoming, true, 'asc')}
             </>
           ) : null}
           {past.length > 0 ? (
             <>
               <Text style={styles.section}>Past &amp; completed</Text>
-              {past.map(ev => (
-                <Row key={ev.id} ev={ev} onPress={() => openEvent(ev)} canRsvp={false}
-                  teamLabel={scope === 'all' ? teamNameById.get(ev.teamId) : undefined}
-                  isCoach={isCoach} myKids={[]} att={attendance.filter(a => a.eventId === ev.id)} rosterCount={rosterCounts[ev.teamId] ?? 0} onRsvp={onRsvp} />
-              ))}
+              {renderAgenda(past, false, 'desc')}
             </>
           ) : null}
         </>
       )}
       </ScrollView>
+    </View>
+  );
+}
+
+// A collapsible container for a tournament's games (a dated multi-game group).
+function TournamentGroup({ name, range, count, collapsed, onToggle, onAddGame, children }: {
+  name: string; range: string; count: number; collapsed: boolean;
+  onToggle: () => void; onAddGame?: () => void; children: ReactNode;
+}) {
+  return (
+    <View style={styles.tourn}>
+      <TouchableOpacity style={styles.tournHead} onPress={onToggle} activeOpacity={0.7}>
+        <Text style={styles.tournChevron}>{collapsed ? '▸' : '▾'}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.tournName} numberOfLines={1}>🏆 {name}</Text>
+          <Text style={styles.tournMeta} numberOfLines={1}>{range} · {count} game{count === 1 ? '' : 's'}</Text>
+        </View>
+        {onAddGame ? (
+          <TouchableOpacity onPress={onAddGame} hitSlop={8} style={styles.tournAdd}><Text style={styles.tournAddTxt}>＋ Game</Text></TouchableOpacity>
+        ) : null}
+      </TouchableOpacity>
+      {!collapsed ? <View style={styles.tournBody}>{children}</View> : null}
     </View>
   );
 }
@@ -299,6 +366,14 @@ const styles = StyleSheet.create({
   importRow: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginBottom: 14 },
   importTxt: { color: '#8b7bff', fontSize: 14, fontWeight: '700' },
   section: { color: '#62707e', fontSize: 12, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 14, marginBottom: 8 },
+  tourn: { backgroundColor: '#12202e', borderColor: '#25333f', borderWidth: 1, borderRadius: 12, marginBottom: 10, overflow: 'hidden' },
+  tournHead: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 13, paddingVertical: 12, backgroundColor: '#16283b' },
+  tournChevron: { color: '#8b7bff', fontSize: 15, fontWeight: '800', width: 14 },
+  tournName: { color: '#f1f4f6', fontSize: 15.5, fontWeight: '800' },
+  tournMeta: { color: '#9db0bd', fontSize: 12.5, marginTop: 2, fontWeight: '600' },
+  tournAdd: { borderWidth: 1, borderColor: '#534AB7', borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6 },
+  tournAddTxt: { color: '#8b7bff', fontSize: 12.5, fontWeight: '800' },
+  tournBody: { paddingHorizontal: 13 },
   scopeRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   scopeBtn: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
   scopeBtnOn: { backgroundColor: '#1b2c44', borderColor: '#534AB7' },

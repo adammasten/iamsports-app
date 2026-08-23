@@ -153,6 +153,23 @@ export async function saveEvent(input: EventInput, userId: string): Promise<void
   }
 }
 
+// ── Tournaments (containers of multiple games) ─────────────────────────
+export type Tournament = { id: string; teamId: string; name: string };
+
+export async function loadTournaments(teamIds: string[]): Promise<Tournament[]> {
+  if (teamIds.length === 0) return [];
+  const { data, error } = await supabase.from('tournaments').select('id, team_id, name').in('team_id', teamIds);
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({ id: r.id, teamId: r.team_id, name: r.name }));
+}
+
+export async function createTournament(teamId: string, name: string, userId: string): Promise<string> {
+  const { data, error } = await supabase.from('tournaments')
+    .insert({ team_id: teamId, name: name.trim(), created_by_user_id: userId }).select('id').single();
+  if (error) throw error;
+  return (data as any).id as string;
+}
+
 // Cancel, don't delete — keeps history + notifications explainable.
 export async function cancelEvent(eventId: string): Promise<void> {
   const { error } = await supabase.from('events').update({ status: 'canceled' }).eq('id', eventId);
