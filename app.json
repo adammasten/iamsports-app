@@ -47,7 +47,13 @@
         }
       ],
       "expo-video",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "IamSports adds your team's games and practices to your calendar when you tap “Add to my calendar.”"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

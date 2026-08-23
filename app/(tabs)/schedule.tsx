@@ -8,6 +8,7 @@ import {
   type Attendance, type RsvpStatus, type ScheduleEvent, type ScheduleFilter,
 } from '@/lib/core/schedule';
 import type { UserKidRow } from '@/context';
+import { addEventsToDeviceCalendar } from '@/lib/native/deviceCalendar';
 import { supabase } from '@/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
@@ -89,6 +90,7 @@ export default function ScheduleScreen() {
   const [filter, setFilter] = useState<ScheduleFilter>('all');
   const [scope, setScope] = useState<'team' | 'all'>('team');
   const [importing, setImporting] = useState(false);
+  const [addingToCal, setAddingToCal] = useState(false);
   const [tournamentNames, setTournamentNames] = useState<Map<string, string>>(new Map());
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const toggleTournament = useCallback((id: string) => {
@@ -146,6 +148,19 @@ export default function ScheduleScreen() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'iamsports-schedule.ics';
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }
+
+  // Native: add the upcoming schedule straight into the phone's calendar app.
+  async function addToDeviceCalendar() {
+    const upcomingAll = events.filter(e => e.localDate >= today && e.status !== 'canceled');
+    if (upcomingAll.length === 0) { Alert.alert('Add to calendar', 'Nothing upcoming to add.'); return; }
+    setAddingToCal(true);
+    try {
+      const n = await addEventsToDeviceCalendar(upcomingAll, scope === 'all' ? 'IamSports' : (activeTeam?.name ?? 'Team'));
+      Alert.alert('Added to calendar', `${n} event${n === 1 ? '' : 's'} added to your calendar.`);
+    } catch (e: any) {
+      Alert.alert('Add to calendar', e?.message ?? 'Could not add events.');
+    } finally { setAddingToCal(false); }
   }
 
   // Photo import: pick an image of a printed/emailed schedule, extract via the
@@ -246,6 +261,11 @@ export default function ScheduleScreen() {
       {isCoach && scope === 'team' ? (
         <TouchableOpacity style={styles.importRow} onPress={importFromPhoto} disabled={importing}>
           <Text style={styles.importTxt}>{importing ? 'Reading the photo…' : '📷 Import schedule from a photo'}</Text>
+        </TouchableOpacity>
+      ) : null}
+      {Platform.OS !== 'web' ? (
+        <TouchableOpacity style={styles.importRow} onPress={addToDeviceCalendar} disabled={addingToCal}>
+          <Text style={styles.importTxt}>{addingToCal ? 'Adding…' : '📅 Add upcoming to my calendar'}</Text>
         </TouchableOpacity>
       ) : null}
 
