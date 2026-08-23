@@ -211,6 +211,24 @@ export async function createPracticeSeries(s: SeriesInput): Promise<number> {
   return (data as number) ?? 0;
 }
 
+// Apply an edit to this + every later still-scheduled occurrence in a series.
+// Times recompute per each occurrence's own date (server-side). Returns count.
+export async function updateSeriesForward(args: {
+  seriesId: string; fromDate: string; title: string | null;
+  startTime: string | null; arrivalTime: string | null; endTime: string | null; eventTimezone: string;
+  venueName: string | null; venueAddress: string | null; uniform: string | null; notes: string | null;
+}): Promise<number> {
+  const t = (v: string | null) => (v && v.trim() ? `${v.trim()}:00` : null);
+  const { data, error } = await supabase.rpc('update_series_forward', {
+    p_series_id: args.seriesId, p_from_date: args.fromDate, p_title: args.title?.trim() || null,
+    p_start_time: t(args.startTime), p_arrival_time: t(args.arrivalTime), p_end_time: t(args.endTime), p_tz: args.eventTimezone,
+    p_venue_name: args.venueName?.trim() || null, p_venue_address: args.venueAddress?.trim() || null,
+    p_uniform: args.uniform?.trim() || null, p_notes: args.notes?.trim() || null,
+  });
+  if (error) throw error;
+  return (data as number) ?? 0;
+}
+
 // Cancel every still-scheduled occurrence of a series from a date forward
 // (past occurrences keep their history). Returns how many were canceled.
 export async function cancelSeries(seriesId: string, fromDate: string): Promise<number> {

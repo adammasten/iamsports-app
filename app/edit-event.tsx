@@ -3,12 +3,13 @@
 // Game-family types create/update a linked games row so film/tagging/stats attach.
 import { useTeamContext } from '@/context';
 import {
-  cancelEvent, cancelSeries, createPracticeSeries, createTournament, EVENT_TYPES, eventTypeLabel, isGameFamily, loadTournaments, saveEvent,
+  cancelEvent, cancelSeries, createPracticeSeries, createTournament, EVENT_TYPES, eventTypeLabel, isGameFamily, loadTournaments, saveEvent, updateSeriesForward,
   type EventInput, type EventType, type ScheduleEvent, type Tournament,
 } from '@/lib/core/schedule';
 import { goBackOrHome } from '@/lib/nav';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
+import DateTimeField from './components/DateTimeField';
 import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -77,6 +78,7 @@ export default function EditEventScreen() {
   const [repeat, setRepeat] = useState(false);
   const [weekdays, setWeekdays] = useState<Set<number>>(new Set([initialWeekday]));
   const [untilDate, setUntilDate] = useState('');
+  const [applyFuture, setApplyFuture] = useState(false); // edit: this + future occurrences
 
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [tournamentId, setTournamentId] = useState<string | null>(existing?.tournamentId ?? prefillTournamentId ?? null);
@@ -124,6 +126,22 @@ export default function EditEventScreen() {
         Alert.alert('Recurring event', `Added ${n} occurrence${n === 1 ? '' : 's'}.`, [{ text: 'OK', onPress: () => router.back() }]);
       } catch (e: any) {
         Alert.alert('Recurring event', e?.message ?? String(e));
+      } finally { setSaving(false); }
+      return;
+    }
+
+    // Edit → apply to this + every later occurrence in the series (times recompute per date).
+    if (editing && existing?.seriesId && applyFuture) {
+      setSaving(true);
+      try {
+        const n = await updateSeriesForward({
+          seriesId: existing.seriesId, fromDate: existing.localDate, title: title.trim() || null,
+          startTime: hhmm(st), arrivalTime: hhmm(at), endTime: hhmm(et), eventTimezone: tz,
+          venueName, venueAddress, uniform, notes,
+        });
+        Alert.alert('Series updated', `Updated ${n} occurrence${n === 1 ? '' : 's'}.`, [{ text: 'OK', onPress: () => router.back() }]);
+      } catch (e: any) {
+        Alert.alert('Update series', e?.message ?? String(e));
       } finally { setSaving(false); }
       return;
     }
@@ -198,7 +216,7 @@ export default function EditEventScreen() {
       {editing ? <Text style={styles.hint}>Type is fixed once an event is created.</Text> : null}
 
       <Text style={styles.label}>Date</Text>
-      <TextInput style={styles.input} value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" placeholderTextColor="#666" autoCapitalize="none" />
+      <DateTimeField mode="date" value={date} onChange={setDate} placeholder="YYYY-MM-DD" />
 
       <View style={styles.rowBetween}>
         <Text style={styles.label}>Time TBD</Text>
@@ -207,11 +225,11 @@ export default function EditEventScreen() {
       {!timeTbd ? (
         <>
           <Text style={styles.label}>Start time</Text>
-          <TextInput style={styles.input} value={startTime} onChangeText={setStartTime} placeholder="e.g. 6:00 PM" placeholderTextColor="#666" />
+          <DateTimeField mode="time" value={startTime} onChange={setStartTime} placeholder="e.g. 6:00 PM" />
           <Text style={styles.label}>Arrival time</Text>
-          <TextInput style={styles.input} value={arrivalTime} onChangeText={setArrivalTime} placeholder="be there by… (optional)" placeholderTextColor="#666" />
+          <DateTimeField mode="time" value={arrivalTime} onChange={setArrivalTime} placeholder="be there by… (optional)" />
           <Text style={styles.label}>End time</Text>
-          <TextInput style={styles.input} value={endTime} onChangeText={setEndTime} placeholder="optional" placeholderTextColor="#666" />
+          <DateTimeField mode="time" value={endTime} onChange={setEndTime} placeholder="optional" />
         </>
       ) : <Text style={styles.hint}>Time is TBD — add it later (e.g. once the bracket is set).</Text>}
 
@@ -283,7 +301,7 @@ export default function EditEventScreen() {
                     ))}
                   </View>
                   <Text style={styles.label}>Repeat until</Text>
-                  <TextInput style={styles.input} value={untilDate} onChangeText={setUntilDate} placeholder="YYYY-MM-DD (last date)" placeholderTextColor="#666" autoCapitalize="none" />
+                  <DateTimeField mode="date" value={untilDate} onChange={setUntilDate} placeholder="YYYY-MM-DD (last date)" />
                 </>
               ) : null}
             </>
@@ -300,6 +318,16 @@ export default function EditEventScreen() {
 
       <Text style={styles.label}>Notes</Text>
       <TextInput style={[styles.input, { minHeight: 64, textAlignVertical: 'top' }]} value={notes} onChangeText={setNotes} placeholder="Anything else the team should know" placeholderTextColor="#666" multiline />
+
+      {editing && existing?.seriesId ? (
+        <>
+          <View style={styles.rowBetween}>
+            <Text style={styles.label}>Apply to this &amp; all future</Text>
+            <Switch value={applyFuture} onValueChange={setApplyFuture} />
+          </View>
+          <Text style={styles.hint}>{applyFuture ? 'Time, venue, uniform & notes will update on this and every later occurrence in the series (date changes are ignored).' : 'Off: changes affect only this occurrence.'}</Text>
+        </>
+      ) : null}
 
       <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={onSave} disabled={saving}>
         <Text style={styles.saveTxt}>{saving ? 'Saving…' : editing ? 'Save changes' : repeat && !gameFamily ? 'Create recurring events' : 'Create event'}</Text>

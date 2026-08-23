@@ -12,7 +12,7 @@ import { supabase } from '@/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebTopNav from '../components/WebTopNav';
 
@@ -30,6 +30,11 @@ function fmtTime(ev: ScheduleEvent): string {
   if (ev.timeStatus === 'all_day') return 'All day';
   if (!ev.startsAt) return 'Time TBD';
   try { return new Date(ev.startsAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: ev.eventTimezone }); } catch { return ''; }
+}
+// A universal maps link (opens Google/Apple Maps on phones, the map site on web).
+function mapsUrl(ev: ScheduleEvent): string | null {
+  const q = ev.venueAddress?.trim() || ev.venueName?.trim();
+  return q ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}` : null;
 }
 function scoreLabel(ev: ScheduleEvent): string | null {
   if (ev.teamScore == null || ev.opponentScore == null) return null;
@@ -299,6 +304,7 @@ function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsv
   onRsvp: (eventId: string, playerId: string, status: RsvpStatus) => void;
 }) {
   const canceled = ev.status === 'canceled';
+  const dir = !canceled ? mapsUrl(ev) : null;
   const score = scoreLabel(ev);
   const heading = ev.title || (isGameFamily(ev.eventType) && ev.opponent ? `vs ${ev.opponent}` : eventTypeLabel(ev.eventType));
   const going = att.filter(a => a.status === 'going').length;
@@ -323,6 +329,12 @@ function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsv
         {canceled ? <Text style={styles.canceledTag}>Canceled</Text> : score ? <Text style={styles.score}>{score}</Text> : null}
         <Text style={styles.arrow}>›</Text>
       </TouchableOpacity>
+
+      {dir ? (
+        <TouchableOpacity onPress={() => Linking.openURL(dir)} style={styles.dirPill} hitSlop={6}>
+          <Text style={styles.dirTxt}>📍 Directions</Text>
+        </TouchableOpacity>
+      ) : null}
 
       {canRsvp && myKids.length > 0 ? (
         <View style={styles.rsvpWrap}>
@@ -388,6 +400,8 @@ const styles = StyleSheet.create({
   rsvpTxt: { color: '#c7d2dc', fontSize: 12.5, fontWeight: '700' },
   rsvpTxtOn: { color: '#0a1210' },
   headcount: { color: '#8b96a3', fontSize: 12, fontWeight: '700', marginTop: 8 },
+  dirPill: { alignSelf: 'flex-start', marginTop: 8, borderWidth: 1, borderColor: '#2a3a48', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  dirTxt: { color: '#6ea8ff', fontSize: 12.5, fontWeight: '700' },
   badge: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4, minWidth: 66, alignItems: 'center' },
   badgeTxt: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
   rowTitle: { color: '#f1f4f6', fontSize: 15.5, fontWeight: '700' },
