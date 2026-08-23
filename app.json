@@ -53,7 +53,8 @@
         {
           "calendarPermission": "IamSports adds your team's games and practices to your calendar when you tap “Add to my calendar.”"
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,

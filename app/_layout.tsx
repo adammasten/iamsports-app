@@ -1,5 +1,6 @@
 import { TeamProvider, useTeamContext } from '@/context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { usePushRegistration } from '@/lib/native/push';
 import { reconcilePendingUploads } from '@/lib/native/upload-reconcile';
 import { reconcile as reconcileVideoCache } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
@@ -187,6 +188,14 @@ function TermsGate() {
   return <TermsAcceptSheet onAccept={accept} onDecline={decline} submitting={submitting} />;
 }
 
+// Registers this device for push on login and routes notification taps. Renders
+// nothing; lives inside <TeamProvider> to read userId. No-op on web.
+function PushGate() {
+  const { userId } = useTeamContext();
+  usePushRegistration(userId);
+  return null;
+}
+
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
@@ -250,6 +259,7 @@ export default function RootLayout() {
         <AuthGate />
         <NameCaptureGate />
         <TermsGate />
+        <PushGate />
         <StatusBar style="auto" />
       </ThemeProvider>
     </TeamProvider>
