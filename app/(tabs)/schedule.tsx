@@ -8,9 +8,11 @@ import {
   type Attendance, type RsvpStatus, type ScheduleEvent, type ScheduleFilter,
 } from '@/lib/core/schedule';
 import type { UserKidRow } from '@/context';
+import { supabase } from '@/supabase';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebTopNav from '../components/WebTopNav';
 
@@ -53,6 +55,7 @@ export default function ScheduleScreen() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ScheduleFilter>('all');
   const [scope, setScope] = useState<'team' | 'all'>('team');
+  const [importing, setImporting] = useState(false);
 
   const teamNameById = useMemo(() => {
     const m = new Map<string, string>();
@@ -106,6 +109,30 @@ export default function ScheduleScreen() {
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   }
 
+  // Photo import: pick an image of a printed/emailed schedule, extract via the
+  // edge function, then hand the rows to an editable preview before anything saves.
+  async function importFromPhoto() {
+    if (!activeTeam) return;
+    const res = await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.5, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+    if (res.canceled || !res.assets?.[0]?.base64) return;
+    setImporting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('extract-schedule', {
+        body: { image: res.assets[0].base64, mediaType: res.assets[0].mimeType ?? 'image/jpeg' },
+      });
+      if (error) {
+        let msg = 'Import failed — try again.';
+        try { const b = await (error as any).context?.json?.(); if (b?.error) msg = b.error; } catch {}
+        Alert.alert('Import schedule', msg); return;
+      }
+      const rows = (data as any)?.rows ?? [];
+      if (rows.length === 0) { Alert.alert('Import schedule', 'No games were found in that image. Try a clearer, straight-on photo.'); return; }
+      router.push({ pathname: '/import-schedule', params: { rows: JSON.stringify(rows), teamId: activeTeam.id } });
+    } catch (e: any) {
+      Alert.alert('Import schedule', e?.message ?? 'Import failed.');
+    } finally { setImporting(false); }
+  }
+
   function openEvent(ev: ScheduleEvent) {
     if (isCoach) { router.push({ pathname: '/edit-event', params: { event: JSON.stringify(ev) } }); return; }
     if (isGameFamily(ev.eventType) && ev.gameId) router.push({ pathname: '/box-score', params: { gameId: ev.gameId, title: ev.title ?? 'Game' } });
@@ -153,10 +180,15 @@ export default function ScheduleScreen() {
         ) : null}
         {Platform.OS === 'web' ? (
           <TouchableOpacity style={styles.exportBtn} onPress={exportCalendar}>
-            <Text style={styles.exportTxt}>⤓ Export to calendar</Text>
+            <Text style={styles.exportTxt}>⤓ Export</Text>
           </TouchableOpacity>
         ) : null}
       </View>
+      {isCoach && scope === 'team' ? (
+        <TouchableOpacity style={styles.importRow} onPress={importFromPhoto} disabled={importing}>
+          <Text style={styles.importTxt}>{importing ? 'Reading the photo…' : '📷 Import schedule from a photo'}</Text>
+        </TouchableOpacity>
+      ) : null}
 
       {loading ? (
         <ActivityIndicator color="#ff6a2c" style={{ marginTop: 30 }} />
@@ -264,6 +296,8 @@ const styles = StyleSheet.create({
   addTxt: { color: '#8b7bff', fontSize: 15, fontWeight: '800' },
   exportBtn: { borderWidth: 1, borderColor: '#25333f', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
   exportTxt: { color: '#9db0bd', fontSize: 13.5, fontWeight: '700' },
+  importRow: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginBottom: 14 },
+  importTxt: { color: '#8b7bff', fontSize: 14, fontWeight: '700' },
   section: { color: '#62707e', fontSize: 12, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 14, marginBottom: 8 },
   scopeRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   scopeBtn: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
