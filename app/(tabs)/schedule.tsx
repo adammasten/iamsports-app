@@ -317,7 +317,7 @@ function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsv
             {heading}{ev.homeAway ? <Text style={styles.rowHa}>  {ev.homeAway === 'home' ? '· Home' : '· Away'}</Text> : null}
           </Text>
           <Text style={styles.rowMeta} numberOfLines={1}>
-            {teamLabel ? `${teamLabel} · ` : ''}{fmtDate(ev.localDate)} · {fmtTime(ev)}{ev.venueName ? ` · ${ev.venueName}` : ''}
+            {teamLabel ? `${teamLabel} · ` : ''}{fmtDate(ev.localDate)} · {fmtTime(ev)}{ev.venueName ? ` · ${ev.venueName}` : ''}{ev.seriesId ? ' · ↻' : ''}
           </Text>
         </View>
         {canceled ? <Text style={styles.canceledTag}>Canceled</Text> : score ? <Text style={styles.score}>{score}</Text> : null}

@@ -52,6 +52,7 @@ export type ScheduleEvent = {
   notes: string | null;
   tournamentId: string | null;
   seasonId: string | null;
+  seriesId: string | null;
   version: number;
   // From the linked game (game-family only):
   gameId: string | null;
@@ -65,7 +66,7 @@ export async function loadEvents(teamIds: string | string[]): Promise<ScheduleEv
   if (ids.length === 0) return [];
   const { data, error } = await supabase
     .from('events')
-    .select('id, team_id, event_type, title, local_date, starts_at, ends_at, arrival_at, event_timezone, time_status, home_away, venue_name, venue_address, status, uniform, notes, tournament_id, season_id, version, games(id, opponent, team_score, opponent_score, deleted_at)')
+    .select('id, team_id, event_type, title, local_date, starts_at, ends_at, arrival_at, event_timezone, time_status, home_away, venue_name, venue_address, status, uniform, notes, tournament_id, season_id, series_id, version, games(id, opponent, team_score, opponent_score, deleted_at)')
     .in('team_id', ids)
     .order('local_date', { ascending: true });
   if (error) throw error;
@@ -78,7 +79,7 @@ export async function loadEvents(teamIds: string | string[]): Promise<ScheduleEv
       eventTimezone: r.event_timezone, timeStatus: r.time_status, homeAway: r.home_away,
       venueName: r.venue_name, venueAddress: r.venue_address, status: r.status,
       uniform: r.uniform, notes: r.notes, tournamentId: r.tournament_id, seasonId: r.season_id,
-      version: r.version,
+      seriesId: r.series_id, version: r.version,
       gameId: g?.id ?? null, opponent: g?.opponent ?? null,
       teamScore: g?.team_score ?? null, opponentScore: g?.opponent_score ?? null,
     };
@@ -174,6 +175,49 @@ export async function createTournament(teamId: string, name: string, userId: str
 export async function cancelEvent(eventId: string): Promise<void> {
   const { error } = await supabase.from('events').update({ status: 'canceled' }).eq('id', eventId);
   if (error) throw error;
+}
+
+// ── Recurring practices / team events (materialized) ───────────────────
+export type SeriesInput = {
+  teamId: string;
+  eventType: 'practice' | 'team_event';
+  title: string | null;
+  firstDate: string;             // YYYY-MM-DD
+  untilDate: string;             // YYYY-MM-DD inclusive
+  weekdays: number[];            // 0=Sun .. 6=Sat
+  startTime: string | null;      // 'HH:MM' (24h) or null = TBD
+  arrivalTime: string | null;
+  endTime: string | null;
+  eventTimezone: string;
+  venueName: string | null;
+  venueAddress: string | null;
+  uniform: string | null;
+  notes: string | null;
+};
+
+// Generate all occurrences server-side (one events row each, shared series_id).
+// Returns the number of occurrences created.
+export async function createPracticeSeries(s: SeriesInput): Promise<number> {
+  const t = (v: string | null) => (v && v.trim() ? `${v.trim()}:00` : null);
+  const { data, error } = await supabase.rpc('create_practice_series', {
+    p_team_id: s.teamId, p_event_type: s.eventType, p_title: s.title?.trim() || (s.eventType === 'practice' ? 'Practice' : null),
+    p_first_date: s.firstDate, p_until_date: s.untilDate, p_weekdays: s.weekdays,
+    p_start_time: t(s.startTime), p_arrival_time: t(s.arrivalTime), p_end_time: t(s.endTime),
+    p_tz: s.eventTimezone,
+    p_venue_name: s.venueName?.trim() || null, p_venue_address: s.venueAddress?.trim() || null,
+    p_uniform: s.uniform?.trim() || null, p_notes: s.notes?.trim() || null,
+  });
+  if (error) throw error;
+  return (data as number) ?? 0;
+}
+
+// Cancel every still-scheduled occurrence of a series from a date forward
+// (past occurrences keep their history). Returns how many were canceled.
+export async function cancelSeries(seriesId: string, fromDate: string): Promise<number> {
+  const { data, error } = await supabase.from('events').update({ status: 'canceled' })
+    .eq('series_id', seriesId).gte('local_date', fromDate).eq('status', 'scheduled').select('id');
+  if (error) throw error;
+  return (data ?? []).length;
 }
 
 // ── RSVP / attendance ──────────────────────────────────────────────────

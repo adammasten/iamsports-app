@@ -3,7 +3,7 @@
 // Game-family types create/update a linked games row so film/tagging/stats attach.
 import { useTeamContext } from '@/context';
 import {
-  cancelEvent, createTournament, EVENT_TYPES, eventTypeLabel, isGameFamily, loadTournaments, saveEvent,
+  cancelEvent, cancelSeries, createPracticeSeries, createTournament, EVENT_TYPES, eventTypeLabel, isGameFamily, loadTournaments, saveEvent,
   type EventInput, type EventType, type ScheduleEvent, type Tournament,
 } from '@/lib/core/schedule';
 import { goBackOrHome } from '@/lib/nav';
@@ -72,6 +72,12 @@ export default function EditEventScreen() {
   const [title, setTitle] = useState(existing?.title ?? '');
   const [saving, setSaving] = useState(false);
 
+  // Recurrence (practice / team_event only, create-only). Weekday = 0..6 (Sun..Sat).
+  const initialWeekday = (() => { const [y, m, d] = (existing?.localDate ?? prefillDate ?? todayYMD()).split('-').map(Number); return new Date(y, m - 1, d).getDay(); })();
+  const [repeat, setRepeat] = useState(false);
+  const [weekdays, setWeekdays] = useState<Set<number>>(new Set([initialWeekday]));
+  const [untilDate, setUntilDate] = useState('');
+
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [tournamentId, setTournamentId] = useState<string | null>(existing?.tournamentId ?? prefillTournamentId ?? null);
   const [newTournament, setNewTournament] = useState('');
@@ -87,18 +93,41 @@ export default function EditEventScreen() {
   async function onSave() {
     if (!activeTeam || !userId) { Alert.alert('Not ready', 'No team selected.'); return; }
     if (!validYMD(date)) { Alert.alert('Date', 'Enter the date as YYYY-MM-DD.'); return; }
-    let startsAt: string | null = null, arrivalAt: string | null = null, endsAt: string | null = null;
+    let st: { h: number; m: number } | null = null, at: { h: number; m: number } | null = null, et: { h: number; m: number } | null = null;
     if (!timeTbd) {
-      const st = parseTime(startTime);
+      st = parseTime(startTime);
       if (startTime.trim() && !st) { Alert.alert('Start time', 'Try a time like “6:00 PM”.'); return; }
-      const at = parseTime(arrivalTime);
+      at = parseTime(arrivalTime);
       if (arrivalTime.trim() && !at) { Alert.alert('Arrival time', 'Try a time like “5:30 PM”.'); return; }
-      const et = parseTime(endTime);
+      et = parseTime(endTime);
       if (endTime.trim() && !et) { Alert.alert('End time', 'Try a time like “8:00 PM”.'); return; }
-      startsAt = st ? combine(date, st) : null;
-      arrivalAt = at ? combine(date, at) : null;
-      endsAt = et ? combine(date, et) : null;
     }
+    const startsAt = st ? combine(date, st) : null;
+    const arrivalAt = at ? combine(date, at) : null;
+    const endsAt = et ? combine(date, et) : null;
+    const hhmm = (t: { h: number; m: number } | null) => (t ? `${String(t.h).padStart(2, '0')}:${String(t.m).padStart(2, '0')}` : null);
+    const canRepeat = !editing && !gameFamily;
+
+    // Recurring practice / team event → materialize the whole series server-side.
+    if (canRepeat && repeat) {
+      if (weekdays.size === 0) { Alert.alert('Repeat', 'Pick at least one day of the week.'); return; }
+      if (!validYMD(untilDate)) { Alert.alert('Repeat until', 'Enter the end date as YYYY-MM-DD.'); return; }
+      if (untilDate.trim() < date.trim()) { Alert.alert('Repeat until', 'The end date must be on or after the first date.'); return; }
+      setSaving(true);
+      try {
+        const n = await createPracticeSeries({
+          teamId: activeTeam.id, eventType: type as 'practice' | 'team_event', title: title.trim() || null,
+          firstDate: date.trim(), untilDate: untilDate.trim(), weekdays: Array.from(weekdays),
+          startTime: hhmm(st), arrivalTime: hhmm(at), endTime: hhmm(et),
+          eventTimezone: tz, venueName, venueAddress, uniform, notes,
+        });
+        Alert.alert('Recurring event', `Added ${n} occurrence${n === 1 ? '' : 's'}.`, [{ text: 'OK', onPress: () => router.back() }]);
+      } catch (e: any) {
+        Alert.alert('Recurring event', e?.message ?? String(e));
+      } finally { setSaving(false); }
+      return;
+    }
+
     setSaving(true);
     try {
       // A game-family event can carry a tournament; create one on the fly if named.
@@ -121,6 +150,19 @@ export default function EditEventScreen() {
     } catch (e: any) {
       Alert.alert('Save event', e?.message ?? String(e));
     } finally { setSaving(false); }
+  }
+
+  async function onCancelSeries() {
+    if (!existing?.seriesId) return;
+    const from = existing.localDate;
+    const run = async () => {
+      try { const n = await cancelSeries(existing.seriesId!, from); Alert.alert('Series canceled', `Canceled ${n} upcoming occurrence${n === 1 ? '' : 's'}.`, [{ text: 'OK', onPress: () => router.back() }]); }
+      catch (e: any) { Alert.alert('Cancel series', e?.message ?? String(e)); }
+    };
+    if (Platform.OS === 'web') { if (window.confirm('Cancel this and every later occurrence in the series? Past ones stay as history.')) run(); return; }
+    Alert.alert('Cancel series', 'Cancel this and every later occurrence? Past ones stay as history.', [
+      { text: 'Keep them' }, { text: 'Cancel series', style: 'destructive', onPress: run },
+    ]);
   }
 
   async function onCancelEvent() {
@@ -218,6 +260,34 @@ export default function EditEventScreen() {
         <>
           <Text style={styles.label}>Title (optional)</Text>
           <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder={type === 'practice' ? 'Practice' : 'e.g. Team dinner'} placeholderTextColor="#666" />
+
+          {!editing ? (
+            <>
+              <View style={styles.rowBetween}>
+                <Text style={styles.label}>Repeat weekly</Text>
+                <Switch value={repeat} onValueChange={setRepeat} />
+              </View>
+              {repeat ? (
+                <>
+                  <Text style={styles.hint}>The “Date” above is the first occurrence. We’ll add one {type === 'practice' ? 'practice' : 'event'} for each chosen day through the end date.</Text>
+                  <Text style={styles.label}>On these days</Text>
+                  <View style={styles.typeRow}>
+                    {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d, i) => (
+                      <TouchableOpacity
+                        key={i}
+                        onPress={() => setWeekdays(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; })}
+                        style={[styles.dayChip, weekdays.has(i) && styles.typeChipOn]}
+                      >
+                        <Text style={[styles.typeTxt, weekdays.has(i) && styles.typeTxtOn]}>{d}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.label}>Repeat until</Text>
+                  <TextInput style={styles.input} value={untilDate} onChangeText={setUntilDate} placeholder="YYYY-MM-DD (last date)" placeholderTextColor="#666" autoCapitalize="none" />
+                </>
+              ) : null}
+            </>
+          ) : null}
         </>
       )}
 
@@ -232,7 +302,7 @@ export default function EditEventScreen() {
       <TextInput style={[styles.input, { minHeight: 64, textAlignVertical: 'top' }]} value={notes} onChangeText={setNotes} placeholder="Anything else the team should know" placeholderTextColor="#666" multiline />
 
       <TouchableOpacity style={[styles.saveBtn, saving && { opacity: 0.6 }]} onPress={onSave} disabled={saving}>
-        <Text style={styles.saveTxt}>{saving ? 'Saving…' : editing ? 'Save changes' : 'Create event'}</Text>
+        <Text style={styles.saveTxt}>{saving ? 'Saving…' : editing ? 'Save changes' : repeat && !gameFamily ? 'Create recurring events' : 'Create event'}</Text>
       </TouchableOpacity>
       {editing && gameFamily && existing?.gameId ? (
         <TouchableOpacity style={styles.linkBtn} onPress={() => router.push({ pathname: '/box-score', params: { gameId: existing.gameId!, title: existing.title ?? 'Game' } })}>
@@ -241,7 +311,12 @@ export default function EditEventScreen() {
       ) : null}
       {editing ? (
         <TouchableOpacity style={styles.cancelBtn} onPress={onCancelEvent}>
-          <Text style={styles.cancelTxt}>Cancel this event</Text>
+          <Text style={styles.cancelTxt}>Cancel this {existing?.seriesId ? 'occurrence' : 'event'}</Text>
+        </TouchableOpacity>
+      ) : null}
+      {editing && existing?.seriesId ? (
+        <TouchableOpacity style={styles.cancelBtn} onPress={onCancelSeries}>
+          <Text style={styles.cancelTxt}>Cancel this &amp; all future in the series</Text>
         </TouchableOpacity>
       ) : null}
     </ScrollView>
@@ -258,6 +333,7 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 10, color: '#f1f4f6', paddingHorizontal: 12, paddingVertical: 11, fontSize: 15 },
   typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   typeChip: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8 },
+  dayChip: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, width: 42, paddingVertical: 9, alignItems: 'center' },
   typeChipOn: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
   typeTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
   typeTxtOn: { color: '#fff' },
