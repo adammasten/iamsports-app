@@ -1,273 +1,177 @@
-// Schedule tab — team's games ordered by date. Tap a game to open its box
-// score. Games are split into "Upcoming" (future date or undated) and
-// "Completed" (past date or scored) purely for display; the DB doesn't have a
-// status column.
-//
-// Coaches see a "+ Add Game" inline form (matches the Roster tab pattern) —
-// creates a games row directly, no video required. Useful for entering past
-// games from memory, or scheduling upcoming games for stat entry later.
+// Schedule tab — a UNIFIED typed agenda (games + practices + events) in one
+// chronological list with type-filter chips. Coaches add/edit any event type;
+// existing games flow in via the events↔games link (film/tagging/stats untouched).
+// Dark-themed to match the app. Slice 1 of the scheduling build.
 import { COACH_ROLES, useTeamContext } from '@/context';
-import { supabase } from '@/supabase';
-import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import {
+  eventTypeLabel, isGameFamily, loadEvents, matchesFilter,
+  type ScheduleEvent, type ScheduleFilter,
+} from '@/lib/core/schedule';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import WebTopNav from '../components/WebTopNav';
 
-type Game = {
-  id: string;
-  title: string;
-  opponent: string | null;
-  game_date: string | null;
-  team_score: number | null;
-  opponent_score: number | null;
+function todayYMD(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// Parse a YYYY-MM-DD as LOCAL (no UTC shift) and format "Sat · Aug 23".
+function fmtDate(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function fmtTime(ev: ScheduleEvent): string {
+  if (ev.timeStatus === 'tbd') return 'Time TBD';
+  if (ev.timeStatus === 'all_day') return 'All day';
+  if (!ev.startsAt) return 'Time TBD';
+  try { return new Date(ev.startsAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: ev.eventTimezone }); } catch { return ''; }
+}
+function scoreLabel(ev: ScheduleEvent): string | null {
+  if (ev.teamScore == null || ev.opponentScore == null) return null;
+  const wl = ev.teamScore === ev.opponentScore ? 'T' : ev.teamScore > ev.opponentScore ? 'W' : 'L';
+  return `${wl} ${ev.teamScore}-${ev.opponentScore}`;
+}
+const TYPE_COLOR: Record<string, string> = {
+  game: '#ff6a2c', scrimmage: '#e0a52e', tournament_game: '#e2574a', practice: '#3ec46d', team_event: '#4a90e2',
 };
 
-// Postgres date columns come back as YYYY-MM-DD strings. Split-and-reorder to
-// DD/MM/YYYY without ever instantiating a Date object (which would re-introduce
-// timezone risk — a coach in Central would see games shift by a day).
-function formatDate(ymd: string | null): string {
-  if (!ymd) return 'No date';
-  const [y, m, d] = ymd.split('-');
-  return `${d}/${m}/${y}`;
-}
-
-// Extract local YYYY-MM-DD from a Date. Never .toISOString() (UTC-shifts).
-function dateToLocalYMD(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-function todayYMD(): string { return dateToLocalYMD(new Date()); }
-
-function scoreLabel(g: Game): string | null {
-  if (g.team_score == null || g.opponent_score == null) return null;
-  const wl = g.team_score === g.opponent_score ? 'T' : g.team_score > g.opponent_score ? 'W' : 'L';
-  return `${wl} ${g.team_score}-${g.opponent_score}`;
-}
+const FILTERS: { key: ScheduleFilter; label: string }[] = [
+  { key: 'all', label: 'All' }, { key: 'games', label: 'Games' },
+  { key: 'practices', label: 'Practices' }, { key: 'events', label: 'Events' },
+];
 
 export default function ScheduleScreen() {
   const insets = useSafeAreaInsets();
   const { activeTeam, activeRole } = useTeamContext();
   const isCoach = !!activeRole && COACH_ROLES.includes(activeRole);
-
-  const [games, setGames] = useState<Game[]>([]);
+  const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Add-game form
-  const [showAdd, setShowAdd] = useState(false);
-  const [opponent, setOpponent] = useState('');
-  const [gameDate, setGameDate] = useState<Date>(new Date());
-  const [teamScore, setTeamScore] = useState('');
-  const [oppScore, setOppScore] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [filter, setFilter] = useState<ScheduleFilter>('all');
 
   const load = useCallback(async () => {
-    if (!activeTeam) { setGames([]); setLoading(false); return; }
+    if (!activeTeam) { setEvents([]); setLoading(false); return; }
     setLoading(true);
-    const { data } = await supabase
-      .from('games')
-      .select('id, title, opponent, game_date, team_score, opponent_score')
-      .eq('team_id', activeTeam.id)
-      .order('game_date', { ascending: false, nullsFirst: false })
-      .order('created_at', { ascending: false });
-    setGames((data ?? []) as Game[]);
+    try { setEvents(await loadEvents(activeTeam.id)); } catch { setEvents([]); }
     setLoading(false);
   }, [activeTeam]);
-
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  function openAddForm() {
-    setGameDate(new Date());              // reset picker default to today on each open
-    setOpponent('');
-    setTeamScore('');
-    setOppScore('');
-    setShowAdd(true);
-  }
+  const today = todayYMD();
+  const { upcoming, past } = useMemo(() => {
+    const shown = events.filter(e => matchesFilter(e.eventType, filter));
+    const up = shown.filter(e => e.localDate >= today && e.status !== 'canceled' && e.status !== 'completed')
+      .sort((a, b) => a.localDate.localeCompare(b.localDate));
+    const pa = shown.filter(e => !(e.localDate >= today && e.status !== 'canceled' && e.status !== 'completed'))
+      .sort((a, b) => b.localDate.localeCompare(a.localDate));
+    return { upcoming: up, past: pa };
+  }, [events, filter, today]);
 
-  function onDateChange(_: DateTimePickerEvent, selected?: Date) {
-    if (selected) setGameDate(selected);
-  }
-
-  function openAndroidPicker() {
-    DateTimePickerAndroid.open({ value: gameDate, mode: 'date', onChange: onDateChange });
-  }
-
-  async function saveGame() {
-    if (!activeTeam) return;
-    const opp = opponent.trim();
-    if (!opp) { Alert.alert('Add game', 'Enter an opponent name.'); return; }
-    setSaving(true);
-    // Coerce optional scores; empty string → null.
-    const ts = teamScore.trim() === '' ? null : parseInt(teamScore.trim(), 10);
-    const os = oppScore.trim() === '' ? null : parseInt(oppScore.trim(), 10);
-    if ((ts != null && Number.isNaN(ts)) || (os != null && Number.isNaN(os))) {
-      Alert.alert('Add game', 'Scores must be numbers.'); setSaving(false); return;
-    }
-    const { error } = await supabase.from('games').insert({
-      team_id: activeTeam.id,
-      title: `vs ${opp}`,
-      opponent: opp,
-      game_date: dateToLocalYMD(gameDate),
-      team_score: ts,
-      opponent_score: os,
-    });
-    setSaving(false);
-    if (error) { Alert.alert('Add game', error.message); return; }
-    setShowAdd(false);
-    await load();
+  function openEvent(ev: ScheduleEvent) {
+    if (isCoach) { router.push({ pathname: '/edit-event', params: { event: JSON.stringify(ev) } }); return; }
+    if (isGameFamily(ev.eventType) && ev.gameId) router.push({ pathname: '/box-score', params: { gameId: ev.gameId, title: ev.title ?? 'Game' } });
   }
 
   if (!activeTeam) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top + 24, paddingHorizontal: 16 }]}>
-        <Text style={styles.empty}>Pick a team to see its schedule.</Text>
+      <View style={styles.root}>
+        {Platform.OS === 'web' ? <WebTopNav /> : null}
+        <View style={{ paddingTop: insets.top + 40, paddingHorizontal: 20 }}><Text style={styles.empty}>Pick a team to see its schedule.</Text></View>
       </View>
     );
   }
 
-  const today = todayYMD();
-  const isPast = (g: Game) => scoreLabel(g) != null || (g.game_date != null && g.game_date < today);
-  const past = games.filter(isPast);
-  const upcoming = games.filter(g => !isPast(g));
-
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ paddingTop: insets.top + 12, paddingHorizontal: 16, paddingBottom: 40 }}
-      keyboardShouldPersistTaps="handled"
-    >
+    <View style={styles.root}>
+      {Platform.OS === 'web' ? <WebTopNav /> : null}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12, paddingHorizontal: 16, paddingBottom: 44, maxWidth: 760, width: '100%', alignSelf: 'center' }}>
       <Text style={styles.title}>{activeTeam.name}</Text>
       <Text style={styles.subtitle}>Schedule</Text>
 
-      {isCoach && (showAdd ? (
-        <View style={styles.addBox}>
-          <TextInput
-            style={styles.input}
-            placeholder="Opponent name"
-            placeholderTextColor="#999"
-            value={opponent}
-            onChangeText={setOpponent}
-            autoFocus
-            editable={!saving}
-          />
-          <View style={styles.dateRow}>
-            <Text style={styles.dateLabel}>Game date:</Text>
-            {Platform.OS === 'ios' ? (
-              <DateTimePicker value={gameDate} mode="date" display="compact" onChange={onDateChange} />
-            ) : (
-              <TouchableOpacity style={styles.dateBtn} onPress={openAndroidPicker} disabled={saving}>
-                <Text style={styles.dateBtnText}>{formatDate(dateToLocalYMD(gameDate))}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          <View style={styles.scoreRow}>
-            <TextInput
-              style={[styles.input, styles.scoreInput]}
-              placeholder="Us"
-              placeholderTextColor="#999"
-              value={teamScore}
-              onChangeText={setTeamScore}
-              keyboardType="number-pad"
-              editable={!saving}
-            />
-            <Text style={styles.scoreDash}>–</Text>
-            <TextInput
-              style={[styles.input, styles.scoreInput]}
-              placeholder="Them"
-              placeholderTextColor="#999"
-              value={oppScore}
-              onChangeText={setOppScore}
-              keyboardType="number-pad"
-              editable={!saving}
-            />
-          </View>
-          <View style={styles.addBtns}>
-            <TouchableOpacity style={[styles.btn, styles.btnPrimary]} disabled={saving} onPress={saveGame}>
-              <Text style={styles.btnPrimaryText}>{saving ? 'Saving…' : 'Save game'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.btn} disabled={saving} onPress={() => setShowAdd(false)}>
-              <Text style={styles.btnText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.hint}>No video needed. You can add stats after saving from the game&apos;s box score.</Text>
-        </View>
-      ) : (
-        <TouchableOpacity style={styles.addRow} onPress={openAddForm}>
-          <Text style={styles.addRowText}>＋ Add game</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={{ gap: 8, paddingRight: 12 }}>
+        {FILTERS.map(f => (
+          <TouchableOpacity key={f.key} onPress={() => setFilter(f.key)} style={[styles.chip, filter === f.key && styles.chipOn]}>
+            <Text style={[styles.chipTxt, filter === f.key && styles.chipTxtOn]}>{f.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {isCoach ? (
+        <TouchableOpacity style={styles.addRow} onPress={() => router.push('/edit-event')}>
+          <Text style={styles.addTxt}>＋ Add event</Text>
         </TouchableOpacity>
-      ))}
+      ) : null}
 
       {loading ? (
-        <ActivityIndicator style={{ marginTop: 28 }} color="#534AB7" />
-      ) : games.length === 0 ? (
-        <Text style={styles.empty}>No games yet.{isCoach ? '\nTap “Add game” above.' : ''}</Text>
+        <ActivityIndicator color="#ff6a2c" style={{ marginTop: 30 }} />
+      ) : upcoming.length === 0 && past.length === 0 ? (
+        <Text style={styles.empty}>Nothing scheduled yet.{isCoach ? '\nTap “＋ Add event” to add a game or practice.' : ''}</Text>
       ) : (
         <>
-          {upcoming.length > 0 && (
+          {upcoming.length > 0 ? (
             <>
               <Text style={styles.section}>Upcoming</Text>
-              {upcoming.map(g => <GameRow key={g.id} game={g} />)}
+              {upcoming.map(ev => <Row key={ev.id} ev={ev} onPress={() => openEvent(ev)} />)}
             </>
-          )}
-          {past.length > 0 && (
+          ) : null}
+          {past.length > 0 ? (
             <>
-              <Text style={styles.section}>Completed</Text>
-              {past.map(g => <GameRow key={g.id} game={g} />)}
+              <Text style={styles.section}>Past &amp; completed</Text>
+              {past.map(ev => <Row key={ev.id} ev={ev} onPress={() => openEvent(ev)} />)}
             </>
-          )}
+          ) : null}
         </>
       )}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
-function GameRow({ game }: { game: Game }) {
-  const score = scoreLabel(game);
+function Row({ ev, onPress }: { ev: ScheduleEvent; onPress: () => void }) {
+  const canceled = ev.status === 'canceled';
+  const score = scoreLabel(ev);
+  const heading = ev.title || (isGameFamily(ev.eventType) && ev.opponent ? `vs ${ev.opponent}` : eventTypeLabel(ev.eventType));
   return (
-    <TouchableOpacity
-      style={styles.row}
-      onPress={() => router.push({ pathname: '/box-score', params: { gameId: game.id, title: game.title } })}
-    >
-      <View style={{ flex: 1 }}>
-        <Text style={styles.rowTitle} numberOfLines={1}>{game.title}</Text>
-        <Text style={styles.rowMeta}>{formatDate(game.game_date)}</Text>
+    <TouchableOpacity style={styles.row} onPress={onPress}>
+      <View style={[styles.badge, { backgroundColor: (TYPE_COLOR[ev.eventType] ?? '#4a90e2') + '22', borderColor: TYPE_COLOR[ev.eventType] ?? '#4a90e2' }]}>
+        <Text style={[styles.badgeTxt, { color: TYPE_COLOR[ev.eventType] ?? '#4a90e2' }]}>{eventTypeLabel(ev.eventType)}</Text>
       </View>
-      {score ? <Text style={styles.rowScore}>{score}</Text> : null}
-      <Text style={styles.rowArrow}>›</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.rowTitle, canceled && styles.canceled]} numberOfLines={1}>
+          {heading}{ev.homeAway ? <Text style={styles.rowHa}>  {ev.homeAway === 'home' ? '· Home' : '· Away'}</Text> : null}
+        </Text>
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {fmtDate(ev.localDate)} · {fmtTime(ev)}{ev.venueName ? ` · ${ev.venueName}` : ''}
+        </Text>
+      </View>
+      {canceled ? <Text style={styles.canceledTag}>Canceled</Text> : score ? <Text style={styles.score}>{score}</Text> : null}
+      <Text style={styles.arrow}>›</Text>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  title: { fontSize: 22, fontWeight: '800', color: '#1a1a1a' },
-  subtitle: { fontSize: 14, fontWeight: '600', color: '#888', marginBottom: 20 },
-  empty: { color: '#888', fontSize: 15, textAlign: 'center', marginTop: 40, lineHeight: 22 },
-  section: { fontSize: 12, fontWeight: '800', color: '#888', letterSpacing: 0.5, textTransform: 'uppercase', marginTop: 16, marginBottom: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#e5e5e5', gap: 12 },
-  rowTitle: { fontSize: 16, fontWeight: '700', color: '#1a1a1a' },
-  rowMeta: { fontSize: 12, color: '#999', marginTop: 2 },
-  rowScore: { fontSize: 14, fontWeight: '800', color: '#534AB7' },
-  rowArrow: { fontSize: 20, color: '#ccc' },
-
-  addRow: { marginBottom: 16, paddingVertical: 14, borderRadius: 10, borderWidth: 1, borderColor: '#534AB7', borderStyle: 'dashed', alignItems: 'center' },
-  addRowText: { color: '#534AB7', fontWeight: '700', fontSize: 15 },
-  addBox: { marginBottom: 16, backgroundColor: '#fafafa', borderRadius: 12, padding: 14, gap: 10 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: '#1a1a1a', backgroundColor: '#fff' },
-  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  dateLabel: { fontSize: 15, color: '#333' },
-  dateBtn: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#fff', flex: 1 },
-  dateBtnText: { fontSize: 15, color: '#333' },
-  scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  scoreInput: { flex: 1, textAlign: 'center' },
-  scoreDash: { fontSize: 18, fontWeight: '700', color: '#888' },
-  addBtns: { flexDirection: 'row', gap: 10 },
-  btn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center', backgroundColor: '#eee' },
-  btnText: { fontWeight: '700', color: '#555' },
-  btnPrimary: { backgroundColor: '#534AB7' },
-  btnPrimaryText: { fontWeight: '700', color: '#fff' },
-  hint: { fontSize: 12, color: '#888', lineHeight: 16 },
+  root: { flex: 1, backgroundColor: '#0e1b2c' },
+  title: { color: '#f1f4f6', fontSize: 22, fontWeight: '800' },
+  subtitle: { color: '#8b96a3', fontSize: 14, fontWeight: '600', marginBottom: 14 },
+  chipRow: { flexGrow: 0, marginBottom: 12 },
+  chip: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  chipOn: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
+  chipTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
+  chipTxtOn: { color: '#fff' },
+  addRow: { borderWidth: 1, borderColor: '#534AB7', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 13, alignItems: 'center', marginBottom: 14 },
+  addTxt: { color: '#8b7bff', fontSize: 15, fontWeight: '800' },
+  section: { color: '#62707e', fontSize: 12, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 14, marginBottom: 8 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#1b2735' },
+  badge: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4, minWidth: 66, alignItems: 'center' },
+  badgeTxt: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
+  rowTitle: { color: '#f1f4f6', fontSize: 15.5, fontWeight: '700' },
+  rowHa: { color: '#8b96a3', fontSize: 13, fontWeight: '600' },
+  rowMeta: { color: '#8b96a3', fontSize: 12.5, marginTop: 2 },
+  canceled: { textDecorationLine: 'line-through', color: '#8b96a3' },
+  canceledTag: { color: '#c0392b', fontSize: 12, fontWeight: '800' },
+  score: { color: '#ff6a2c', fontSize: 14, fontWeight: '800' },
+  arrow: { color: '#3a4b5a', fontSize: 20 },
+  empty: { color: '#8b96a3', fontSize: 15, textAlign: 'center', marginTop: 40, lineHeight: 22 },
 });

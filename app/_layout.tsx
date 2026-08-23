@@ -227,6 +227,7 @@ export default function RootLayout() {
           <Stack.Screen name="join-team" options={{ headerShown: false }} />
           <Stack.Screen name="claim-kid" options={{ headerShown: false }} />
           <Stack.Screen name="join-coach" options={{ headerShown: false }} />
+          <Stack.Screen name="edit-event" options={{ headerShown: false }} />
           <Stack.Screen name="kid" options={{ headerShown: false }} />
           <Stack.Screen name="team" options={{ headerShown: false }} />
           <Stack.Screen name="clips-library" options={{ headerShown: false }} />

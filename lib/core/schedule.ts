@@ -1,0 +1,158 @@
+// Scheduling data layer (RN-agnostic; UI stays platform-specific). Reads the
+// unified `events` table joined to the linked `games` row (game-family events
+// carry opponent + score from games). Writes an event and, for game-family
+// types, creates/updates the 1:1 linked games row so film/tagging/stats attach
+// exactly as before. Cancel-not-delete. Optimistic concurrency via `version`.
+
+import { supabase } from '@/supabase';
+
+export type EventType = 'game' | 'scrimmage' | 'practice' | 'tournament_game' | 'team_event';
+export type TimeStatus = 'confirmed' | 'tbd' | 'all_day';
+export type EventStatus = 'scheduled' | 'completed' | 'canceled' | 'postponed';
+
+export const EVENT_TYPES: { value: EventType; label: string }[] = [
+  { value: 'game', label: 'Game' },
+  { value: 'scrimmage', label: 'Scrimmage' },
+  { value: 'practice', label: 'Practice' },
+  { value: 'tournament_game', label: 'Tournament game' },
+  { value: 'team_event', label: 'Team event' },
+];
+
+export const GAME_FAMILY: EventType[] = ['game', 'scrimmage', 'tournament_game'];
+export const isGameFamily = (t: EventType) => GAME_FAMILY.includes(t);
+export function eventTypeLabel(t: EventType): string {
+  return EVENT_TYPES.find(e => e.value === t)?.label ?? t;
+}
+
+// Filter chips: All · Games (game/scrimmage/tournament) · Practices · Events.
+export type ScheduleFilter = 'all' | 'games' | 'practices' | 'events';
+export function matchesFilter(t: EventType, f: ScheduleFilter): boolean {
+  if (f === 'all') return true;
+  if (f === 'games') return isGameFamily(t);
+  if (f === 'practices') return t === 'practice';
+  return t === 'team_event';
+}
+
+export type ScheduleEvent = {
+  id: string;
+  teamId: string;
+  eventType: EventType;
+  title: string | null;
+  localDate: string;         // YYYY-MM-DD
+  startsAt: string | null;   // ISO instant
+  endsAt: string | null;
+  arrivalAt: string | null;
+  eventTimezone: string;
+  timeStatus: TimeStatus;
+  homeAway: 'home' | 'away' | null;
+  venueName: string | null;
+  venueAddress: string | null;
+  status: EventStatus;
+  uniform: string | null;
+  notes: string | null;
+  tournamentId: string | null;
+  seasonId: string | null;
+  version: number;
+  // From the linked game (game-family only):
+  gameId: string | null;
+  opponent: string | null;
+  teamScore: number | null;
+  opponentScore: number | null;
+};
+
+export async function loadEvents(teamId: string): Promise<ScheduleEvent[]> {
+  const { data, error } = await supabase
+    .from('events')
+    .select('id, team_id, event_type, title, local_date, starts_at, ends_at, arrival_at, event_timezone, time_status, home_away, venue_name, venue_address, status, uniform, notes, tournament_id, season_id, version, games(id, opponent, team_score, opponent_score, deleted_at)')
+    .eq('team_id', teamId)
+    .order('local_date', { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r: any) => {
+    const games = Array.isArray(r.games) ? r.games : r.games ? [r.games] : [];
+    const g = games.find((x: any) => !x.deleted_at) ?? games[0] ?? null;
+    return {
+      id: r.id, teamId: r.team_id, eventType: r.event_type, title: r.title,
+      localDate: r.local_date, startsAt: r.starts_at, endsAt: r.ends_at, arrivalAt: r.arrival_at,
+      eventTimezone: r.event_timezone, timeStatus: r.time_status, homeAway: r.home_away,
+      venueName: r.venue_name, venueAddress: r.venue_address, status: r.status,
+      uniform: r.uniform, notes: r.notes, tournamentId: r.tournament_id, seasonId: r.season_id,
+      version: r.version,
+      gameId: g?.id ?? null, opponent: g?.opponent ?? null,
+      teamScore: g?.team_score ?? null, opponentScore: g?.opponent_score ?? null,
+    };
+  });
+}
+
+export type EventInput = {
+  id?: string;               // present = edit
+  teamId: string;
+  eventType: EventType;
+  title: string | null;
+  localDate: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  arrivalAt: string | null;
+  eventTimezone: string;
+  timeStatus: TimeStatus;
+  homeAway: 'home' | 'away' | null;
+  venueName: string | null;
+  venueAddress: string | null;
+  uniform: string | null;
+  notes: string | null;
+  tournamentId: string | null;
+  seasonId: string | null;
+  opponent: string | null;   // game-family
+  version?: number;          // edit: optimistic concurrency
+  gameId?: string | null;    // edit: existing linked game
+};
+
+// Insert or update an event (+ its linked game for game-family types).
+export async function saveEvent(input: EventInput, userId: string): Promise<void> {
+  const gameFamily = isGameFamily(input.eventType);
+  const title = input.title?.trim()
+    || (gameFamily && input.opponent?.trim() ? `vs ${input.opponent.trim()}` : null)
+    || (input.eventType === 'practice' ? 'Practice' : null);
+
+  const row: any = {
+    team_id: input.teamId, event_type: input.eventType, title,
+    local_date: input.localDate, starts_at: input.startsAt, ends_at: input.endsAt, arrival_at: input.arrivalAt,
+    event_timezone: input.eventTimezone, time_status: input.timeStatus,
+    home_away: gameFamily ? input.homeAway : null,
+    venue_name: input.venueName?.trim() || null, venue_address: input.venueAddress?.trim() || null,
+    uniform: input.uniform?.trim() || null, notes: input.notes?.trim() || null,
+    tournament_id: input.tournamentId, season_id: input.seasonId,
+  };
+
+  let eventId = input.id;
+  if (eventId) {
+    const { data, error } = await supabase.from('events').update(row).eq('id', eventId).eq('version', input.version ?? -1).select('id');
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error('This event was just changed by someone else — refresh and try again.');
+  } else {
+    row.created_by = userId;
+    const { data, error } = await supabase.from('events').insert(row).select('id').single();
+    if (error) throw error;
+    eventId = (data as any).id;
+  }
+
+  // Game-family → keep the linked games row in sync (film/tagging/stats attach here).
+  if (gameFamily) {
+    const gameRow: any = {
+      team_id: input.teamId, title: title ?? 'Game', opponent: input.opponent?.trim() || null,
+      game_date: input.localDate, season_id: input.seasonId, tournament_id: input.tournamentId, event_id: eventId,
+    };
+    if (input.gameId) {
+      const { error } = await supabase.from('games').update(gameRow).eq('id', input.gameId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from('games').insert(gameRow);
+      if (error) throw error;
+    }
+  }
+}
+
+// Cancel, don't delete — keeps history + notifications explainable.
+export async function cancelEvent(eventId: string): Promise<void> {
+  const { error } = await supabase.from('events').update({ status: 'canceled' }).eq('id', eventId);
+  if (error) throw error;
+}
