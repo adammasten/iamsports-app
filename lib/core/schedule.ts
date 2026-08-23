@@ -180,6 +180,40 @@ export async function setRsvp(eventId: string, playerId: string, status: RsvpSta
   if (error) throw error;
 }
 
+// ── Calendar export (.ics) ─────────────────────────────────────────────
+// Build a standard iCalendar file from upcoming events. Timed events export with
+// their UTC instant (calendars render in the viewer's local tz); TBD/all-day
+// events export as all-day. Game-family events get a 2-hour reminder.
+function icsStamp(iso: string): string { return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); }
+function icsEsc(s: string): string { return s.replace(/\\/g, '\\\\').replace(/([,;])/g, '\\$1').replace(/\n/g, '\\n'); }
+
+export function buildICS(events: ScheduleEvent[], calName: string): string {
+  const now = icsStamp(new Date().toISOString());
+  const out: string[] = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//IamSports//Schedule//EN', 'CALSCALE:GREGORIAN', `X-WR-CALNAME:${icsEsc(calName)} Schedule`];
+  for (const ev of events) {
+    if (ev.status === 'canceled') continue;
+    const summary = ev.title || (isGameFamily(ev.eventType) && ev.opponent ? `vs ${ev.opponent}` : eventTypeLabel(ev.eventType));
+    out.push('BEGIN:VEVENT', `UID:${ev.id}@iamsports`, `DTSTAMP:${now}`);
+    if (ev.timeStatus === 'confirmed' && ev.startsAt) {
+      out.push(`DTSTART:${icsStamp(ev.startsAt)}`);
+      if (ev.endsAt) out.push(`DTEND:${icsStamp(ev.endsAt)}`);
+    } else {
+      out.push(`DTSTART;VALUE=DATE:${ev.localDate.replace(/-/g, '')}`);
+    }
+    out.push(`SUMMARY:${icsEsc(`${calName}: ${summary}`)}`);
+    const loc = [ev.venueName, ev.venueAddress].filter(Boolean).join(', ');
+    if (loc) out.push(`LOCATION:${icsEsc(loc)}`);
+    const desc = [ev.uniform ? `Uniform: ${ev.uniform}` : '', ev.notes ?? ''].filter(Boolean).join('\n');
+    if (desc) out.push(`DESCRIPTION:${icsEsc(desc)}`);
+    if (isGameFamily(ev.eventType) && ev.timeStatus === 'confirmed' && ev.startsAt) {
+      out.push('BEGIN:VALARM', 'TRIGGER:-PT2H', 'ACTION:DISPLAY', `DESCRIPTION:${icsEsc(summary)}`, 'END:VALARM');
+    }
+    out.push('END:VEVENT');
+  }
+  out.push('END:VCALENDAR');
+  return out.join('\r\n');
+}
+
 // Active-roster player count per team (denominator for the "no answer" headcount).
 export async function loadRosterCounts(teamIds: string[]): Promise<Record<string, number>> {
   if (teamIds.length === 0) return {};

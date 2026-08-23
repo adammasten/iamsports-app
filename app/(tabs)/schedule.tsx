@@ -4,7 +4,7 @@
 // Dark-themed to match the app. Slice 1 of the scheduling build.
 import { COACH_ROLES, useTeamContext } from '@/context';
 import {
-  eventTypeLabel, isGameFamily, loadAttendance, loadEvents, loadRosterCounts, matchesFilter, setRsvp,
+  buildICS, eventTypeLabel, isGameFamily, loadAttendance, loadEvents, loadRosterCounts, matchesFilter, setRsvp,
   type Attendance, type RsvpStatus, type ScheduleEvent, type ScheduleFilter,
 } from '@/lib/core/schedule';
 import type { UserKidRow } from '@/context';
@@ -93,6 +93,19 @@ export default function ScheduleScreen() {
     return { upcoming: up, past: pa };
   }, [events, filter, today]);
 
+  // Web: download the upcoming schedule as a .ics the coach/parent can add to
+  // Apple/Google/Outlook. (Native "add to device calendar" is a fast-follow.)
+  function exportCalendar() {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const upcomingAll = events.filter(e => e.localDate >= today && e.status !== 'canceled');
+    if (upcomingAll.length === 0) return;
+    const ics = buildICS(upcomingAll, scope === 'all' ? 'My teams' : (activeTeam?.name ?? 'Team'));
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'iamsports-schedule.ics';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }
+
   function openEvent(ev: ScheduleEvent) {
     if (isCoach) { router.push({ pathname: '/edit-event', params: { event: JSON.stringify(ev) } }); return; }
     if (isGameFamily(ev.eventType) && ev.gameId) router.push({ pathname: '/box-score', params: { gameId: ev.gameId, title: ev.title ?? 'Game' } });
@@ -132,11 +145,18 @@ export default function ScheduleScreen() {
         ))}
       </ScrollView>
 
-      {isCoach && scope === 'team' ? (
-        <TouchableOpacity style={styles.addRow} onPress={() => router.push('/edit-event')}>
-          <Text style={styles.addTxt}>＋ Add event</Text>
-        </TouchableOpacity>
-      ) : null}
+      <View style={styles.actionsRow}>
+        {isCoach && scope === 'team' ? (
+          <TouchableOpacity style={[styles.addRow, { flex: 1 }]} onPress={() => router.push('/edit-event')}>
+            <Text style={styles.addTxt}>＋ Add event</Text>
+          </TouchableOpacity>
+        ) : null}
+        {Platform.OS === 'web' ? (
+          <TouchableOpacity style={styles.exportBtn} onPress={exportCalendar}>
+            <Text style={styles.exportTxt}>⤓ Export to calendar</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
 
       {loading ? (
         <ActivityIndicator color="#ff6a2c" style={{ marginTop: 30 }} />
@@ -239,8 +259,11 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
   chipTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
   chipTxtOn: { color: '#fff' },
-  addRow: { borderWidth: 1, borderColor: '#534AB7', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 13, alignItems: 'center', marginBottom: 14 },
+  actionsRow: { flexDirection: 'row', gap: 8, marginBottom: 14, alignItems: 'stretch' },
+  addRow: { borderWidth: 1, borderColor: '#534AB7', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
   addTxt: { color: '#8b7bff', fontSize: 15, fontWeight: '800' },
+  exportBtn: { borderWidth: 1, borderColor: '#25333f', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+  exportTxt: { color: '#9db0bd', fontSize: 13.5, fontWeight: '700' },
   section: { color: '#62707e', fontSize: 12, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 14, marginBottom: 8 },
   scopeRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   scopeBtn: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
