@@ -7,7 +7,7 @@ import { pickAndUploadTeamLogo } from '@/lib/native/team-logo-upload';
 import { supabase } from '@/supabase';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { loadTeamWall, type WallPost } from '@/lib/core/homeFeed';
 import { sportHasPlaybook } from '@/lib/core/playbook/capability';
 import { showContentActions } from '../moderationActions';
@@ -30,6 +30,12 @@ const SORT_OPTIONS: DropdownOption[] = [
   { value: 'az', label: 'A–Z' },
 ];
 
+// RN's Alert.alert is a no-op on web, so error toasts must fall back to window.alert.
+function webAlert(title: string, message: string) {
+  if (Platform.OS === 'web') { if (typeof window !== 'undefined') window.alert(message); return; }
+  Alert.alert(title, message);
+}
+
 // The feed's data model (WallPost) and the merge/dedup logic live in
 // @/lib/core/homeFeed — the SINGLE source of truth, shared with the app-home
 // screen (select-team.tsx). This screen only renders + filters the result.
@@ -38,6 +44,26 @@ export default function HomeScreen() {
   const { activeTeam, activeRole, userId, refreshTeams } = useTeamContext();
   const isCoach = !!activeRole && COACH_ROLES.includes(activeRole);
   const [logoBusy, setLogoBusy] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [savingName, setSavingName] = useState(false);
+
+  // Rename the team (coach-only; RLS enforces is_team_coach). Lives here on the
+  // team wall so it's reachable on BOTH web and phone — the Roster-tab rename is
+  // native-only (no Roster in the web nav). refreshTeams() updates the shared
+  // context so the new name shows everywhere, not just this header.
+  async function saveTeamName() {
+    if (!activeTeam) return;
+    const name = nameInput.trim();
+    if (!name) { webAlert('Team name', 'Enter a team name.'); return; }
+    if (name === activeTeam.name) { setEditingName(false); return; }
+    setSavingName(true);
+    const { error } = await supabase.from('teams').update({ name }).eq('id', activeTeam.id);
+    setSavingName(false);
+    if (error) { webAlert('Rename team', error.message); return; }
+    setEditingName(false);
+    await refreshTeams();
+  }
 
   async function changeLogo() {
     if (!activeTeam) return;
@@ -248,13 +274,42 @@ export default function HomeScreen() {
             ) : (
               <TeamLogo logoPath={activeTeam.logo_path} name={activeTeam.name} size={40} />
             )}
-            <Text style={[styles.heading, { flexShrink: 1, marginBottom: 0 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{activeTeam.name}</Text>
-            {/* On web the mobile header is hidden, so Permissions lives beside the team name. */}
-            {Platform.OS === 'web' && isCoach ? (
-              <TouchableOpacity style={styles.headingAction} onPress={() => router.push({ pathname: '/team-permissions', params: { teamId: activeTeam.id } })}>
-                <Text style={styles.manageBtn}>Permissions</Text>
-              </TouchableOpacity>
-            ) : null}
+            {editingName ? (
+              <>
+                <TextInput
+                  style={styles.nameInput}
+                  value={nameInput}
+                  onChangeText={setNameInput}
+                  autoFocus
+                  editable={!savingName}
+                  placeholder="Team name"
+                  placeholderTextColor="#666"
+                  onSubmitEditing={saveTeamName}
+                  returnKeyType="done"
+                />
+                <TouchableOpacity onPress={saveTeamName} disabled={savingName} hitSlop={8}>
+                  <Text style={styles.renameSave}>{savingName ? 'Saving…' : 'Save'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setEditingName(false)} disabled={savingName} hitSlop={8}>
+                  <Text style={styles.renameCancel}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={[styles.heading, { flexShrink: 1, marginBottom: 0 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{activeTeam.name}</Text>
+                {isCoach ? (
+                  <TouchableOpacity onPress={() => { setNameInput(activeTeam.name); setEditingName(true); }} hitSlop={8}>
+                    <Text style={styles.renameBtn}>✎ Rename</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {/* On web the mobile header is hidden, so Permissions lives beside the team name. */}
+                {Platform.OS === 'web' && isCoach ? (
+                  <TouchableOpacity style={styles.headingAction} onPress={() => router.push({ pathname: '/team-permissions', params: { teamId: activeTeam.id } })}>
+                    <Text style={styles.manageBtn}>Permissions</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </>
+            )}
           </View>
 
           <Text style={styles.subtitle}>The published team feed — watch-only. Make &amp; post from the Film Room.</Text>
@@ -347,6 +402,10 @@ const styles = StyleSheet.create({
   heading: { color: '#fff', fontSize: 28, fontWeight: '700', letterSpacing: -0.3 },
   teamHeadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headingAction: { marginLeft: 'auto' },
+  renameBtn: { color: '#8b83e0', fontSize: 14, fontWeight: '700' },
+  nameInput: { flex: 1, color: '#fff', fontSize: 22, fontWeight: '700', borderBottomWidth: 1, borderBottomColor: '#534AB7', paddingVertical: 4, paddingHorizontal: 2 },
+  renameSave: { color: '#1D9E75', fontSize: 14, fontWeight: '800' },
+  renameCancel: { color: '#9aa0aa', fontSize: 14, fontWeight: '700' },
   subtitle: { color: '#888', fontSize: 13, lineHeight: 18, textAlign: 'center', marginBottom: 14 },
   playbookBtn: { alignSelf: 'center', backgroundColor: '#534AB7', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, marginBottom: 14 },
   playbookBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
