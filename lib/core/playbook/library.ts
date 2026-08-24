@@ -14,6 +14,7 @@ export async function fetchLibraryPlays(userId: string): Promise<LibraryPlay[]> 
     .from('library_plays')
     .select('id, name, doc, tags')
     .eq('owner_user_id', userId)
+    .eq('curated', false)   // curated Vault seeds live only in The Vault, not your library
     .order('name');
   if (error) throw error;
   return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, doc: (r.doc ?? null) as PlayDoc | null, tags: Array.isArray(r.tags) ? r.tags : [] }));

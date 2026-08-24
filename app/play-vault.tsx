@@ -1,30 +1,30 @@
-// The Vault — the community play bank. Browse plays other coaches published, filter
-// by sport + tag, watch them animate, and grab any into your own playbook (a deep
-// copy of the diagram; film never travels). Reachable from My Playbook.
+// The Vault — the community play bank. Deliberately mirrors My Playbook's layout
+// (same header, grid, and cards) so it feels like one product; the only difference
+// is the action: "Add to Playbook" copies the diagram into your own library.
 import PlayPlayer from '@/components/PlayPlayer';
 import { useTeamContext } from '@/context';
 import { fetchVaultPlays, grabPlay, type VaultPlay } from '@/lib/core/playbook/library';
+import { tagColor } from '@/lib/core/playbook/tags';
 import { goBackOrHome } from '@/lib/nav';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebTopNav from './components/WebTopNav';
 
 function webSafeAlert(title: string, message: string) {
   if (Platform.OS === 'web') { if (typeof window !== 'undefined') window.alert(message); return; }
   Alert.alert(title, message);
 }
-const SPORT_LABEL: Record<string, string> = { basketball: '🏀 Basketball', football: '🏈 Football / Flag' };
+const SPORT_LABEL: Record<string, string> = { basketball: 'Basketball', football: 'Football / Flag' };
 
 export default function PlayVault() {
-  const insets = useSafeAreaInsets();
   const { userId } = useTeamContext();
   const [plays, setPlays] = useState<VaultPlay[]>([]);
   const [loading, setLoading] = useState(true);
   const [sport, setSport] = useState<string | null>(null);
   const [tag, setTag] = useState<string | null>(null);
   const [grabbing, setGrabbing] = useState<string | null>(null);
+  const [done, setDone] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setLoading(true);
@@ -45,25 +45,22 @@ export default function PlayVault() {
     try {
       await grabPlay(p.id);
       setPlays(prev => prev.map(x => x.id === p.id ? { ...x, saveCount: x.saveCount + 1 } : x));
-      webSafeAlert('Added to your playbook', `“${p.name}” is now in My Playbook — yours to edit and run.`);
+      setDone(d => ({ ...d, [p.id]: true }));
     } catch (e: any) { webSafeAlert('Add to playbook', e?.message ?? 'Could not add the play.'); }
     finally { setGrabbing(null); }
   }
 
   return (
-    <View style={styles.root}>
+    <View style={styles.screen}>
       {Platform.OS === 'web' ? <WebTopNav /> : null}
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12, paddingHorizontal: 16, paddingBottom: 44, maxWidth: Platform.OS === 'web' ? 1120 : 760, width: '100%', alignSelf: 'center' }}>
-        {Platform.OS !== 'web' ? <Pressable onPress={goBackOrHome} hitSlop={8} style={{ paddingVertical: 4 }}><Text style={styles.back}>← Back</Text></Pressable> : null}
-        <View style={styles.hero}>
-          <Text style={styles.heroKicker}>IAMSPORTS · PLAYBOOK</Text>
-          <Text style={styles.heroTitle}>THE VAULT</Text>
-          <View style={styles.heroRule} />
-          <Text style={styles.heroTagline}>A community bank of plays from coaches everywhere. Grab any into your playbook — the diagram's yours to run.</Text>
-        </View>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Pressable onPress={goBackOrHome} hitSlop={8} style={styles.back}><Text style={styles.backTxt}>← Back</Text></Pressable>
+        <Text style={styles.eyebrow}>THE VAULT</Text>
+        <Text style={styles.h1}>Community plays</Text>
+        <Text style={styles.sub}>Plays from coaches everywhere. Watch any one, then add it to your playbook — the diagram becomes yours to edit and run.</Text>
 
         {sports.length > 1 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }} style={{ marginBottom: 6 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={styles.chipRowInner}>
             <Pressable onPress={() => { setSport(null); setTag(null); }} style={[styles.chip, !sport && styles.chipOn]}><Text style={[styles.chipTxt, !sport && styles.chipTxtOn]}>All sports</Text></Pressable>
             {sports.map(s => (
               <Pressable key={s} onPress={() => { setSport(s); setTag(null); }} style={[styles.chip, sport === s && styles.chipOn]}><Text style={[styles.chipTxt, sport === s && styles.chipTxtOn]}>{SPORT_LABEL[s] ?? s}</Text></Pressable>
@@ -71,69 +68,72 @@ export default function PlayVault() {
           </ScrollView>
         ) : null}
         {tags.length > 0 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7, paddingBottom: 4 }} style={{ marginBottom: 8 }}>
-            <Pressable onPress={() => setTag(null)} style={[styles.tag, !tag && styles.tagOn]}><Text style={[styles.tagTxt, !tag && styles.tagTxtOn]}>All</Text></Pressable>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={styles.chipRowInner}>
+            <Pressable onPress={() => setTag(null)} style={[styles.chip, !tag && styles.chipOn]}><Text style={[styles.chipTxt, !tag && styles.chipTxtOn]}>All</Text></Pressable>
             {tags.map(t => (
-              <Pressable key={t} onPress={() => setTag(tag === t ? null : t)} style={[styles.tag, tag === t && styles.tagOn]}><Text style={[styles.tagTxt, tag === t && styles.tagTxtOn]}>{t}</Text></Pressable>
+              <Pressable key={t} onPress={() => setTag(tag === t ? null : t)} style={[styles.chip, tag === t && styles.chipOn]}>
+                <View style={[styles.tagDot, { backgroundColor: tagColor(t) }]} /><Text style={[styles.chipTxt, tag === t && styles.chipTxtOn]}>{t}</Text>
+              </Pressable>
             ))}
           </ScrollView>
         ) : null}
 
         {loading ? <ActivityIndicator color="#ff6a2c" style={{ marginTop: 30 }} /> :
-          filtered.length === 0 ? <Text style={styles.empty}>No plays here yet.</Text> :
+          filtered.length === 0 ? <Text style={styles.empty}>No plays here yet.</Text> : (
           <View style={styles.grid}>
-          {filtered.map(p => (
-            <View key={p.id} style={[styles.card, styles.gridCell]}>
-              <View style={styles.cardHead}>
-                <Text style={styles.name} numberOfLines={1}>{p.name}</Text>
-                {p.saveCount > 0 ? <Text style={styles.saves}>★ {p.saveCount}</Text> : null}
+            {filtered.map(p => (
+              <View key={p.id} style={[styles.card, styles.gridCard]}>
+                <View style={styles.nameRow}>
+                  <Text style={styles.name} numberOfLines={1}>{p.doc?.name ?? p.name}</Text>
+                  {p.saveCount > 0 ? <Text style={styles.saves}>★ {p.saveCount}</Text> : null}
+                </View>
+                {p.tags.length > 0 ? (
+                  <View style={styles.tagWrap}>
+                    {p.tags.map(t => (
+                      <Pressable key={t} onPress={() => setTag(t)} style={[styles.tagChip, { borderColor: tagColor(t) }]}>
+                        <View style={[styles.tagDot, { backgroundColor: tagColor(t) }]} /><Text style={styles.tagChipTxt}>{t}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+                {p.doc ? <PlayPlayer doc={p.doc} /> : <Text style={styles.empty}>Couldn’t load.</Text>}
+                <Pressable style={[styles.grabBtn, (grabbing === p.id || done[p.id]) && { opacity: 0.6 }]} disabled={grabbing === p.id || done[p.id]} onPress={() => grab(p)}>
+                  <Text style={styles.grabTxt}>{done[p.id] ? '✓ Added to your playbook' : grabbing === p.id ? 'Adding…' : '＋ Add to Playbook'}</Text>
+                </Pressable>
               </View>
-              {p.tags.length ? (
-                <View style={styles.tagRow}>{p.tags.slice(0, 6).map(t => <Text key={t} style={styles.pill}>{t}</Text>)}</View>
-              ) : null}
-              <View style={styles.playerWrap}>{p.doc ? <PlayPlayer doc={p.doc} /> : <Text style={styles.empty}>Couldn’t load.</Text>}</View>
-              <Pressable style={[styles.grabBtn, grabbing === p.id && { opacity: 0.5 }]} disabled={grabbing === p.id} onPress={() => grab(p)}>
-                <Text style={styles.grabTxt}>{grabbing === p.id ? 'Adding…' : '＋ Add to Playbook'}</Text>
-              </Pressable>
-            </View>
-          ))}
-          </View>}
-
-        <Pressable onPress={() => router.push('/my-playbook')} style={{ paddingVertical: 18, alignItems: 'center' }}>
-          <Text style={styles.link}>← Back to My Playbook</Text>
-        </Pressable>
+            ))}
+          </View>
+        )}
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0b1725' },
-  back: { color: '#ff6a2c', fontSize: 14, fontWeight: '700' },
-  hero: { paddingTop: Platform.OS === 'web' ? 22 : 8, paddingBottom: 22, marginBottom: 18, borderBottomWidth: 1, borderBottomColor: '#25333f' },
-  heroKicker: { color: '#62707e', fontSize: 11.5, fontWeight: '800', letterSpacing: 3, marginBottom: 8 },
-  heroTitle: { color: '#f4f7fa', fontSize: Platform.OS === 'web' ? 64 : 44, fontWeight: '900', letterSpacing: 1, lineHeight: Platform.OS === 'web' ? 62 : 44 },
-  heroRule: { height: 5, width: 96, backgroundColor: '#ff6a2c', borderRadius: 3, marginTop: 16, marginBottom: 16 },
-  heroTagline: { color: '#9db0bd', fontSize: 15.5, lineHeight: 22, maxWidth: 480 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
-  gridCell: Platform.OS === 'web' ? { width: '31.5%', marginBottom: 0 } : { width: '100%' },
-  chip: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
-  chipOn: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
+  screen: { flex: 1, backgroundColor: '#0e1b2c' },
+  content: { padding: 20, maxWidth: 1120, width: '100%', alignSelf: 'center' },
+  back: { alignSelf: 'flex-start', paddingVertical: 6 },
+  backTxt: { color: '#ff6a2c', fontSize: 14, fontWeight: '700' },
+  eyebrow: { color: '#ff6a2c', fontSize: 12, fontWeight: '800', letterSpacing: 1.6, marginTop: 8 },
+  h1: { color: '#f1f4f6', fontSize: 28, fontWeight: '800', letterSpacing: -0.5, marginTop: 6 },
+  sub: { color: '#9db0bd', fontSize: 14, marginTop: 6, marginBottom: 14, lineHeight: 20 },
+  chipRow: { marginBottom: 6 },
+  chipRowInner: { gap: 8, paddingRight: 20, paddingVertical: 4 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  chipOn: { backgroundColor: '#ff6a2c', borderColor: '#ff6a2c' },
   chipTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
-  chipTxtOn: { color: '#fff' },
-  tag: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 8, paddingHorizontal: 11, paddingVertical: 6 },
-  tagOn: { backgroundColor: '#1b2c44', borderColor: '#8b7bff' },
-  tagTxt: { color: '#9db0bd', fontSize: 12.5, fontWeight: '700' },
-  tagTxtOn: { color: '#c8bcff' },
-  empty: { color: '#8b96a3', fontSize: 15, textAlign: 'center', marginTop: 30 },
-  card: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 14 },
-  cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  name: { color: '#f1f4f6', fontSize: 17, fontWeight: '800', flex: 1 },
+  chipTxtOn: { color: '#160b02' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
+  gridCard: { flexBasis: '30%', flexGrow: 1, minWidth: 250, maxWidth: 380, marginTop: 0 },
+  card: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 16, padding: 16, gap: 10 },
+  nameRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  name: { color: '#f1f4f6', fontSize: 16, fontWeight: '700', flex: 1 },
   saves: { color: '#e0a52e', fontSize: 13, fontWeight: '800', marginLeft: 8 },
-  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
-  pill: { color: '#b9c6ff', fontSize: 11, fontWeight: '700', backgroundColor: '#1b2c44', borderColor: '#3a4d78', borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  playerWrap: { marginTop: 12, borderRadius: 10, overflow: 'hidden' },
-  grabBtn: { backgroundColor: '#ff6a2c', borderRadius: 11, paddingVertical: 13, alignItems: 'center', marginTop: 12 },
-  grabTxt: { color: '#160b02', fontSize: 15, fontWeight: '800' },
-  link: { color: '#8b7bff', fontSize: 14, fontWeight: '700' },
+  tagWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  tagChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  tagDot: { width: 7, height: 7, borderRadius: 4 },
+  tagChipTxt: { color: '#c7d2dc', fontSize: 11.5, fontWeight: '700' },
+  grabBtn: { backgroundColor: '#ff6a2c', borderRadius: 11, paddingVertical: 12, alignItems: 'center', marginTop: 2 },
+  grabTxt: { color: '#160b02', fontSize: 14, fontWeight: '800' },
+  empty: { color: '#8b96a3', fontSize: 15, textAlign: 'center', marginTop: 30 },
 });
