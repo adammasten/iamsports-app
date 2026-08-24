@@ -269,6 +269,9 @@ export default function ScheduleScreen() {
             <Text style={styles.addTxt}>＋ Add event</Text>
           </TouchableOpacity>
         ) : null}
+        <TouchableOpacity style={styles.exportBtn} onPress={() => router.push('/messages')}>
+          <Text style={styles.exportTxt}>💬 Messages</Text>
+        </TouchableOpacity>
         {Platform.OS === 'web' ? (
           <TouchableOpacity style={styles.exportBtn} onPress={exportCalendar}>
             <Text style={styles.exportTxt}>⤓ Export</Text>
