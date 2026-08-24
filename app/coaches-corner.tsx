@@ -2,6 +2,7 @@ import { COACH_ROLES, useTeamContext } from '@/context';
 import { filterModerated, loadModeration } from '@/lib/core/moderation';
 import { supabase } from '@/supabase';
 import { showContentActions } from './moderationActions';
+import { confirm } from '@/lib/confirm';
 import { router, useFocusEffect } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -256,6 +257,21 @@ export default function CoachesCornerScreen() {
     });
   }
 
+  // Web-safe remove (long-press + the Alert action sheet don't fire on web, so
+  // the board shows an explicit Remove button). Every post here is from a team the
+  // viewer coaches (RLS), so removal always applies.
+  async function removePost(item: Post) {
+    const ok = await confirm({ title: 'Remove from Coaches’ Corner?', message: 'This takes it off the board. It stays in your Film Room.', confirmText: 'Remove', destructive: true });
+    if (!ok) return;
+    const { data, error } = await supabase.from('shares').delete().eq('id', item.shareId).select('id');
+    if (error || !data || data.length === 0) {
+      const msg = error?.message ?? 'You can only remove content on a team you coach.';
+      if (Platform.OS === 'web') { if (typeof window !== 'undefined') window.alert(msg); } else Alert.alert('Couldn’t remove', msg);
+      return;
+    }
+    loadCoachesBoard();
+  }
+
   if (!isCoachAnywhere) {
     return (
       <View style={[styles.container, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
@@ -319,6 +335,10 @@ export default function CoachesCornerScreen() {
                     <Text style={styles.lockLink}>Forgot PIN? Set a new one</Text>
                   </TouchableOpacity>
                 ) : null}
+                {/* Never trap someone at the lock — always a way out. */}
+                <TouchableOpacity onPress={goBackOrHome} style={{ marginTop: 18 }}>
+                  <Text style={styles.lockLink}>← Go back</Text>
+                </TouchableOpacity>
               </>
             )}
           </View>
@@ -384,6 +404,7 @@ export default function CoachesCornerScreen() {
                     content={{ id: item.contentId, kind: isReel ? 'reel' : 'game', title: item.title, meta: `${item.teamName} · ${relativeTime(item.createdAt)}`, typeLabel, thumbnailKey: item.thumbnailPath }}
                     onOpen={() => openShared(item)}
                     onLongPress={() => showContentActions({ contentType: item.contentType, contentId: item.contentId, shareId: item.shareId, sharedByUserId: item.sharedByUserId, canRemove: true, onChanged: loadCoachesBoard })}
+                    actions={[{ icon: 'trash-outline', label: 'Remove', onPress: () => removePost(item) }]}
                     showPlayOnThumb
                     onPlay={() => openShared(item)}
                     note={item.note ? { text: item.note } : undefined}
