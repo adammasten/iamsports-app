@@ -83,14 +83,14 @@ export default function MyPlaybook() {
         <Text style={styles.h1}>Your plays</Text>
         <Text style={styles.sub}>Your personal library — these belong to you, across every team you coach. Attach any of them to a team to teach it.</Text>
 
-        <Pressable style={styles.newBtn} onPress={() => router.push('/playbook-edit')}>
-          <Text style={styles.newBtnTxt}>＋  New play</Text>
-        </Pressable>
-
-        <Pressable style={styles.vaultBanner} onPress={() => router.push('/play-vault')}>
-          <Text style={styles.vaultBannerTitle}>🔒  The Vault</Text>
-          <Text style={styles.vaultBannerSub}>Browse plays from coaches everywhere — grab any into your playbook  →</Text>
-        </Pressable>
+        <View style={styles.topActions}>
+          <Pressable style={styles.newBtn} onPress={() => router.push('/playbook-edit')}>
+            <Text style={styles.newBtnTxt}>＋  New play</Text>
+          </Pressable>
+          <Pressable style={styles.vaultBtn} onPress={() => router.push('/play-vault')}>
+            <Text style={styles.vaultBtnTxt}>THE VAULT  →</Text>
+          </Pressable>
+        </View>
 
         {plays && sportsPresent.length > 1 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow} contentContainerStyle={styles.chipRowInner}>
@@ -199,9 +199,9 @@ const styles = StyleSheet.create({
   sub: { color: '#9db0bd', fontSize: 14, marginTop: 6, marginBottom: 14, lineHeight: 20 },
   newBtn: { alignSelf: 'flex-start', backgroundColor: '#ff6a2c', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10, marginBottom: 10 },
   newBtnTxt: { color: '#160b02', fontSize: 14, fontWeight: '800' },
-  vaultBanner: { backgroundColor: '#1b2c44', borderColor: '#534AB7', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 14 },
-  vaultBannerTitle: { color: '#c8bcff', fontSize: 16, fontWeight: '800' },
-  vaultBannerSub: { color: '#9db0bd', fontSize: 13, marginTop: 3, fontWeight: '600' },
+  topActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 12 },
+  vaultBtn: { borderWidth: 1.5, borderColor: '#ff6a2c', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 9 },
+  vaultBtnTxt: { color: '#ff6a2c', fontSize: 14, fontWeight: '900', letterSpacing: 1 },
   chipRow: { marginBottom: 6 },
   chipRowInner: { gap: 8, paddingRight: 20, paddingVertical: 4 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },

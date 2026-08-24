@@ -55,8 +55,12 @@ export default function PlayVault() {
       {Platform.OS === 'web' ? <WebTopNav /> : null}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12, paddingHorizontal: 16, paddingBottom: 44, maxWidth: 760, width: '100%', alignSelf: 'center' }}>
         {Platform.OS !== 'web' ? <Pressable onPress={goBackOrHome} hitSlop={8} style={{ paddingVertical: 4 }}><Text style={styles.back}>← Back</Text></Pressable> : null}
-        <Text style={styles.title}>🔒 The Vault</Text>
-        <Text style={styles.subtitle}>A community bank of plays from coaches everywhere. Grab any into your playbook — the diagram's yours to edit.</Text>
+        <View style={styles.hero}>
+          <Text style={styles.heroKicker}>IAMSPORTS · PLAYBOOK</Text>
+          <Text style={styles.heroTitle}>THE VAULT</Text>
+          <View style={styles.heroRule} />
+          <Text style={styles.heroTagline}>A community bank of plays from coaches everywhere. Grab any into your playbook — the diagram's yours to run.</Text>
+        </View>
 
         {sports.length > 1 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }} style={{ marginBottom: 6 }}>
@@ -77,8 +81,9 @@ export default function PlayVault() {
 
         {loading ? <ActivityIndicator color="#ff6a2c" style={{ marginTop: 30 }} /> :
           filtered.length === 0 ? <Text style={styles.empty}>No plays here yet.</Text> :
-          filtered.map(p => (
-            <View key={p.id} style={styles.card}>
+          <View style={styles.grid}>
+          {filtered.map(p => (
+            <View key={p.id} style={[styles.card, styles.gridCell]}>
               <View style={styles.cardHead}>
                 <Text style={styles.name} numberOfLines={1}>{p.name}</Text>
                 {p.saveCount > 0 ? <Text style={styles.saves}>★ {p.saveCount}</Text> : null}
@@ -92,6 +97,7 @@ export default function PlayVault() {
               </Pressable>
             </View>
           ))}
+          </View>}
 
         <Pressable onPress={() => router.push('/my-playbook')} style={{ paddingVertical: 18, alignItems: 'center' }}>
           <Text style={styles.link}>← Back to My Playbook</Text>
@@ -102,10 +108,15 @@ export default function PlayVault() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0e1b2c' },
+  root: { flex: 1, backgroundColor: '#0b1725' },
   back: { color: '#ff6a2c', fontSize: 14, fontWeight: '700' },
-  title: { color: '#f1f4f6', fontSize: 26, fontWeight: '800', marginTop: 4 },
-  subtitle: { color: '#9db0bd', fontSize: 14, marginTop: 4, marginBottom: 14, lineHeight: 20 },
+  hero: { paddingTop: Platform.OS === 'web' ? 22 : 8, paddingBottom: 22, marginBottom: 18, borderBottomWidth: 1, borderBottomColor: '#25333f' },
+  heroKicker: { color: '#62707e', fontSize: 11.5, fontWeight: '800', letterSpacing: 3, marginBottom: 8 },
+  heroTitle: { color: '#f4f7fa', fontSize: Platform.OS === 'web' ? 64 : 44, fontWeight: '900', letterSpacing: 1, lineHeight: Platform.OS === 'web' ? 62 : 44 },
+  heroRule: { height: 5, width: 96, backgroundColor: '#ff6a2c', borderRadius: 3, marginTop: 16, marginBottom: 16 },
+  heroTagline: { color: '#9db0bd', fontSize: 15.5, lineHeight: 22, maxWidth: 480 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
+  gridCell: Platform.OS === 'web' ? { width: '31.5%', minWidth: 240, marginBottom: 0 } : { width: '100%' },
   chip: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   chipOn: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
   chipTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
