@@ -87,7 +87,7 @@ export const FB_GUN_TRIPS_VERTS: PlayDoc = {
   sport: 'football',
   surface: 'field',
   name: 'Gun Trips Right — 4 Verticals',
-  note: 'Base pass concept. Four receivers release vertical off the snap; QB reads the slot (Y) up the seam first, then works outside to Z. RB checks protection, then leaks to the flat as the checkdown.',
+  note: 'Base pass concept. Four receivers release vertical off the snap; QB reads the slot (Y) up the seam first, then works outside to Z. RB checks protection, then leaks to the flat as the checkdown. Watch the throw: the ball leads Y and arrives in stride while he’s still running up the seam.',
   tokens: [
     // Offensive line (on the LOS) — plain circles.
     { id: 'lt', kind: 'offense', pos: { x: 0.36, y: 0.60 } },
@@ -106,13 +106,15 @@ export const FB_GUN_TRIPS_VERTS: PlayDoc = {
     { id: 'ball', kind: 'ball', pos: { x: 0.50, y: 0.63 } },
   ],
   actions: [
-    // Off the snap (beat 1): four verticals + the RB to the flat.
+    // Beat 1 — snap: outside verticals clear; Y starts up the seam; RB to the flat.
     { id: 'rx',  type: 'move', fromToken: 'x', step: 1, path: [{ x: 0.10, y: 0.595 }, { x: 0.09, y: 0.10 }] },
-    { id: 'ry',  type: 'move', fromToken: 'y', step: 1, path: [{ x: 0.71, y: 0.585 }, { x: 0.69, y: 0.10 }] },
     { id: 'rh',  type: 'move', fromToken: 'h', step: 1, path: [{ x: 0.80, y: 0.585 }, { x: 0.80, y: 0.12 }] },
     { id: 'rz',  type: 'move', fromToken: 'z', step: 1, path: [{ x: 0.90, y: 0.595 }, { x: 0.91, y: 0.10 }] },
     { id: 'rrb', type: 'move', fromToken: 'rb', step: 1, path: [{ x: 0.41, y: 0.80 }, { x: 0.19, y: 0.70 }] },
-    // Beat 2: the throw up the seam to Y.
+    { id: 'ry',  type: 'move', fromToken: 'y', step: 1, path: [{ x: 0.71, y: 0.585 }, { x: 0.70, y: 0.34 }] },
+    // Beat 2 — the QB throws WHILE Y keeps running up the seam. Smart passing tracks
+    // Y's live position, so the ball leads him and arrives in stride.
+    { id: 'ry2',  type: 'move', fromToken: 'y', step: 2, path: [{ x: 0.70, y: 0.34 }, { x: 0.69, y: 0.10 }] },
     { id: 'pass', type: 'pass', fromToken: 'qb', toToken: 'y', step: 2, path: [{ x: 0.50, y: 0.74 }, { x: 0.69, y: 0.12 }] },
   ],
 };

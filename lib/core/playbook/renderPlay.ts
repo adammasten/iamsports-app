@@ -183,7 +183,20 @@ export function tokenPosAt(doc: PlayDoc, tokenId: string, t: number): Vec {
     const slot = slotOf.get(beats[i]) ?? 0;
     const start = slot / total, end = (slot + 1) / total;
     if (t <= start) return;
-    pos = pointAlong(a.path, Math.min(1, (t - start) / (end - start)));
+    const localT = Math.min(1, (t - start) / (end - start));
+    // Smart passing: a pass/shot aimed at a receiver token tracks that receiver's
+    // LIVE position over the throw window — so the ball leads a moving target and
+    // lands on him, instead of at a fixed drawn endpoint. (fromToken/toToken are
+    // players, so this never recurses back into the ball.) Falls back to the drawn
+    // path for a loose pass with no named receiver.
+    if (tokenId === 'ball' && (a.type === 'pass' || a.type === 'shot') && a.toToken && a.toToken !== 'ball'
+        && doc.tokens.some(x => x.id === a.toToken)) {
+      const from = a.fromToken ? tokenPosAt(doc, a.fromToken, start) : (a.path[0] ?? pos);
+      const to = tokenPosAt(doc, a.toToken, end);
+      pos = { x: from.x + (to.x - from.x) * localT, y: from.y + (to.y - from.y) * localT };
+    } else {
+      pos = pointAlong(a.path, localT);
+    }
   });
   return pos;
 }

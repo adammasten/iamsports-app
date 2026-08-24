@@ -157,7 +157,16 @@ export default function PlayEditor({ editId }: { editId?: string }) {
     if (drawFor && drawPts.length >= 1) {
       const start = tokens.find(t => t.id === drawFor)!.pos;
       const path = drawPts.length >= 2 ? drawPts : [start, drawPts[0]];
-      setActions(a => [...a, { id: 'a' + a.length, type: drawType, fromToken: drawFor!, path, step: currentBeat }]);
+      // Smart passing: aim a pass/shot at the nearest receiver to where the throw
+      // ends, so the ball tracks that player's live position (leads a moving target).
+      let toToken: string | undefined;
+      if (drawType === 'pass' || drawType === 'shot') {
+        const end = path[path.length - 1];
+        let best: string | null = null, bestD = 0.1;
+        tokens.forEach(t => { if (t.id === drawFor || t.kind === 'ball') return; const d = Math.hypot(t.pos.x - end.x, t.pos.y - end.y); if (d < bestD) { bestD = d; best = t.id; } });
+        if (best) toToken = best;
+      }
+      setActions(a => [...a, { id: 'a' + a.length, type: drawType, fromToken: drawFor!, ...(toToken ? { toToken } : {}), path, step: currentBeat }]);
     }
     setDrawFor(null); setDrawPts([]);
   }
