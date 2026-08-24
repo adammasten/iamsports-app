@@ -151,6 +151,18 @@ export default function ScheduleScreen() {
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   }
 
+  // Subscribe to the LIVE team calendar (webcal://) — one tap, updates forever.
+  // Distinct from Export (a one-time snapshot) and native Add (writes once).
+  async function subscribeCalendar() {
+    if (!activeTeam) return;
+    try {
+      const { data } = await supabase.from('teams').select('ics_token').eq('id', activeTeam.id).maybeSingle();
+      const token = (data as any)?.ics_token;
+      if (!token) { Alert.alert('Calendar', 'The team feed isn’t ready yet — try again in a moment.'); return; }
+      Linking.openURL(`webcal://wscfpkaltajnrhiusoze.supabase.co/functions/v1/team-calendar?token=${token}`);
+    } catch (e: any) { Alert.alert('Calendar', e?.message ?? 'Could not open the calendar.'); }
+  }
+
   // Native: add the upcoming schedule straight into the phone's calendar app.
   async function addToDeviceCalendar() {
     const upcomingAll = events.filter(e => e.localDate >= today && e.status !== 'canceled');
@@ -271,6 +283,9 @@ export default function ScheduleScreen() {
         ) : null}
         <TouchableOpacity style={styles.exportBtn} onPress={() => router.push('/messages')}>
           <Text style={styles.exportTxt}>💬 Messages</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.exportBtn} onPress={subscribeCalendar}>
+          <Text style={styles.exportTxt}>📅 Subscribe</Text>
         </TouchableOpacity>
         {Platform.OS === 'web' ? (
           <TouchableOpacity style={styles.exportBtn} onPress={exportCalendar}>
@@ -418,7 +433,7 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
   chipTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
   chipTxtOn: { color: '#fff' },
-  actionsRow: { flexDirection: 'row', gap: 8, marginBottom: 14, alignItems: 'stretch' },
+  actionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14, alignItems: 'stretch' },
   addRow: { borderWidth: 1, borderColor: '#534AB7', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
   addTxt: { color: '#8b7bff', fontSize: 15, fontWeight: '800' },
   exportBtn: { borderWidth: 1, borderColor: '#25333f', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
