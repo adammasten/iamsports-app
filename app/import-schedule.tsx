@@ -6,10 +6,20 @@ import { saveEvent } from '@/lib/core/schedule';
 import { goBackOrHome } from '@/lib/nav';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const DEVICE_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return 'America/Chicago'; } })();
+
+// RN's Alert.alert is a no-op on web; these show a real message / navigate there.
+function webSafeAlert(title: string, message: string) {
+  if (Platform.OS === 'web') { if (typeof window !== 'undefined') window.alert(message); return; }
+  Alert.alert(title, message);
+}
+function alertThenGo(message: string, go: () => void) {
+  if (Platform.OS === 'web') { if (typeof window !== 'undefined') window.alert(message); go(); return; }
+  Alert.alert('Done', message, [{ text: 'OK', onPress: go }]);
+}
 
 type Row = { date: string; time: string; opponent: string; location: string; home: boolean };
 
@@ -49,9 +59,9 @@ export default function ImportScheduleScreen() {
   const remove = (i: number) => setRows(rs => rs.filter((_, j) => j !== i));
 
   async function confirm() {
-    if (!userId || !teamId) { Alert.alert('Import', 'Not ready.'); return; }
+    if (!userId || !teamId) { webSafeAlert('Import', 'Not ready.'); return; }
     const valid = rows.filter(r => validYMD(r.date));
-    if (valid.length === 0) { Alert.alert('Import', 'No rows have a valid date (YYYY-MM-DD). Fix the dates or cancel.'); return; }
+    if (valid.length === 0) { webSafeAlert('Import', 'No rows have a valid date (YYYY-MM-DD). Fix the dates or cancel.'); return; }
     setSaving(true);
     let ok = 0;
     try {
@@ -69,12 +79,12 @@ export default function ImportScheduleScreen() {
         ok++;
       }
     } catch (e: any) {
-      Alert.alert('Import', `Added ${ok} of ${valid.length}, then hit an error: ${e?.message ?? e}`);
+      webSafeAlert('Import', `Added ${ok} of ${valid.length}, then hit an error: ${e?.message ?? e}`);
       setSaving(false);
       return;
     }
     setSaving(false);
-    Alert.alert('Added', `${ok} game${ok === 1 ? '' : 's'} added to the schedule.`, [{ text: 'OK', onPress: () => router.replace('/schedule') }]);
+    alertThenGo(`${ok} game${ok === 1 ? '' : 's'} added to the schedule.`, () => router.replace('/schedule'));
   }
 
   return (

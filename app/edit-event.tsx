@@ -43,6 +43,29 @@ function fmtTimeInput(iso: string | null, tz: string): string {
   if (!iso) return '';
   try { return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz }); } catch { return ''; }
 }
+// Confirm success, THEN navigate — cross-platform. React Native's Alert button
+// callbacks DO NOT fire on web, so an onPress-based router.back() there silently
+// never runs (which let a coach re-submit and create duplicate series). On web we
+// use window.alert (blocking) then navigate directly; native keeps the Alert.
+function alertThenGo(message: string, go: () => void) {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined') window.alert(message);
+    go();
+    return;
+  }
+  Alert.alert('Done', message, [{ text: 'OK', onPress: go }]);
+}
+
+// A plain alert that actually shows on web too (RN's Alert.alert is a no-op there,
+// which silently swallowed validation + error messages).
+function webSafeAlert(title: string, message: string) {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined') window.alert(message);
+    return;
+  }
+  Alert.alert(title, message);
+}
+
 // "Sat, Aug 30" from a YYYY-MM-DD (parsed as local, no UTC shift).
 function fmtNice(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number);
@@ -121,21 +144,21 @@ export default function EditEventScreen() {
     try {
       await sendTeamPush({ teamId: activeTeam.id, title: pushTitle, body: pushBody, data: { url: '/schedule' } });
     } catch (e: any) {
-      Alert.alert('Notify team', e?.message ?? 'Could not send the notification.');
+      webSafeAlert('Notify team', e?.message ?? 'Could not send the notification.');
     }
   }
 
   async function onSave() {
-    if (!activeTeam || !userId) { Alert.alert('Not ready', 'No team selected.'); return; }
-    if (!validYMD(date)) { Alert.alert('Date', 'Enter the date as YYYY-MM-DD.'); return; }
+    if (!activeTeam || !userId) { webSafeAlert('Not ready', 'No team selected.'); return; }
+    if (!validYMD(date)) { webSafeAlert('Date', 'Enter the date as YYYY-MM-DD.'); return; }
     let st: { h: number; m: number } | null = null, at: { h: number; m: number } | null = null, et: { h: number; m: number } | null = null;
     if (!timeTbd) {
       st = parseTime(startTime);
-      if (startTime.trim() && !st) { Alert.alert('Start time', 'Try a time like “6:00 PM”.'); return; }
+      if (startTime.trim() && !st) { webSafeAlert('Start time', 'Try a time like “6:00 PM”.'); return; }
       at = parseTime(arrivalTime);
-      if (arrivalTime.trim() && !at) { Alert.alert('Arrival time', 'Try a time like “5:30 PM”.'); return; }
+      if (arrivalTime.trim() && !at) { webSafeAlert('Arrival time', 'Try a time like “5:30 PM”.'); return; }
       et = parseTime(endTime);
-      if (endTime.trim() && !et) { Alert.alert('End time', 'Try a time like “8:00 PM”.'); return; }
+      if (endTime.trim() && !et) { webSafeAlert('End time', 'Try a time like “8:00 PM”.'); return; }
     }
     const startsAt = st ? combine(date, st) : null;
     const arrivalAt = at ? combine(date, at) : null;
@@ -145,9 +168,9 @@ export default function EditEventScreen() {
 
     // Recurring practice / team event → materialize the whole series server-side.
     if (canRepeat && repeat) {
-      if (weekdays.size === 0) { Alert.alert('Repeat', 'Pick at least one day of the week.'); return; }
-      if (!validYMD(untilDate)) { Alert.alert('Repeat until', 'Enter the end date as YYYY-MM-DD.'); return; }
-      if (untilDate.trim() < date.trim()) { Alert.alert('Repeat until', 'The end date must be on or after the first date.'); return; }
+      if (weekdays.size === 0) { webSafeAlert('Repeat', 'Pick at least one day of the week.'); return; }
+      if (!validYMD(untilDate)) { webSafeAlert('Repeat until', 'Enter the end date as YYYY-MM-DD.'); return; }
+      if (untilDate.trim() < date.trim()) { webSafeAlert('Repeat until', 'The end date must be on or after the first date.'); return; }
       setSaving(true);
       try {
         const n = await createPracticeSeries({
@@ -156,9 +179,9 @@ export default function EditEventScreen() {
           startTime: hhmm(st), arrivalTime: hhmm(at), endTime: hhmm(et),
           eventTimezone: tz, venueName, venueAddress, uniform, notes,
         });
-        Alert.alert('Recurring event', `Added ${n} occurrence${n === 1 ? '' : 's'}.`, [{ text: 'OK', onPress: () => router.back() }]);
+        alertThenGo(`Added ${n} occurrence${n === 1 ? '' : 's'}.`, () => router.back());
       } catch (e: any) {
-        Alert.alert('Recurring event', e?.message ?? String(e));
+        webSafeAlert('Recurring event', e?.message ?? String(e));
       } finally { setSaving(false); }
       return;
     }
@@ -172,9 +195,9 @@ export default function EditEventScreen() {
           startTime: hhmm(st), arrivalTime: hhmm(at), endTime: hhmm(et), eventTimezone: tz,
           venueName, venueAddress, uniform, notes,
         });
-        Alert.alert('Series updated', `Updated ${n} occurrence${n === 1 ? '' : 's'}.`, [{ text: 'OK', onPress: () => router.back() }]);
+        alertThenGo(`Updated ${n} occurrence${n === 1 ? '' : 's'}.`, () => router.back());
       } catch (e: any) {
-        Alert.alert('Update series', e?.message ?? String(e));
+        webSafeAlert('Update series', e?.message ?? String(e));
       } finally { setSaving(false); }
       return;
     }
@@ -200,7 +223,7 @@ export default function EditEventScreen() {
       if (editing) await offerChangeNotify('update');
       router.back();
     } catch (e: any) {
-      Alert.alert('Save event', e?.message ?? String(e));
+      webSafeAlert('Save event', e?.message ?? String(e));
     } finally { setSaving(false); }
   }
 
@@ -208,8 +231,8 @@ export default function EditEventScreen() {
     if (!existing?.seriesId) return;
     const from = existing.localDate;
     const run = async () => {
-      try { const n = await cancelSeries(existing.seriesId!, from); Alert.alert('Series canceled', `Canceled ${n} upcoming occurrence${n === 1 ? '' : 's'}.`, [{ text: 'OK', onPress: () => router.back() }]); }
-      catch (e: any) { Alert.alert('Cancel series', e?.message ?? String(e)); }
+      try { const n = await cancelSeries(existing.seriesId!, from); alertThenGo(`Canceled ${n} upcoming occurrence${n === 1 ? '' : 's'}.`, () => router.back()); }
+      catch (e: any) { webSafeAlert('Cancel series', e?.message ?? String(e)); }
     };
     if (Platform.OS === 'web') { if (window.confirm('Cancel this and every later occurrence in the series? Past ones stay as history.')) run(); return; }
     Alert.alert('Cancel series', 'Cancel this and every later occurrence? Past ones stay as history.', [
@@ -220,7 +243,7 @@ export default function EditEventScreen() {
   async function doCancel() {
     if (!existing) return;
     try { await cancelEvent(existing.id); await offerChangeNotify('canceled'); router.back(); }
-    catch (e: any) { Alert.alert('Cancel event', e?.message ?? String(e)); }
+    catch (e: any) { webSafeAlert('Cancel event', e?.message ?? String(e)); }
   }
   async function onCancelEvent() {
     if (!existing) return;
