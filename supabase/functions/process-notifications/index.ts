@@ -63,10 +63,16 @@ function copyFor(kind: string, ev: any): { title: string; body: string } | null 
     default: return null;
   }
 }
-function dedupeKey(ob: any, uid: string): string {
-  if (ob.change_kind === "snack_reminder") return `${ob.event_id}:${uid}:push:snack`;
-  if (ob.change_kind === "completed") return `${ob.event_id}:${uid}:push:completed`;
-  return `${ob.event_id}:${uid}:push:${ob.change_kind}:${ob.event_version ?? 0}`;
+function dedupeKey(ob: any, uid: string, channel = "push"): string {
+  if (ob.change_kind === "snack_reminder") return `${ob.event_id}:${uid}:${channel}:snack`;
+  if (ob.change_kind === "completed") return `${ob.event_id}:${uid}:${channel}:completed`;
+  return `${ob.event_id}:${uid}:${channel}:${ob.change_kind}:${ob.event_version ?? 0}`;
+}
+// SMS is reserved for "gravity" — schedule disruptions + the snack reminder. Never
+// chat, announcements, new-event, or the film prompt (those are push-only).
+const SMS_KINDS = new Set(["canceled", "time_changed", "venue_changed", "snack_reminder"]);
+function smsBody(copy: { title: string; body: string }): string {
+  return `${copy.title} ${copy.body}\nReply STOP to opt out.`;
 }
 
 async function expandEvent(ob: any, now: Date) {
@@ -84,14 +90,30 @@ async function expandEvent(ob: any, now: Date) {
   else if (ob.change_kind === "completed") { const { data } = await svc.rpc("resolve_team_coaches", { p_team_id: (ev as any).team_id }); ids = (data ?? []).map((r: any) => r.recipient_user_id); }
   else { const { data } = await svc.rpc("resolve_event_recipients", { p_event_id: ob.event_id, p_exclude: ob.actor_user_id }); ids = (data ?? []).map((r: any) => r.recipient_user_id); }
   if (!ids.length) return;
-  const tz = await tzMap(ids);
+
+  // SMS goes to the eligible subset (verified + consented + not opted out) for
+  // gravity changes only. Targeted rows (snack) → just the claimer's phone.
+  let sms: { uid: string; phone: string }[] = [];
+  if (SMS_KINDS.has(ob.change_kind)) {
+    if (ob.target_user_id) { const { data } = await svc.rpc("sms_target", { p_user_id: ob.target_user_id }); sms = (data ?? []).map((r: any) => ({ uid: r.recipient_user_id, phone: r.phone })); }
+    else { const { data } = await svc.rpc("resolve_event_sms_recipients", { p_event_id: ob.event_id, p_exclude: ob.actor_user_id }); sms = (data ?? []).map((r: any) => ({ uid: r.recipient_user_id, phone: r.phone })); }
+  }
+
+  const tz = await tzMap(Array.from(new Set([...ids, ...sms.map(s => s.uid)])));
   const dataUrl = ob.change_kind === "completed" ? "/upload" : "/schedule";
-  const rows = ids.map((uid: string) => ({
+  const startsAt = (evx as any).starts_at ?? null;
+  const rows: any[] = ids.map((uid: string) => ({
     event_id: ob.event_id, team_id: ob.team_id, recipient_user_id: uid, channel: "push", change_kind: ob.change_kind,
-    dedupe_key: dedupeKey(ob, uid), status: "queued",
-    send_after: computeSendAfter(ob.change_kind, (evx as any).starts_at ?? null, tz.get(uid) || DEFAULT_TZ, now),
+    dedupe_key: dedupeKey(ob, uid, "push"), status: "queued",
+    send_after: computeSendAfter(ob.change_kind, startsAt, tz.get(uid) || DEFAULT_TZ, now),
     title: copy.title, body: copy.body, data: { url: dataUrl, event_id: ob.event_id },
   }));
+  for (const s of sms) rows.push({
+    event_id: ob.event_id, team_id: ob.team_id, recipient_user_id: s.uid, channel: "sms", change_kind: ob.change_kind,
+    dedupe_key: dedupeKey(ob, s.uid, "sms"), status: "queued",
+    send_after: computeSendAfter(ob.change_kind, startsAt, tz.get(s.uid) || DEFAULT_TZ, now),
+    title: null, body: smsBody(copy), data: { phone: s.phone, event_id: ob.event_id },
+  });
   await svc.from("schedule_notifications").upsert(rows, { onConflict: "dedupe_key", ignoreDuplicates: true });
 }
 
@@ -157,8 +179,42 @@ async function dispatchPush(): Promise<number> {
   return claimed.length;
 }
 
+// Send due queued SMS rows via Twilio. Env-gated: with no Twilio secrets yet, due
+// rows are marked skipped:no_sms_config (harmless) rather than rotting in the queue.
+// Claimed 'sent' on submit; the sms-status webhook later moves to delivered/failed.
+async function dispatchSms(): Promise<number> {
+  const now = new Date().toISOString();
+  const { data: candidates } = await svc.from("schedule_notifications").select("id, body, data").eq("status", "queued").eq("channel", "sms").lte("send_after", now).limit(300);
+  if (!candidates || candidates.length === 0) return 0;
+  const SID = Deno.env.get("TWILIO_ACCOUNT_SID"), TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN"), FROM = Deno.env.get("TWILIO_FROM");
+  const ids = candidates.map((c) => c.id);
+  if (!SID || !TOKEN || !FROM) {
+    await svc.from("schedule_notifications").update({ status: "skipped", error_code: "no_sms_config", status_updated_at: now }).in("id", ids).eq("status", "queued");
+    return 0;
+  }
+  const { data: claimed } = await svc.from("schedule_notifications").update({ status: "sent", sent_at: now, status_updated_at: now }).in("id", ids).eq("status", "queued").select("id, body, data");
+  if (!claimed || claimed.length === 0) return 0;
+  const auth = "Basic " + btoa(`${SID}:${TOKEN}`);
+  const statusCb = `${SUPA_URL}/functions/v1/sms-status`;
+  for (const row of claimed) {
+    const to = (row.data as any)?.phone;
+    if (!to) { await svc.from("schedule_notifications").update({ status: "failed", error_code: "no_phone" }).eq("id", row.id); continue; }
+    try {
+      const params = new URLSearchParams();
+      if (FROM.startsWith("MG")) params.set("MessagingServiceSid", FROM); else params.set("From", FROM);
+      params.set("To", to); params.set("Body", row.body); params.set("StatusCallback", statusCb);
+      const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${SID}/Messages.json`, { method: "POST", headers: { Authorization: auth, "Content-Type": "application/x-www-form-urlencoded" }, body: params.toString() });
+      const out = await res.json().catch(() => null);
+      if (res.ok && out?.sid) await svc.from("schedule_notifications").update({ provider_message_id: out.sid, status_updated_at: new Date().toISOString() }).eq("id", row.id);
+      else await svc.from("schedule_notifications").update({ status: "failed", error_code: out?.code ? String(out.code) : "twilio_error", status_updated_at: new Date().toISOString() }).eq("id", row.id);
+    } catch { await svc.from("schedule_notifications").update({ status: "failed", error_code: "twilio_exception", status_updated_at: new Date().toISOString() }).eq("id", row.id); }
+  }
+  return claimed.length;
+}
+
 Deno.serve(async () => {
   const expanded = await expand();
   const dispatched = await dispatchPush();
-  return new Response(JSON.stringify({ expanded, dispatched }), { headers: { "content-type": "application/json" } });
+  const sms = await dispatchSms();
+  return new Response(JSON.stringify({ expanded, dispatched, sms }), { headers: { "content-type": "application/json" } });
 });
