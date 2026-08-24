@@ -1,4 +1,4 @@
-import { useTeamContext } from '@/context';
+import { COACH_ROLES, useTeamContext } from '@/context';
 import { TeamLogo } from '@/components/team-logo';
 import { SkeletonCards } from '@/components/skeleton-cards';
 import { DebugPanel } from '@/components/debug-panel';
@@ -67,6 +67,7 @@ export function initials(name: string): string {
 export default function SelectTeamScreen() {
   const insets = useSafeAreaInsets();
   const { userId, userTeams, userKids, setActiveTeam, refreshTeams, refreshKids } = useTeamContext();
+  const isCoachAnywhere = userTeams.some(t => COACH_ROLES.includes(t.role));
   const [showNewTeam, setShowNewTeam] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamSport, setNewTeamSport] = useState('Basketball');
@@ -557,9 +558,11 @@ export default function SelectTeamScreen() {
         <TouchableOpacity style={styles.navItem} onPress={() => router.push('/my-work')}>
           <Ionicons name="folder-outline" size={24} color="#888" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/coaches-corner')}>
-          <Ionicons name="clipboard-outline" size={24} color="#888" />
-        </TouchableOpacity>
+        {isCoachAnywhere ? (
+          <TouchableOpacity style={styles.navItem} onPress={() => router.push('/coaches-corner')}>
+            <Ionicons name="clipboard-outline" size={24} color="#888" />
+          </TouchableOpacity>
+        ) : null}
       </View>
       ) : null}
     </View>

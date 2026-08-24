@@ -74,6 +74,9 @@ const PIN_ACCESSORY_ID = 'coachesPinAccessory';
 export default function CoachesCornerScreen() {
   const insets = useSafeAreaInsets();
   const { userTeams } = useTeamContext();
+  // Coaches' Corner is for coaches only. Content is already RLS-locked to coaches,
+  // but non-coaches shouldn't even see the door.
+  const isCoachAnywhere = useMemo(() => userTeams.some(t => COACH_ROLES.includes(t.role)), [userTeams]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -251,6 +254,24 @@ export default function CoachesCornerScreen() {
         ...mod,
       },
     });
+  }
+
+  if (!isCoachAnywhere) {
+    return (
+      <View style={[styles.container, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
+        {Platform.OS === 'web' ? <WebTopNav /> : null}
+        <View style={Platform.OS === 'web' ? [styles.pageWrap, styles.pageWrapWeb] : styles.pageWrap}>
+          <View style={styles.lockWrap}>
+            <Text style={styles.lockIcon}>🔒</Text>
+            <Text style={styles.lockTitle}>Coaches only</Text>
+            <Text style={styles.lockSub}>Coaches’ Corner is for team coaches. If you coach a team, ask an admin to add you as a coach on that team’s roster.</Text>
+            <TouchableOpacity style={styles.lockBtn} onPress={goBackOrHome}>
+              <Text style={styles.lockBtnText}>Go back</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
   }
 
   if (pinGate !== 'ok') {

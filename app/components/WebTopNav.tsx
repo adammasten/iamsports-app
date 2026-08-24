@@ -7,6 +7,7 @@
 // (account → sign out, upload) fall off-screen unreachable, so below ~760px it
 // collapses to a wordmark + a ☰ menu holding every destination + action.
 // Rendered ONLY on web (callers gate on Platform.OS); native keeps its bottom tabs.
+import { COACH_ROLES, useTeamContext } from '@/context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
@@ -31,6 +32,10 @@ export default function WebTopNav({ active, unseenNotif = 0 }: { active?: Dest; 
   const narrow = width < 760;
   const [menuOpen, setMenuOpen] = useState(false);
   const go = (href: string) => { setMenuOpen(false); router.push(href as any); };
+  // Coaches' Corner is coaches-only — hide it from everyone else.
+  const { userTeams } = useTeamContext();
+  const isCoach = userTeams.some(t => COACH_ROLES.includes(t.role));
+  const links = LINKS.filter(l => l.key !== 'coaches' || isCoach);
 
   // ── Phone-width browser: wordmark + hamburger menu ──
   if (narrow) {
@@ -48,7 +53,7 @@ export default function WebTopNav({ active, unseenNotif = 0 }: { active?: Dest; 
         <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
           <Pressable style={styles.backdrop} onPress={() => setMenuOpen(false)}>
             <Pressable style={styles.panel} onPress={() => {}}>
-              {LINKS.map(l => (
+              {links.map(l => (
                 <Pressable key={l.key} onPress={() => go(l.href)} style={styles.item}>
                   <Text style={[styles.itemTxt, active === l.key && styles.itemTxtOn]}>{l.label}</Text>
                 </Pressable>
@@ -86,7 +91,7 @@ export default function WebTopNav({ active, unseenNotif = 0 }: { active?: Dest; 
       </Pressable>
 
       <View style={styles.links}>
-        {LINKS.map(l => {
+        {links.map(l => {
           const on = active === l.key;
           return (
             <Pressable key={l.key} onPress={() => router.push(l.href as any)} style={styles.link}>
