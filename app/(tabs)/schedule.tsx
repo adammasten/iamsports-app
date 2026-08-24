@@ -9,6 +9,7 @@ import {
 } from '@/lib/core/schedule';
 import type { UserKidRow } from '@/context';
 import { sendTeamPush } from '@/lib/core/push';
+import { claimSnack, loadSnacks, releaseSnack, type SnackSignup } from '@/lib/core/snacks';
 import { addEventsToDeviceCalendar } from '@/lib/native/deviceCalendar';
 import { supabase } from '@/supabase';
 import * as ImagePicker from 'expo-image-picker';
@@ -87,6 +88,7 @@ export default function ScheduleScreen() {
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [rosterCounts, setRosterCounts] = useState<Record<string, number>>({});
+  const [snacks, setSnacks] = useState<Map<string, SnackSignup>>(new Map());
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ScheduleFilter>('all');
   const [scope, setScope] = useState<'team' | 'all'>('team');
@@ -115,7 +117,9 @@ export default function ScheduleScreen() {
       const [evs, rc, tourns] = await Promise.all([loadEvents(scopeTeamIds), loadRosterCounts(scopeTeamIds), loadTournaments(scopeTeamIds)]);
       setEvents(evs); setRosterCounts(rc);
       setTournamentNames(new Map(tourns.map(t => [t.id, t.name])));
-      setAttendance(await loadAttendance(evs.map(e => e.id)));
+      const eventIds = evs.map(e => e.id);
+      const [att, snk] = await Promise.all([loadAttendance(eventIds), loadSnacks(eventIds)]);
+      setAttendance(att); setSnacks(snk);
     } catch { setEvents([]); setAttendance([]); }
     setLoading(false);
   }, [scopeTeamIds]);
@@ -126,6 +130,18 @@ export default function ScheduleScreen() {
     if (!userId) return;
     setAttendance(prev => [...prev.filter(a => !(a.eventId === eventId && a.playerId === playerId)), { eventId, playerId, status }]);
     try { await setRsvp(eventId, playerId, status, userId); } catch { load(); }
+  }, [userId, load]);
+
+  // Snack sign-up (optimistic): claim or release the single snack slot per event.
+  const onClaimSnack = useCallback(async (ev: ScheduleEvent) => {
+    if (!userId) return;
+    setSnacks(prev => new Map(prev).set(ev.id, { eventId: ev.id, claimedByUserId: userId, claimerName: 'You' }));
+    try { await claimSnack(ev.id, ev.teamId, userId); } catch (e: any) { Alert.alert('Snacks', e?.message ?? 'Could not sign up.'); load(); }
+  }, [userId, load]);
+  const onReleaseSnack = useCallback(async (ev: ScheduleEvent) => {
+    if (!userId) return;
+    setSnacks(prev => { const n = new Map(prev); n.delete(ev.id); return n; });
+    try { await releaseSnack(ev.id, userId); } catch (e: any) { Alert.alert('Snacks', e?.message ?? 'Could not update.'); load(); }
   }, [userId, load]);
 
   const today = todayYMD();
@@ -225,7 +241,9 @@ export default function ScheduleScreen() {
       teamLabel={scope === 'all' ? teamNameById.get(ev.teamId) : undefined}
       isCoach={isCoach} myKids={canRsvp ? userKids.filter(k => k.team_id === ev.teamId) : []}
       att={attendance.filter(a => a.eventId === ev.id)} rosterCount={rosterCounts[ev.teamId] ?? 0} onRsvp={onRsvp}
-      onRemind={isCoach && canRsvp ? () => remindRsvp(ev) : undefined} />
+      onRemind={isCoach && canRsvp ? () => remindRsvp(ev) : undefined}
+      snack={snacks.get(ev.id)} myUserId={userId}
+      onClaimSnack={canRsvp ? () => onClaimSnack(ev) : undefined} onReleaseSnack={() => onReleaseSnack(ev)} />
   );
 
   const renderAgenda = (list: ScheduleEvent[], canRsvp: boolean, dir: 'asc' | 'desc') =>
@@ -353,11 +371,13 @@ function TournamentGroup({ name, range, count, collapsed, onToggle, onAddGame, c
 
 const RSVP_ON: Record<RsvpStatus, object> = { going: { backgroundColor: '#3ec46d', borderColor: '#3ec46d' }, maybe: { backgroundColor: '#e0a52e', borderColor: '#e0a52e' }, out: { backgroundColor: '#c0392b', borderColor: '#c0392b' } };
 
-function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsvp, onRsvp, onRemind }: {
+function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsvp, onRsvp, onRemind, snack, myUserId, onClaimSnack, onReleaseSnack }: {
   ev: ScheduleEvent; onPress: () => void; teamLabel?: string; isCoach: boolean;
   myKids: UserKidRow[]; att: Attendance[]; rosterCount: number; canRsvp: boolean;
   onRsvp: (eventId: string, playerId: string, status: RsvpStatus) => void;
   onRemind?: () => void;
+  snack?: SnackSignup; myUserId: string | null;
+  onClaimSnack?: () => void; onReleaseSnack?: () => void;
 }) {
   const canceled = ev.status === 'canceled';
   const dir = !canceled ? mapsUrl(ev) : null;
@@ -390,6 +410,23 @@ function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsv
         <TouchableOpacity onPress={() => Linking.openURL(dir)} style={styles.dirPill} hitSlop={6}>
           <Text style={styles.dirTxt}>📍 Directions</Text>
         </TouchableOpacity>
+      ) : null}
+
+      {canRsvp && !canceled ? (
+        snack ? (
+          snack.claimedByUserId === myUserId ? (
+            <View style={styles.snackRow}>
+              <Text style={styles.snackMine}>🍎 You're bringing snacks</Text>
+              <TouchableOpacity onPress={onReleaseSnack} hitSlop={6}><Text style={styles.snackRelease}>Release</Text></TouchableOpacity>
+            </View>
+          ) : (
+            <Text style={styles.snackTaken}>🍎 Snacks: {snack.claimerName}</Text>
+          )
+        ) : onClaimSnack ? (
+          <TouchableOpacity onPress={onClaimSnack} style={styles.snackClaim} hitSlop={6}>
+            <Text style={styles.snackClaimTxt}>🍎 Snacks open — I'll bring them</Text>
+          </TouchableOpacity>
+        ) : null
       ) : null}
 
       {canRsvp && myKids.length > 0 ? (
@@ -468,6 +505,12 @@ const styles = StyleSheet.create({
   remindTxt: { color: '#8b7bff', fontSize: 12, fontWeight: '800' },
   dirPill: { alignSelf: 'flex-start', marginTop: 8, borderWidth: 1, borderColor: '#2a3a48', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
   dirTxt: { color: '#6ea8ff', fontSize: 12.5, fontWeight: '700' },
+  snackRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
+  snackMine: { color: '#3ec46d', fontSize: 13, fontWeight: '800' },
+  snackRelease: { color: '#8b96a3', fontSize: 12.5, fontWeight: '700' },
+  snackTaken: { color: '#9db0bd', fontSize: 13, fontWeight: '600', marginTop: 8 },
+  snackClaim: { alignSelf: 'flex-start', marginTop: 8, borderWidth: 1, borderStyle: 'dashed', borderColor: '#3ec46d', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  snackClaimTxt: { color: '#3ec46d', fontSize: 12.5, fontWeight: '800' },
   badge: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4, minWidth: 66, alignItems: 'center' },
   badgeTxt: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
   rowTitle: { color: '#f1f4f6', fontSize: 15.5, fontWeight: '700' },

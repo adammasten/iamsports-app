@@ -58,27 +58,41 @@ function copyFor(kind: string, ev: any): { title: string; body: string } | null 
     case "time_changed": return { title: `🕒 ${team}: schedule update`, body: `${label} is now ${when}` };
     case "venue_changed": return { title: `📍 ${team}: location update`, body: `${label}${ev.venue_name ? ` — ${ev.venue_name}` : ""}` };
     case "canceled": return { title: `❌ ${team}: canceled`, body: `${label} on ${fmtDate(ev.local_date)} is canceled` };
+    case "snack_reminder": return { title: `🍎 ${team}: you're on snacks`, body: `Bring snacks for ${label} — ${when}` };
+    case "completed": return { title: `🎥 ${team}: ${label} finished`, body: `Add your film from today — tap to upload.` };
     default: return null;
   }
+}
+function dedupeKey(ob: any, uid: string): string {
+  if (ob.change_kind === "snack_reminder") return `${ob.event_id}:${uid}:push:snack`;
+  if (ob.change_kind === "completed") return `${ob.event_id}:${uid}:push:completed`;
+  return `${ob.event_id}:${uid}:push:${ob.change_kind}:${ob.event_version ?? 0}`;
 }
 
 async function expandEvent(ob: any, now: Date) {
   const { data: ev } = await svc.from("events")
     .select("id, team_id, title, event_type, local_date, starts_at, event_timezone, venue_name, teams(name), games(opponent, deleted_at)")
     .eq("id", ob.event_id).maybeSingle();
-  const copy = ev ? copyFor(ob.change_kind, { ...ev, team_name: (ev as any).teams?.name, opponent: (Array.isArray((ev as any).games) ? (ev as any).games.find((g: any) => !g.deleted_at) : (ev as any).games)?.opponent ?? null }) : null;
+  if (!ev) return;
+  const evx = { ...ev, team_name: (ev as any).teams?.name, opponent: (Array.isArray((ev as any).games) ? (ev as any).games.find((g: any) => !g.deleted_at) : (ev as any).games)?.opponent ?? null };
+  const copy = copyFor(ob.change_kind, evx);
   if (!copy) return;
-  const { data: recips } = await svc.rpc("resolve_event_recipients", { p_event_id: ob.event_id, p_exclude: ob.actor_user_id });
-  const ids = (recips ?? []).map((r: any) => r.recipient_user_id);
+  // Recipients: a targeted reminder → just that user; a game-completed film prompt
+  // → coaches only; otherwise the whole team (minus the actor).
+  let ids: string[];
+  if (ob.target_user_id) ids = [ob.target_user_id];
+  else if (ob.change_kind === "completed") { const { data } = await svc.rpc("resolve_team_coaches", { p_team_id: (ev as any).team_id }); ids = (data ?? []).map((r: any) => r.recipient_user_id); }
+  else { const { data } = await svc.rpc("resolve_event_recipients", { p_event_id: ob.event_id, p_exclude: ob.actor_user_id }); ids = (data ?? []).map((r: any) => r.recipient_user_id); }
+  if (!ids.length) return;
   const tz = await tzMap(ids);
-  const rows = (recips ?? []).map((r: any) => {
-    const uid = r.recipient_user_id;
-    return { event_id: ob.event_id, team_id: ob.team_id, recipient_user_id: uid, channel: "push", change_kind: ob.change_kind,
-      dedupe_key: `${ob.event_id}:${uid}:push:${ob.change_kind}:${ob.event_version ?? 0}`, status: "queued",
-      send_after: computeSendAfter(ob.change_kind, (ev as any)?.starts_at ?? null, tz.get(uid) || DEFAULT_TZ, now),
-      title: copy.title, body: copy.body, data: { url: "/schedule", event_id: ob.event_id } };
-  });
-  if (rows.length) await svc.from("schedule_notifications").upsert(rows, { onConflict: "dedupe_key", ignoreDuplicates: true });
+  const dataUrl = ob.change_kind === "completed" ? "/upload" : "/schedule";
+  const rows = ids.map((uid: string) => ({
+    event_id: ob.event_id, team_id: ob.team_id, recipient_user_id: uid, channel: "push", change_kind: ob.change_kind,
+    dedupe_key: dedupeKey(ob, uid), status: "queued",
+    send_after: computeSendAfter(ob.change_kind, (evx as any).starts_at ?? null, tz.get(uid) || DEFAULT_TZ, now),
+    title: copy.title, body: copy.body, data: { url: dataUrl, event_id: ob.event_id },
+  }));
+  await svc.from("schedule_notifications").upsert(rows, { onConflict: "dedupe_key", ignoreDuplicates: true });
 }
 
 async function expandMessage(ob: any, now: Date) {
