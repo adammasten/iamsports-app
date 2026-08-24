@@ -94,6 +94,7 @@ export default function EditEventScreen() {
   const [uniform, setUniform] = useState(existing?.uniform ?? '');
   const [notes, setNotes] = useState(existing?.notes ?? '');
   const [title, setTitle] = useState(existing?.title ?? '');
+  const [snacksEnabled, setSnacksEnabled] = useState(existing?.snacksEnabled ?? true);
   const [saving, setSaving] = useState(false);
 
   // Recurrence (practice / team_event only, create-only). Weekday = 0..6 (Sun..Sat).
@@ -188,6 +189,7 @@ export default function EditEventScreen() {
         homeAway: gameFamily ? homeAway : null,
         venueName, venueAddress, uniform, notes,
         tournamentId: resolvedTournamentId, seasonId: existing?.seasonId ?? null,
+        snacksEnabled,
         opponent: gameFamily ? opponent : null,
         version: existing?.version, gameId: existing?.gameId ?? null,
       };
@@ -346,6 +348,12 @@ export default function EditEventScreen() {
 
       <Text style={styles.label}>Notes</Text>
       <TextInput style={[styles.input, { minHeight: 64, textAlignVertical: 'top' }]} value={notes} onChangeText={setNotes} placeholder="Anything else the team should know" placeholderTextColor="#666" multiline />
+
+      <View style={styles.rowBetween}>
+        <Text style={styles.label}>Snack sign-up</Text>
+        <Switch value={snacksEnabled} onValueChange={setSnacksEnabled} />
+      </View>
+      <Text style={styles.hint}>{snacksEnabled ? 'A family can sign up to bring snacks for this event.' : 'No snacks for this one — the sign-up is hidden.'}</Text>
 
       {editing && existing?.seriesId ? (
         <>

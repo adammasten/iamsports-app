@@ -53,6 +53,7 @@ export type ScheduleEvent = {
   tournamentId: string | null;
   seasonId: string | null;
   seriesId: string | null;
+  snacksEnabled: boolean;
   version: number;
   // From the linked game (game-family only):
   gameId: string | null;
@@ -66,7 +67,7 @@ export async function loadEvents(teamIds: string | string[]): Promise<ScheduleEv
   if (ids.length === 0) return [];
   const { data, error } = await supabase
     .from('events')
-    .select('id, team_id, event_type, title, local_date, starts_at, ends_at, arrival_at, event_timezone, time_status, home_away, venue_name, venue_address, status, uniform, notes, tournament_id, season_id, series_id, version, games(id, opponent, team_score, opponent_score, deleted_at)')
+    .select('id, team_id, event_type, title, local_date, starts_at, ends_at, arrival_at, event_timezone, time_status, home_away, venue_name, venue_address, status, uniform, notes, tournament_id, season_id, series_id, snacks_enabled, version, games(id, opponent, team_score, opponent_score, deleted_at)')
     .in('team_id', ids)
     .order('local_date', { ascending: true });
   if (error) throw error;
@@ -79,7 +80,7 @@ export async function loadEvents(teamIds: string | string[]): Promise<ScheduleEv
       eventTimezone: r.event_timezone, timeStatus: r.time_status, homeAway: r.home_away,
       venueName: r.venue_name, venueAddress: r.venue_address, status: r.status,
       uniform: r.uniform, notes: r.notes, tournamentId: r.tournament_id, seasonId: r.season_id,
-      seriesId: r.series_id, version: r.version,
+      seriesId: r.series_id, snacksEnabled: r.snacks_enabled ?? true, version: r.version,
       gameId: g?.id ?? null, opponent: g?.opponent ?? null,
       teamScore: g?.team_score ?? null, opponentScore: g?.opponent_score ?? null,
     };
@@ -104,6 +105,7 @@ export type EventInput = {
   notes: string | null;
   tournamentId: string | null;
   seasonId: string | null;
+  snacksEnabled?: boolean;
   opponent: string | null;   // game-family
   version?: number;          // edit: optimistic concurrency
   gameId?: string | null;    // edit: existing linked game
@@ -124,6 +126,7 @@ export async function saveEvent(input: EventInput, userId: string): Promise<void
     venue_name: input.venueName?.trim() || null, venue_address: input.venueAddress?.trim() || null,
     uniform: input.uniform?.trim() || null, notes: input.notes?.trim() || null,
     tournament_id: input.tournamentId, season_id: input.seasonId,
+    snacks_enabled: input.snacksEnabled ?? true,
   };
 
   let eventId = input.id;

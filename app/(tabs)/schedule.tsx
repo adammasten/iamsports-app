@@ -412,7 +412,7 @@ function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsv
         </TouchableOpacity>
       ) : null}
 
-      {canRsvp && !canceled ? (
+      {canRsvp && !canceled && ev.snacksEnabled ? (
         snack ? (
           snack.claimedByUserId === myUserId ? (
             <View style={styles.snackRow}>
