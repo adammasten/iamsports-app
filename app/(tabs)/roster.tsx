@@ -27,10 +27,25 @@ type DupePair = {
   dup_id: string; dup_name: string; dup_guardians: number; dup_content: number;
 };
 
+// A person attached to a player (via parent_player_links) with their email +
+// current role on this team — surfaced from list_player_guardians (admin/head_coach).
+type Guardian = { user_id: string; display_name: string; email: string | null; relationship: string | null; team_role: string | null };
+
+// RN's Alert.alert is a no-op on web, so anything that must surface on the web app
+// falls back to window.alert.
+function webAlert(title: string, message: string) {
+  if (Platform.OS === 'web') { if (typeof window !== 'undefined') window.alert(message); return; }
+  Alert.alert(title, message);
+}
+const STAFF_ROLES = ['admin', 'head_coach', 'coach'];
+
 export default function RosterScreen() {
   const insets = useSafeAreaInsets();
   const { activeTeam, activeRole, userId, refreshTeams } = useTeamContext();
   const isCoach = !!activeRole && COACH_ROLES.includes(activeRole);
+  // Seeing guardian emails + assigning coaches is admin/head_coach only (the RPCs
+  // enforce it too); a plain coach doesn't get the expand affordance.
+  const canManageCoaches = activeRole === 'admin' || activeRole === 'head_coach';
   const [editingTeamName, setEditingTeamName] = useState(false);
   const [teamNameInput, setTeamNameInput] = useState('');
 
@@ -49,6 +64,11 @@ export default function RosterScreen() {
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  // Collapsible per-player guardian panel.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [guardiansByPlayer, setGuardiansByPlayer] = useState<Record<string, Guardian[]>>({});
+  const [guardiansLoading, setGuardiansLoading] = useState<string | null>(null);
+  const [assigningUid, setAssigningUid] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!activeTeam) { setPlayers([]); setTeamCode(null); setLoading(false); return; }
@@ -252,6 +272,41 @@ export default function RosterScreen() {
     setPlayers(prev => prev.map(p => p.playerId === playerId ? { ...p, guardianCode: data as string } : p));
   }
 
+  // Load the people attached to a player (name + email + their team role) so an
+  // admin/head_coach can tell them apart and pick who to make a coach.
+  const loadGuardians = useCallback(async (playerId: string) => {
+    if (!activeTeam) return;
+    setGuardiansLoading(playerId);
+    const { data, error } = await supabase.rpc('list_player_guardians', { p_team_id: activeTeam.id, p_player_id: playerId });
+    setGuardiansLoading(null);
+    if (error) { webAlert('Guardians', error.message); return; }
+    setGuardiansByPlayer(prev => ({ ...prev, [playerId]: (data as Guardian[]) ?? [] }));
+  }, [activeTeam]);
+
+  // Tap a player's name to open/close its guardian panel (fetch once, then cache).
+  function toggleExpand(playerId: string) {
+    if (expandedId === playerId) { setExpandedId(null); return; }
+    setExpandedId(playerId);
+    if (!guardiansByPlayer[playerId]) loadGuardians(playerId);
+  }
+
+  // Promote a specific guardian to coach on this team. On success the badge flips
+  // to “Coach” and the Coaches list up top refreshes — no silent no-op.
+  async function assignCoach(playerId: string, g: Guardian) {
+    if (!activeTeam) return;
+    const ok = await confirm({
+      title: `Make ${g.display_name} a coach?`,
+      message: `${g.display_name}${g.email ? ` (${g.email})` : ''} will get coach access to ${activeTeam.name} — Coaches’ Corner + tools.`,
+      confirmText: 'Make coach',
+    });
+    if (!ok) return;
+    setAssigningUid(g.user_id);
+    const { error } = await supabase.rpc('assign_team_coach', { p_team_id: activeTeam.id, p_user_id: g.user_id });
+    setAssigningUid(null);
+    if (error) { webAlert('Make coach', error.message); return; }
+    await Promise.all([loadGuardians(playerId), load()]);
+  }
+
   // Coach access: a team code that grants the coach role (Coaches' Corner + tools).
   async function makeCoachCode() {
     if (!activeTeam) return;
@@ -407,7 +462,8 @@ export default function RosterScreen() {
           )}
 
           {players.map(p => (
-            <View key={p.playerId} style={styles.row}>
+            <View key={p.playerId}>
+            <View style={styles.row}>
               <View style={styles.jersey}><Text style={styles.jerseyText}>{p.jersey || '—'}</Text></View>
 
               <View style={{ flex: 1 }}>
@@ -421,6 +477,11 @@ export default function RosterScreen() {
                     onSubmitEditing={() => saveEdit(p.playerId)}
                     onBlur={() => saveEdit(p.playerId)}
                   />
+                ) : canManageCoaches ? (
+                  <TouchableOpacity onPress={() => toggleExpand(p.playerId)} hitSlop={6} style={styles.nameTapRow}>
+                    <Text style={styles.chevron}>{expandedId === p.playerId ? '▾' : '▸'}</Text>
+                    <Text style={styles.name} numberOfLines={1}>{p.name}</Text>
+                  </TouchableOpacity>
                 ) : (
                   <Text style={styles.name} numberOfLines={1}>{p.name}</Text>
                 )}
@@ -453,6 +514,36 @@ export default function RosterScreen() {
                   <Text style={[styles.action, styles.danger]}>{p.guardianCount === 0 ? 'Delete' : 'Remove'}</Text>
                 </TouchableOpacity>
               )}
+            </View>
+
+            {canManageCoaches && expandedId === p.playerId && (
+              <View style={styles.guardBox}>
+                {guardiansLoading === p.playerId ? (
+                  <ActivityIndicator color="#534AB7" style={{ marginVertical: 8 }} />
+                ) : (guardiansByPlayer[p.playerId]?.length ?? 0) === 0 ? (
+                  <Text style={styles.guardEmpty}>No one has claimed {p.name} yet. Share the invite code above so a parent can join and be attached.</Text>
+                ) : (
+                  guardiansByPlayer[p.playerId].map(g => {
+                    const isStaff = !!g.team_role && STAFF_ROLES.includes(g.team_role);
+                    return (
+                      <View key={g.user_id} style={styles.guardRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.guardName} numberOfLines={1}>{g.display_name}{g.relationship ? ` · ${g.relationship}` : ''}</Text>
+                          <Text style={styles.guardEmail} numberOfLines={1}>{g.email ?? 'no email on file'}</Text>
+                        </View>
+                        {isStaff ? (
+                          <Text style={styles.guardBadge}>{roleLabel(g.team_role!)}</Text>
+                        ) : (
+                          <TouchableOpacity onPress={() => assignCoach(p.playerId, g)} disabled={assigningUid === g.user_id} hitSlop={6}>
+                            <Text style={styles.guardAssign}>{assigningUid === g.user_id ? 'Assigning…' : 'Make coach'}</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            )}
             </View>
           ))}
 
@@ -566,6 +657,15 @@ const styles = StyleSheet.create({
   jersey: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#24242c', alignItems: 'center', justifyContent: 'center' },
   jerseyText: { fontWeight: '800', color: '#c9ccd3' },
   name: { fontSize: 16, fontWeight: '700', color: '#f4f4f6' },
+  nameTapRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  chevron: { color: '#8b7bff', fontSize: 13, fontWeight: '800', width: 12 },
+  guardBox: { backgroundColor: '#14141a', borderRadius: 12, borderWidth: 1, borderColor: '#2a2a32', paddingHorizontal: 14, paddingVertical: 6, marginTop: -2, marginBottom: 12, marginLeft: 52 },
+  guardEmpty: { color: '#8a8a93', fontSize: 13, paddingVertical: 10, lineHeight: 18 },
+  guardRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#23232b' },
+  guardName: { color: '#f4f4f6', fontSize: 14, fontWeight: '700' },
+  guardEmail: { color: '#9aa0aa', fontSize: 13, marginTop: 2 },
+  guardBadge: { color: '#8b7bff', fontSize: 12, fontWeight: '800' },
+  guardAssign: { color: '#1D9E75', fontSize: 14, fontWeight: '800' },
   meta: { fontSize: 12, color: '#62626c', marginTop: 2 },
   codeSmall: { fontSize: 13, color: '#8b7bff', fontWeight: '600', marginTop: 4 },
   editInput: { fontSize: 16, fontWeight: '700', color: '#f4f4f6', borderBottomWidth: 1, borderBottomColor: '#6c5ce7', paddingVertical: 2 },
