@@ -113,6 +113,15 @@ export default function AccountScreen() {
           )}
         </View>
 
+        {/* Text alerts — opt in to SMS for schedule disruptions + snack reminders. */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>📲 Text alerts</Text>
+          <Text style={styles.cardBody}>Get a text when a game is canceled, a time or field changes, or you’re on snacks. Push covers everything else.</Text>
+          <TouchableOpacity style={styles.btnPrimary} onPress={() => router.push('/text-alerts')}>
+            <Text style={styles.btnPrimaryText}>Manage text alerts</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* 🧪 Phase 0b background-upload spike harness. Visible in TestFlight too
             (a plain __DEV__ gate would hide it in a release build). Flip
             SPIKE_SHOW_BG_TEST to false / remove this card when 0b is done. */}

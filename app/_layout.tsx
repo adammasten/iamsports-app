@@ -239,6 +239,7 @@ export default function RootLayout() {
           <Stack.Screen name="edit-event" options={{ headerShown: false }} />
           <Stack.Screen name="import-schedule" options={{ headerShown: false }} />
           <Stack.Screen name="messages" options={{ headerShown: false }} />
+          <Stack.Screen name="text-alerts" options={{ headerShown: false }} />
           <Stack.Screen name="kid" options={{ headerShown: false }} />
           <Stack.Screen name="team" options={{ headerShown: false }} />
           <Stack.Screen name="clips-library" options={{ headerShown: false }} />
