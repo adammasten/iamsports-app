@@ -53,7 +53,7 @@ export default function PlayVault() {
   return (
     <View style={styles.root}>
       {Platform.OS === 'web' ? <WebTopNav /> : null}
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12, paddingHorizontal: 16, paddingBottom: 44, maxWidth: 760, width: '100%', alignSelf: 'center' }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12, paddingHorizontal: 16, paddingBottom: 44, maxWidth: Platform.OS === 'web' ? 1120 : 760, width: '100%', alignSelf: 'center' }}>
         {Platform.OS !== 'web' ? <Pressable onPress={goBackOrHome} hitSlop={8} style={{ paddingVertical: 4 }}><Text style={styles.back}>← Back</Text></Pressable> : null}
         <View style={styles.hero}>
           <Text style={styles.heroKicker}>IAMSPORTS · PLAYBOOK</Text>
@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
   heroRule: { height: 5, width: 96, backgroundColor: '#ff6a2c', borderRadius: 3, marginTop: 16, marginBottom: 16 },
   heroTagline: { color: '#9db0bd', fontSize: 15.5, lineHeight: 22, maxWidth: 480 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
-  gridCell: Platform.OS === 'web' ? { width: '31.5%', minWidth: 240, marginBottom: 0 } : { width: '100%' },
+  gridCell: Platform.OS === 'web' ? { width: '31.5%', marginBottom: 0 } : { width: '100%' },
   chip: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   chipOn: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
   chipTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
