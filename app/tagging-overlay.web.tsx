@@ -6,6 +6,7 @@
 // are the "★ Highlight" / "POE" special tags), so exports/filters stay valid.
 // See docs/WEB_TAGGING_STUDIO_PLAN.md + docs/tagging-studio-prototype.html.
 import { useTeamContext } from '@/context';
+import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import { getCachedPathSync } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
@@ -186,11 +187,14 @@ export default function TaggingStudioWeb() {
         : q.or(globalBranch);
       const { data } = await q;
       if (cancelled) return;
+      // Exclude tags this team has hidden (special tags never appear in the hide UI).
+      const hidden = teamId ? await loadHiddenTagIds(teamId).catch(() => new Set<string>()) : new Set<string>();
+      if (cancelled) return;
       const grouped: Record<string, Tag[]> = { players: [], offense: [], defense: [], plays: [] };
       let highlight: string | null = null, poe: string | null = null;
       (data || []).forEach((t: any) => {
         if (t.category === 'special') { if (t.name === '★ Highlight') highlight = t.id; else if (t.name === 'POE') poe = t.id; }
-        else if (grouped[t.category]) grouped[t.category].push({ id: t.id, name: t.name, category: t.category });
+        else if (grouped[t.category] && !hidden.has(t.id)) grouped[t.category].push({ id: t.id, name: t.name, category: t.category });
       });
       setTags(grouped);
       setSpecial({ highlight, poe });

@@ -4,6 +4,7 @@
 // stays the same in both modes: top bar, right-edge bundle strip, scrub bar,
 // bottom controls row. Toggle is in the bottom controls row (rightmost).
 import { useTeamContext } from '@/context';
+import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
@@ -433,6 +434,10 @@ export default function TaggingOverlayScreen() {
         Alert.alert('Error', error.message);
         return;
       }
+      // Tags this team hid stay out of the tagging screen (special/period are
+      // functional and never appear in the hide UI, so they're unaffected).
+      const hidden = tagTeamId ? await loadHiddenTagIds(tagTeamId).catch(() => new Set<string>()) : new Set<string>();
+      if (cancelled) return;
       const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [] };
       let highlightId: string | null = null;
       let poeId: string | null = null;
@@ -443,7 +448,7 @@ export default function TaggingOverlayScreen() {
           else if (t.name === 'POE') poeId = t.id;
         } else if (t.category === 'period') {
           periods.push(t);
-        } else if (grouped[t.category]) {
+        } else if (grouped[t.category] && !hidden.has(t.id)) {
           grouped[t.category].push(t);
         }
       });

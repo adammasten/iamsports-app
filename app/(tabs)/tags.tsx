@@ -1,4 +1,5 @@
 import { useTeamContext } from '@/context';
+import { hideTag, loadHiddenTagIds, unhideTag } from '@/lib/core/hiddenTags';
 import { computeSortOrderUpdates } from '@/lib/core/tag-reorder';
 import { supabase } from '@/supabase';
 import { confirm } from '@/lib/confirm';
@@ -16,8 +17,9 @@ const CATEGORIES = [
 ];
 
 export default function TagsScreen() {
-  const { activeTeam } = useTeamContext();
+  const { activeTeam, userId } = useTeamContext();
   const [tags, setTags] = useState<Record<string, Tag[]>>({ offense: [], defense: [], plays: [], players: [] });
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newTagName, setNewTagName] = useState('');
   const [newTagScope, setNewTagScope] = useState<'global' | 'team'>('team');
@@ -25,6 +27,9 @@ export default function TagsScreen() {
   useEffect(() => { fetchTags(); }, [activeTeam]);
 
   async function fetchTags() {
+    // Which tags this team has hidden (so we can mark them here; the taggers
+    // exclude them entirely).
+    loadHiddenTagIds(activeTeam?.id).then(setHiddenIds).catch(() => setHiddenIds(new Set()));
     // V3 tag scope is global | team only. Global tags are visible to every
     // team; team tags are visible only when activeTeam is set and matches.
     let query = supabase.from('tags').select('*').order('sort_order');
@@ -65,11 +70,34 @@ export default function TagsScreen() {
     else { fetchTags(); setNewTagName(''); setAddingTo(null); }
   }
 
-  async function deleteTag(id: string, name: string) {
-    const ok = await confirm({ title: name, message: 'Delete this tag?', confirmText: 'Delete', destructive: true });
+  async function deleteTag(tag: Tag) {
+    // Universal (global) tags are shared across every team — a coach can't delete
+    // one, but they CAN hide it for their own team so it stops showing while tagging.
+    if (tag.scope === 'global') {
+      const ok = await confirm({ title: tag.name, message: 'Universal tags can’t be deleted, but you can hide it so it won’t show while tagging. Hide it for your team?', confirmText: 'Hide', destructive: false });
+      if (ok) await toggleHide(tag, true);
+      return;
+    }
+    const ok = await confirm({ title: tag.name, message: 'Delete this tag?', confirmText: 'Delete', destructive: true });
     if (!ok) return;
-    await supabase.from('tags').delete().eq('id', id);
+    await supabase.from('tags').delete().eq('id', tag.id);
     fetchTags();
+  }
+
+  // Hide/show a tag for THIS team only (universal or team tag). forceHide skips
+  // the toggle and always hides (used from the global-tag delete path).
+  async function toggleHide(tag: Tag, forceHide?: boolean) {
+    if (!activeTeam) { Alert.alert('No team selected', 'Pick a team to hide tags.'); return; }
+    const currentlyHidden = hiddenIds.has(tag.id);
+    try {
+      if (currentlyHidden && !forceHide) {
+        await unhideTag(activeTeam.id, tag.id);
+        setHiddenIds(prev => { const n = new Set(prev); n.delete(tag.id); return n; });
+      } else if (!currentlyHidden) {
+        await hideTag(activeTeam.id, tag.id, userId);
+        setHiddenIds(prev => new Set(prev).add(tag.id));
+      }
+    } catch (e: any) { Alert.alert('Error', e?.message ?? String(e)); }
   }
 
   async function moveTag(catKey: string, fromIndex: number, toIndex: number) {
@@ -100,7 +128,7 @@ export default function TagsScreen() {
           <Text style={styles.context}>
             {activeTeam ? activeTeam.name : 'No team selected'}
           </Text>
-          <Text style={styles.subtitle}>Long press a tag to delete • ▲▼ to reorder • 🌍 Global 🏀 Team</Text>
+          <Text style={styles.subtitle}>👁 hide/show • ▲▼ reorder • long-press to delete your own • 🌍 Universal 🏀 Team</Text>
         </View>
 
         {addingTo && (
@@ -155,16 +183,23 @@ export default function TagsScreen() {
             {tags[cat.key].map((tag, index) => {
               const isFirst = index === 0;
               const isLast = index === tags[cat.key].length - 1;
+              const hidden = hiddenIds.has(tag.id);
               return (
-                <View key={tag.id} style={[styles.tagRow, { backgroundColor: cat.bg }]}>
+                <View key={tag.id} style={[styles.tagRow, { backgroundColor: cat.bg }, hidden && styles.tagRowHidden]}>
                   <TouchableOpacity
                     style={styles.tagBody}
-                    onLongPress={() => deleteTag(tag.id, tag.name)}
+                    onLongPress={() => deleteTag(tag)}
                     delayLongPress={400}
                   >
-                    <Text style={[styles.tagText, { color: cat.color }]}>
-                      {getScopeLabel(tag)} {tag.name}
+                    <Text style={[styles.tagText, { color: cat.color }, hidden && styles.tagTextHidden]}>
+                      {getScopeLabel(tag)} {tag.name}{hidden ? '  · hidden' : ''}
                     </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => toggleHide(tag)}
+                    style={styles.moveBtn}
+                  >
+                    <Text style={styles.moveBtnText}>{hidden ? '🙈' : '👁'}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => moveTag(cat.key, index, index - 1)}
@@ -214,6 +249,8 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 16, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   addBtn: { fontSize: 14, fontWeight: '600' },
   tagRow: { flexDirection: 'row', alignItems: 'stretch', borderRadius: 8, marginBottom: 4, overflow: 'hidden' },
+  tagRowHidden: { opacity: 0.5 },
+  tagTextHidden: { textDecorationLine: 'line-through' },
   tagBody: { flex: 1, paddingHorizontal: 10, paddingVertical: 12, justifyContent: 'center' },
   moveBtn: { paddingHorizontal: 14, paddingVertical: 12, minWidth: 44, backgroundColor: 'rgba(0,0,0,0.07)', alignItems: 'center', justifyContent: 'center', borderLeftWidth: 1, borderLeftColor: 'rgba(0,0,0,0.08)' },
   moveBtnDisabled: { opacity: 0.25 },

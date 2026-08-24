@@ -1,4 +1,5 @@
 import { useTeamContext } from '@/context';
+import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { supabase } from '@/supabase';
 import { useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
@@ -72,7 +73,10 @@ export default function EditReelScreen() {
         ? q.or(`scope.eq.global,and(scope.eq.team,team_id.eq.${teamId})`)
         : q.eq('scope', 'global');
       const { data } = await q;
-      const list = (data as Tag[]) || [];
+      // Honor the team's hidden-tag list here too, so a hidden tag doesn't reappear
+      // when building a reel.
+      const hidden = teamId ? await loadHiddenTagIds(teamId).catch(() => new Set<string>()) : new Set<string>();
+      const list = ((data as Tag[]) || []).filter(t => !hidden.has(t.id));
       setTags(list);
       const inScope = new Set(list.map(t => t.id));
       setSelected(prev => new Set([...prev].filter(id => inScope.has(id))));
