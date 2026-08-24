@@ -32,6 +32,9 @@ declare
   v_count int := 0;
   d date;
 begin
+  -- Suppress the events notification trigger: a recurring series must not fire one
+  -- alert per occurrence (added with the notification backbone, Stage 1).
+  perform set_config('app.suppress_event_notify', '1', true);
   if p_event_type not in ('practice','team_event') then
     raise exception 'Only practices and team events can repeat.';
   end if;

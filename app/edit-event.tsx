@@ -3,10 +3,9 @@
 // Game-family types create/update a linked games row so film/tagging/stats attach.
 import { useTeamContext } from '@/context';
 import {
-  cancelEvent, cancelSeries, createPracticeSeries, createTournament, EVENT_TYPES, eventTypeLabel, isGameFamily, loadTournaments, saveEvent, updateSeriesForward,
+  cancelEvent, cancelSeries, createPracticeSeries, createTournament, EVENT_TYPES, isGameFamily, loadTournaments, saveEvent, updateSeriesForward,
   type EventInput, type EventType, type ScheduleEvent, type Tournament,
 } from '@/lib/core/schedule';
-import { sendTeamPush } from '@/lib/core/push';
 import { goBackOrHome } from '@/lib/nav';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -66,12 +65,6 @@ function webSafeAlert(title: string, message: string) {
   Alert.alert(title, message);
 }
 
-// "Sat, Aug 30" from a YYYY-MM-DD (parsed as local, no UTC shift).
-function fmtNice(ymd: string): string {
-  const [y, m, d] = ymd.split('-').map(Number);
-  if (!y || !m || !d) return ymd;
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
 
 export default function EditEventScreen() {
   const insets = useSafeAreaInsets();
@@ -122,31 +115,10 @@ export default function EditEventScreen() {
     loadTournaments([activeTeam.id]).then(setTournaments).catch(() => {});
   }, [activeTeam]);
 
-  // Ask the coach whether to push the team about a change; resolves to their choice.
-  function confirmNotify(kind: 'update' | 'canceled'): Promise<boolean> {
-    const q = kind === 'canceled' ? 'Notify the team this event is canceled?' : 'Notify the team about this change?';
-    return new Promise(resolve => {
-      if (Platform.OS === 'web') { resolve(window.confirm(q)); return; }
-      Alert.alert('Notify the team?', q, [
-        { text: 'Not now', style: 'cancel', onPress: () => resolve(false) },
-        { text: 'Notify', onPress: () => resolve(true) },
-      ]);
-    });
-  }
-  // On a coach's confirmation, push the whole team about this edit/cancel.
-  async function offerChangeNotify(kind: 'update' | 'canceled') {
-    if (!activeTeam) return;
-    if (!(await confirmNotify(kind))) return;
-    const label = title.trim() || (gameFamily && opponent.trim() ? `vs ${opponent.trim()}` : eventTypeLabel(type));
-    const when = `${fmtNice(date)}${!timeTbd && startTime.trim() ? ` · ${startTime.trim()}` : ''}`;
-    const pushTitle = kind === 'canceled' ? `❌ ${activeTeam.name}` : `🗓️ ${activeTeam.name}`;
-    const pushBody = kind === 'canceled' ? `${label} on ${fmtNice(date)} is canceled.` : `Update: ${label} — ${when}.`;
-    try {
-      await sendTeamPush({ teamId: activeTeam.id, title: pushTitle, body: pushBody, data: { url: '/schedule' } });
-    } catch (e: any) {
-      webSafeAlert('Notify team', e?.message ?? 'Could not send the notification.');
-    }
-  }
+  // NOTE: team notifications on time/venue/cancel changes are now fired
+  // automatically by the DB trigger on `events` → notification_outbox → worker
+  // (the schedule change IS the message). No inline "notify team?" prompt here —
+  // that path was removed to avoid double-sends. See migration_notif_backbone_*.
 
   async function onSave() {
     if (!activeTeam || !userId) { webSafeAlert('Not ready', 'No team selected.'); return; }
@@ -220,7 +192,6 @@ export default function EditEventScreen() {
         version: existing?.version, gameId: existing?.gameId ?? null,
       };
       await saveEvent(input, userId);
-      if (editing) await offerChangeNotify('update');
       router.back();
     } catch (e: any) {
       webSafeAlert('Save event', e?.message ?? String(e));
@@ -242,7 +213,7 @@ export default function EditEventScreen() {
 
   async function doCancel() {
     if (!existing) return;
-    try { await cancelEvent(existing.id); await offerChangeNotify('canceled'); router.back(); }
+    try { await cancelEvent(existing.id); router.back(); }
     catch (e: any) { webSafeAlert('Cancel event', e?.message ?? String(e)); }
   }
   async function onCancelEvent() {

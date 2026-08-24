@@ -2,8 +2,8 @@
 // coach reviews/edits and taps Confirm (spec rule: never silently save AI data).
 // Each confirmed row becomes a game-family event (+ its linked games row).
 import { useTeamContext } from '@/context';
-import { saveEvent } from '@/lib/core/schedule';
 import { goBackOrHome } from '@/lib/nav';
+import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -62,29 +62,23 @@ export default function ImportScheduleScreen() {
     if (!userId || !teamId) { webSafeAlert('Import', 'Not ready.'); return; }
     const valid = rows.filter(r => validYMD(r.date));
     if (valid.length === 0) { webSafeAlert('Import', 'No rows have a valid date (YYYY-MM-DD). Fix the dates or cancel.'); return; }
+    // Insert the whole batch in ONE transaction with notifications suppressed —
+    // a season import must not fire one alert per game.
+    const payload = valid.map(r => {
+      const t = r.time ? parseHHMM(r.time) : null;
+      const startsAt = t ? combine(r.date, t) : null;
+      return {
+        date: r.date.trim(), starts_at: startsAt, time_status: startsAt ? 'confirmed' : 'tbd',
+        home_away: r.home ? 'home' : 'away', venue_name: r.location.trim() || null,
+        opponent: r.opponent.trim() || null, tz: DEVICE_TZ,
+      };
+    });
     setSaving(true);
-    let ok = 0;
-    try {
-      for (const r of valid) {
-        const t = r.time ? parseHHMM(r.time) : null;
-        const startsAt = t ? combine(r.date, t) : null;
-        await saveEvent({
-          teamId, eventType: 'game', title: null,
-          localDate: r.date.trim(), startsAt, endsAt: null, arrivalAt: null,
-          eventTimezone: DEVICE_TZ, timeStatus: startsAt ? 'confirmed' : 'tbd',
-          homeAway: r.home ? 'home' : 'away',
-          venueName: r.location.trim() || null, venueAddress: null, uniform: null, notes: null,
-          tournamentId: null, seasonId: null, opponent: r.opponent.trim() || null,
-        }, userId);
-        ok++;
-      }
-    } catch (e: any) {
-      webSafeAlert('Import', `Added ${ok} of ${valid.length}, then hit an error: ${e?.message ?? e}`);
-      setSaving(false);
-      return;
-    }
+    const { data, error } = await supabase.rpc('import_game_events', { p_team_id: teamId, p_rows: payload });
     setSaving(false);
-    alertThenGo(`${ok} game${ok === 1 ? '' : 's'} added to the schedule.`, () => router.replace('/schedule'));
+    if (error) { webSafeAlert('Import', error.message); return; }
+    const n = (data as number) ?? valid.length;
+    alertThenGo(`${n} game${n === 1 ? '' : 's'} added to the schedule.`, () => router.replace('/schedule'));
   }
 
   return (
