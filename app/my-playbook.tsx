@@ -6,7 +6,7 @@
 import PlayPlayer from '@/components/PlayPlayer';
 import { useTeamContext } from '@/context';
 import { fetchCoachTeams, type CoachTeam } from '@/lib/core/playbook/installs';
-import { attachToTeam, deleteLibraryPlay, fetchLibraryPlays, type LibraryPlay } from '@/lib/core/playbook/library';
+import { attachToTeam, deleteLibraryPlay, fetchLibraryPlays, setPlayVisibility, type LibraryPlay } from '@/lib/core/playbook/library';
 import { tagColor } from '@/lib/core/playbook/tags';
 import { goBackOrHome } from '@/lib/nav';
 import { router } from 'expo-router';
@@ -53,6 +53,13 @@ export default function MyPlaybook() {
   }
 
   // Sport / side present across the library (drive which filters to show).
+  async function publish(p: LibraryPlay) {
+    try {
+      await setPlayVisibility(p.id, 'community');
+      setDone(d => ({ ...d, [p.id]: 'Published to The Vault' }));
+    } catch (e: any) { setErr(e?.message ?? 'Could not publish.'); }
+  }
+
   const sportsPresent = plays ? Array.from(new Set(plays.map(p => p.doc?.sport).filter(Boolean) as string[])).sort() : [];
   const sidesPresent: string[] = plays ? Array.from(new Set(plays.map(p => (p.doc?.side ?? 'offense') as string))) : [];
   const SIDE_ORDER = ['offense', 'defense', 'special_teams'];
@@ -78,6 +85,11 @@ export default function MyPlaybook() {
 
         <Pressable style={styles.newBtn} onPress={() => router.push('/playbook-edit')}>
           <Text style={styles.newBtnTxt}>＋  New play</Text>
+        </Pressable>
+
+        <Pressable style={styles.vaultBanner} onPress={() => router.push('/play-vault')}>
+          <Text style={styles.vaultBannerTitle}>🔒  The Vault</Text>
+          <Text style={styles.vaultBannerSub}>Browse plays from coaches everywhere — grab any into your playbook  →</Text>
         </Pressable>
 
         {plays && sportsPresent.length > 1 ? (
@@ -163,6 +175,7 @@ export default function MyPlaybook() {
 
                 <View style={styles.cardActions}>
                   <Pressable onPress={() => router.push({ pathname: '/playbook-edit', params: { editId: p.id } })}><Text style={styles.editLink}>✎ Edit</Text></Pressable>
+                  <Pressable onPress={() => publish(p)}><Text style={styles.editLink}>{done[p.id] === 'Published to The Vault' ? '✓ In The Vault' : '🔒 Publish'}</Text></Pressable>
                   <Pressable onPress={() => del(p)}><Text style={styles.deleteLink}>Delete</Text></Pressable>
                 </View>
               </View>
@@ -186,6 +199,9 @@ const styles = StyleSheet.create({
   sub: { color: '#9db0bd', fontSize: 14, marginTop: 6, marginBottom: 14, lineHeight: 20 },
   newBtn: { alignSelf: 'flex-start', backgroundColor: '#ff6a2c', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10, marginBottom: 10 },
   newBtnTxt: { color: '#160b02', fontSize: 14, fontWeight: '800' },
+  vaultBanner: { backgroundColor: '#1b2c44', borderColor: '#534AB7', borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 14 },
+  vaultBannerTitle: { color: '#c8bcff', fontSize: 16, fontWeight: '800' },
+  vaultBannerSub: { color: '#9db0bd', fontSize: 13, marginTop: 3, fontWeight: '600' },
   chipRow: { marginBottom: 6 },
   chipRowInner: { gap: 8, paddingRight: 20, paddingVertical: 4 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },

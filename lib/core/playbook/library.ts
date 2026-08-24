@@ -29,6 +29,30 @@ export async function fetchCoachTags(userId: string): Promise<string[]> {
   return Array.from(set).sort();
 }
 
+// ── The Vault: the community bank (visibility='community') ──────────────
+export type VaultPlay = LibraryPlay & { sport: string; saveCount: number };
+
+export async function fetchVaultPlays(sport?: string): Promise<VaultPlay[]> {
+  let q = supabase.from('library_plays').select('id, name, doc, tags, sport, save_count')
+    .eq('visibility', 'community').order('save_count', { ascending: false }).order('name');
+  if (sport) q = q.eq('sport', sport);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, doc: (r.doc ?? null) as PlayDoc | null, tags: Array.isArray(r.tags) ? r.tags : [], sport: r.sport, saveCount: r.save_count ?? 0 }));
+}
+
+// Copy a community play into MY library (server-side deep copy; bumps save_count).
+export async function grabPlay(sourceId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('grab_play', { p_source: sourceId });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function setPlayVisibility(id: string, visibility: 'private' | 'community'): Promise<void> {
+  const { error } = await supabase.from('library_plays').update({ visibility }).eq('id', id);
+  if (error) throw error;
+}
+
 export async function fetchLibraryPlay(id: string): Promise<LibraryPlay> {
   const { data, error } = await supabase.from('library_plays').select('id, name, doc, tags').eq('id', id).single();
   if (error) throw error;

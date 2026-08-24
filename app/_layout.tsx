@@ -222,6 +222,7 @@ export default function RootLayout() {
           <Stack.Screen name="playbook-play" options={{ headerShown: false }} />
           <Stack.Screen name="playbook-link" options={{ headerShown: false }} />
           <Stack.Screen name="my-playbook" options={{ headerShown: false }} />
+          <Stack.Screen name="play-vault" options={{ headerShown: false }} />
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
           <Stack.Screen name="game" options={{ headerShown: false }} />
