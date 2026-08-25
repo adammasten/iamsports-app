@@ -18,12 +18,13 @@ const C = {
   accent: '#6c5ce7', badge: '#EF5350', panel: '#1b1e26',
 };
 
-type Dest = 'home' | 'filmroom' | 'playbook' | 'coaches' | 'messages';
+type Dest = 'home' | 'filmroom' | 'playbook' | 'coaches' | 'messages' | 'tagging';
 const LINKS: { key: Dest; label: string; href: string }[] = [
   { key: 'home', label: 'Home', href: '/select-team' },
   { key: 'filmroom', label: 'Film Room', href: '/my-work' },
   { key: 'messages', label: 'Messages', href: '/messages' },
   { key: 'playbook', label: 'My Playbook', href: '/my-playbook' },
+  { key: 'tagging', label: 'Tagging', href: '/tagging-jobs' },
   { key: 'coaches', label: "Coaches' Corner", href: '/coaches-corner' },
 ];
 

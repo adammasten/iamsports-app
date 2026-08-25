@@ -464,6 +464,12 @@ export default function SelectTeamScreen() {
             </View>
             <Text style={styles.teamName}>Join as coach</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.teamItem} onPress={() => router.push('/tagging-jobs')}>
+            <View style={[styles.avatar, styles.avatarAdd]}>
+              <Ionicons name="pricetags-outline" size={24} color="#534AB7" />
+            </View>
+            <Text style={styles.teamName}>Tagging</Text>
+          </TouchableOpacity>
         </FadeRail>
 
         {/* Player lens (multi-value) sits above the single-select FilterBar. */}
