@@ -92,7 +92,7 @@ export default function ScheduleScreen() {
   const [snacks, setSnacks] = useState<Map<string, SnackSignup>>(new Map());
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ScheduleFilter>('all');
-  const [scope, setScope] = useState<'team' | 'all'>('team');
+  const [scopePref, setScopePref] = useState<'team' | 'all'>('team');
   const [importing, setImporting] = useState(false);
   const [addingToCal, setAddingToCal] = useState(false);
   const [tournamentNames, setTournamentNames] = useState<Map<string, string>>(new Map());
@@ -106,6 +106,11 @@ export default function ScheduleScreen() {
     userTeams.forEach(t => { if (!m.has(t.team_id)) m.set(t.team_id, t.name); });
     return m;
   }, [userTeams]);
+  // From Home (no active team) the Schedule is a COMBINED agenda across every team
+  // the user is on; picking a specific team narrows it. With a team active, the
+  // This-team / All toggle governs. So the EFFECTIVE scope is always 'all' when no
+  // team is selected, regardless of the stored preference.
+  const scope: 'team' | 'all' = activeTeam ? scopePref : 'all';
   const scopeTeamIds = useMemo(
     () => (scope === 'all' ? Array.from(new Set(userTeams.map(t => t.team_id))) : activeTeam ? [activeTeam.id] : []),
     [scope, userTeams, activeTeam],
@@ -260,22 +265,13 @@ export default function ScheduleScreen() {
       ),
     );
 
-  if (!activeTeam) {
-    return (
-      <View style={styles.root}>
-        {Platform.OS === 'web' ? <WebTopNav /> : null}
-        <View style={{ paddingTop: insets.top + 40, paddingHorizontal: 20 }}><Text style={styles.empty}>Pick a team to see its schedule.</Text></View>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.root}>
       {Platform.OS === 'web' ? <WebTopNav /> : null}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12, paddingHorizontal: 16, paddingBottom: 44, maxWidth: 760, width: '100%', alignSelf: 'center' }}>
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.caption} numberOfLines={1}>{scope === 'all' ? 'All my teams' : activeTeam.name}</Text>
+          <Text style={styles.caption} numberOfLines={1}>{scope === 'all' ? 'All my teams' : (activeTeam?.name ?? 'Schedule')}</Text>
           <Text style={styles.title}>Schedule</Text>
         </View>
         <TouchableOpacity style={styles.iconCircle} onPress={() => router.push('/messages')} accessibilityLabel="Team messages">
@@ -283,10 +279,10 @@ export default function ScheduleScreen() {
         </TouchableOpacity>
       </View>
 
-      {userTeams.length > 1 ? (
+      {activeTeam && userTeams.length > 1 ? (
         <View style={styles.scopeRow}>
           {(['team', 'all'] as const).map(s => (
-            <TouchableOpacity key={s} onPress={() => setScope(s)} style={[styles.scopeBtn, scope === s && styles.scopeBtnOn]}>
+            <TouchableOpacity key={s} onPress={() => setScopePref(s)} style={[styles.scopeBtn, scope === s && styles.scopeBtnOn]}>
               <Text style={[styles.scopeTxt, scope === s && styles.scopeTxtOn]}>{s === 'team' ? 'This team' : 'All my teams'}</Text>
             </TouchableOpacity>
           ))}
@@ -315,9 +311,11 @@ export default function ScheduleScreen() {
             {importing ? <ActivityIndicator color="#9db0bd" size="small" /> : <Ionicons name="camera-outline" size={18} color="#9db0bd" />}
           </TouchableOpacity>
         ) : null}
-        <TouchableOpacity style={styles.iconBtn} onPress={subscribeCalendar} accessibilityLabel="Subscribe to the live calendar feed">
-          <Ionicons name="calendar-outline" size={18} color="#9db0bd" />
-        </TouchableOpacity>
+        {activeTeam ? (
+          <TouchableOpacity style={styles.iconBtn} onPress={subscribeCalendar} accessibilityLabel="Subscribe to the live calendar feed">
+            <Ionicons name="calendar-outline" size={18} color="#9db0bd" />
+          </TouchableOpacity>
+        ) : null}
         {Platform.OS === 'web' ? (
           <TouchableOpacity style={styles.iconBtn} onPress={exportCalendar} accessibilityLabel="Export the schedule">
             <Ionicons name="download-outline" size={18} color="#9db0bd" />
