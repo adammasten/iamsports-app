@@ -5,8 +5,9 @@ import { showContentActions } from './moderationActions';
 import { confirm } from '@/lib/confirm';
 import { router, useFocusEffect } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, InputAccessoryView, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContentCard from '@/components/content-card/ContentCard';
 import { ShareComments } from '@/components/share-comments';
@@ -68,9 +69,6 @@ type Post = {
 let CORNER_UNLOCKED_AT = 0;
 const PIN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes idle → re-lock
 function pinStillValid() { return CORNER_UNLOCKED_AT > 0 && Date.now() - CORNER_UNLOCKED_AT < PIN_TIMEOUT_MS; }
-// The number-pad keyboard has no return key, so we pin the submit button to a bar
-// above the keyboard (iOS InputAccessoryView) — otherwise the keyboard covers it.
-const PIN_ACCESSORY_ID = 'coachesPinAccessory';
 
 export default function CoachesCornerScreen() {
   const insets = useSafeAreaInsets();
@@ -87,6 +85,9 @@ export default function CoachesCornerScreen() {
   const [pin, setPin] = useState('');
   const [pinBusy, setPinBusy] = useState(false);
   const [pinErr, setPinErr] = useState<string | null>(null);
+  const shakeX = useRef(new Animated.Value(0)).current;
+  // Entered digits are ephemeral local state — never persisted. Clear on unmount.
+  useEffect(() => () => setPin(''), []);
 
   // Filtered+sorted items, produced by FilterBar (a FilterableItem subset; the
   // full Post is recovered via postsById for the card render).
@@ -154,24 +155,45 @@ export default function CoachesCornerScreen() {
     return () => { cancelled = true; };
   }, []));
 
-  async function submitSetPin() {
-    if (!/^[0-9]{4,8}$/.test(pin)) { setPinErr('Pick a 4–8 digit PIN.'); return; }
+  // Wrong-PIN feedback: red caption + shake + error haptic, then clear the dots.
+  const failPin = useCallback((msg: string) => {
+    setPin('');
+    setPinErr(msg);
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+    Animated.sequence([
+      Animated.timing(shakeX, { toValue: 9, duration: 45, useNativeDriver: true }),
+      Animated.timing(shakeX, { toValue: -9, duration: 45, useNativeDriver: true }),
+      Animated.timing(shakeX, { toValue: 6, duration: 45, useNativeDriver: true }),
+      Animated.timing(shakeX, { toValue: 0, duration: 45, useNativeDriver: true }),
+    ]).start();
+  }, [shakeX]);
+
+  async function submitSetPin(value: string) {
+    if (!/^[0-9]{4}$/.test(value)) { failPin('Enter 4 digits'); return; }
     setPinBusy(true);
-    const { error } = await supabase.rpc('set_coaches_pin', { p_pin: pin });
+    const { error } = await supabase.rpc('set_coaches_pin', { p_pin: value });
     setPinBusy(false);
-    if (error) { setPinErr(error.message); return; }
+    if (error) { failPin(error.message); return; }
     CORNER_UNLOCKED_AT = Date.now(); setPin(''); setPinErr(null); setPinGate('ok');
   }
 
-  async function submitEnterPin() {
-    if (!pin) return;
+  async function submitEnterPin(value: string) {
     setPinBusy(true);
-    const { data, error } = await supabase.rpc('verify_coaches_pin', { p_pin: pin });
+    const { data, error } = await supabase.rpc('verify_coaches_pin', { p_pin: value });
     setPinBusy(false);
-    if (error) { setPinErr(error.message); return; }
+    if (error) { failPin(error.message); return; }
     if (data === true) { CORNER_UNLOCKED_AT = Date.now(); setPin(''); setPinErr(null); setPinGate('ok'); }
-    else setPinErr('Incorrect PIN. Try again.');
+    else failPin('Wrong PIN — try again');
   }
+
+  // Keypad: append a digit and auto-submit on the 4th; backspace removes one.
+  function onKey(d: string) {
+    if (pinBusy || pin.length >= 4) return;
+    const next = pin + d;
+    setPin(next); setPinErr(null);
+    if (next.length === 4) (pinGate === 'set' ? submitSetPin : submitEnterPin)(next);
+  }
+  function onBackspace() { if (!pinBusy) { setPin(p => p.slice(0, -1)); setPinErr(null); } }
 
   // Batch-load tags for the whole feed whenever posts change. Bucket content ids
   // by type (reel → reel_tags, clip → clip_tags; video/game have no tags), load
@@ -291,68 +313,62 @@ export default function CoachesCornerScreen() {
   }
 
   if (pinGate !== 'ok') {
-    const submit = pinGate === 'set' ? submitSetPin : submitEnterPin;
-    const btnLabel = pinBusy ? 'Please wait…' : pinGate === 'set' ? 'Set PIN & open' : 'Unlock';
+    const isSet = pinGate === 'set';
+    const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
     return (
       <View style={[styles.container, { paddingTop: Platform.OS === 'web' ? 0 : insets.top }]}>
         {Platform.OS === 'web' ? <WebTopNav active="coaches" /> : null}
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={Platform.OS === 'web' ? [styles.pageWrap, styles.pageWrapWeb] : styles.pageWrap}
-        >
-          <View style={styles.lockWrap}>
-            {pinGate === 'checking' ? (
-              <ActivityIndicator size="large" color="#534AB7" />
-            ) : (
-              <>
-                <Text style={styles.lockIcon}>🔒</Text>
-                <Text style={styles.lockTitle}>{pinGate === 'set' ? 'Set a Coaches’ Corner PIN' : 'Enter your PIN'}</Text>
-                <Text style={styles.lockSub}>
-                  {pinGate === 'set'
-                    ? 'Your team requires a PIN to open Coaches’ Corner. Pick a 4–8 digit PIN you’ll remember — you’ll use it to unlock this board.'
-                    : 'Coaches’ Corner is locked. Enter your PIN, then tap Unlock (above the keypad).'}
-                </Text>
-                <TextInput
-                  style={styles.lockInput}
-                  value={pin}
-                  onChangeText={t => { setPin(t.replace(/[^0-9]/g, '')); setPinErr(null); }}
-                  placeholder="PIN"
-                  placeholderTextColor="#666"
-                  keyboardType="number-pad"
-                  secureTextEntry
-                  maxLength={8}
-                  autoFocus
-                  returnKeyType="done"
-                  onSubmitEditing={submit}
-                  inputAccessoryViewID={Platform.OS === 'ios' ? PIN_ACCESSORY_ID : undefined}
-                />
-                {pinErr ? <Text style={styles.lockErr}>{pinErr}</Text> : null}
-                <TouchableOpacity style={styles.lockBtn} onPress={submit} disabled={pinBusy}>
-                  <Text style={styles.lockBtnText}>{btnLabel}</Text>
-                </TouchableOpacity>
-                {pinGate === 'enter' ? (
-                  <TouchableOpacity onPress={() => { setPin(''); setPinErr(null); setPinGate('set'); }} style={{ marginTop: 14 }}>
-                    <Text style={styles.lockLink}>Forgot PIN? Set a new one</Text>
-                  </TouchableOpacity>
-                ) : null}
-                {/* Never trap someone at the lock — always a way out. */}
-                <TouchableOpacity onPress={goBackOrHome} style={{ marginTop: 18 }}>
-                  <Text style={styles.lockLink}>← Go back</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </KeyboardAvoidingView>
-        {/* iOS number pad has no return key, so pin the submit button above it. */}
-        {Platform.OS === 'ios' && pinGate !== 'checking' ? (
-          <InputAccessoryView nativeID={PIN_ACCESSORY_ID}>
-            <View style={styles.accessoryBar}>
-              <TouchableOpacity style={styles.accessoryBtn} onPress={submit} disabled={pinBusy}>
-                <Text style={styles.accessoryBtnText}>{btnLabel}</Text>
+        <View style={Platform.OS === 'web' ? [styles.pageWrap, styles.pageWrapWeb] : styles.pageWrap}>
+          {/* Back — always visible so the lock is never a dead end (swipe-back also works). */}
+          {Platform.OS === 'web' ? null : (
+            <View style={styles.topRow}>
+              <TouchableOpacity onPress={goBackOrHome} style={styles.back} hitSlop={10}>
+                <Text style={styles.backText}>‹ Back</Text>
               </TouchableOpacity>
             </View>
-          </InputAccessoryView>
-        ) : null}
+          )}
+          {pinGate === 'checking' ? (
+            <View style={styles.lockWrap}><ActivityIndicator size="large" color="#534AB7" /></View>
+          ) : (
+            <View style={styles.lockWrap}>
+              <Text style={styles.lockIcon}>🔒</Text>
+              <Text style={styles.lockTitle}>Coaches&apos; Corner</Text>
+              <Text style={styles.lockSub}>{isSet ? 'Set a 4-digit PIN' : 'Enter your 4-digit PIN'}</Text>
+
+              {/* PIN dots — filled per entered digit, red on a wrong attempt, shake on error. */}
+              <Animated.View style={[styles.dotsRow, { transform: [{ translateX: shakeX }] }]}>
+                {[0, 1, 2, 3].map(i => (
+                  <View key={i} style={[styles.dot, i < pin.length && (pinErr ? styles.dotErr : styles.dotOn)]} />
+                ))}
+              </Animated.View>
+
+              {/* Fixed-height caption so the keypad never shifts. */}
+              <Text style={[styles.lockErr, !pinErr && styles.errHidden]}>{pinErr || ' '}</Text>
+
+              {/* Custom in-screen keypad — no system keyboard, so no accessory-view duplicate. */}
+              <View style={styles.keypad}>
+                {KEYS.map(d => (
+                  <TouchableOpacity key={d} style={styles.key} onPress={() => onKey(d)} disabled={pinBusy} activeOpacity={0.6}>
+                    <Text style={styles.keyTxt}>{d}</Text>
+                  </TouchableOpacity>
+                ))}
+                <View style={styles.keySpacer} />
+                <TouchableOpacity style={styles.key} onPress={() => onKey('0')} disabled={pinBusy} activeOpacity={0.6}>
+                  <Text style={styles.keyTxt}>0</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.key} onPress={onBackspace} disabled={pinBusy} activeOpacity={0.6} accessibilityLabel="Delete digit">
+                  <Text style={styles.keyDel}>⌫</Text>
+                </TouchableOpacity>
+              </View>
+
+              {pinGate === 'enter' ? (
+                <TouchableOpacity onPress={() => { setPin(''); setPinErr(null); setPinGate('set'); }} style={{ marginTop: 4 }}>
+                  <Text style={styles.lockLink}>Forgot PIN? Set a new one</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          )}
+        </View>
       </View>
     );
   }
@@ -432,15 +448,21 @@ const styles = StyleSheet.create({
   lockIcon: { fontSize: 40 },
   lockTitle: { color: '#fff', fontSize: 22, fontWeight: '800', textAlign: 'center' },
   lockSub: { color: '#888', fontSize: 14, lineHeight: 20, textAlign: 'center', marginBottom: 6 },
-  lockInput: { backgroundColor: '#17171d', color: '#fff', fontSize: 24, fontWeight: '800', letterSpacing: 8, textAlign: 'center', borderRadius: 12, paddingVertical: 14, width: '100%' },
-  lockErr: { color: '#EF5350', fontSize: 13, fontWeight: '600' },
+  dotsRow: { flexDirection: 'row', gap: 18, marginTop: 18, marginBottom: 2 },
+  dot: { width: 15, height: 15, borderRadius: 8, borderWidth: 1.5, borderColor: '#5a5f78', backgroundColor: 'transparent' },
+  dotOn: { backgroundColor: '#8b83e6', borderColor: '#8b83e6' },
+  dotErr: { backgroundColor: '#EF5350', borderColor: '#EF5350' },
+  lockErr: { color: '#EF5350', fontSize: 13, fontWeight: '700', minHeight: 18, textAlign: 'center' },
+  errHidden: { opacity: 0 },
+  keypad: { flexDirection: 'row', flexWrap: 'wrap', width: 264, justifyContent: 'space-between', rowGap: 14, marginTop: 6 },
+  key: { width: 76, height: 76, borderRadius: 38, backgroundColor: '#17171d', alignItems: 'center', justifyContent: 'center' },
+  keySpacer: { width: 76, height: 76 },
+  keyTxt: { color: '#f1f4f6', fontSize: 28, fontWeight: '600' },
+  keyDel: { color: '#9db0bd', fontSize: 24, fontWeight: '600' },
   lockBtn: { backgroundColor: '#534AB7', borderRadius: 12, paddingVertical: 15, alignItems: 'center', width: '100%', marginTop: 4 },
   lockBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
   lockLink: { color: '#8b83e6', fontWeight: '700', fontSize: 14 },
   // Bar pinned above the number keypad (iOS) so Unlock is always reachable.
-  accessoryBar: { backgroundColor: '#14161c', borderTopWidth: 1, borderTopColor: '#333', padding: 8 },
-  accessoryBtn: { backgroundColor: '#534AB7', borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
-  accessoryBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
   // Grid like Home/Film Room, but 2-across (wider cells) so each post's comment
   // thread has room to read + type.
   feedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start' },
