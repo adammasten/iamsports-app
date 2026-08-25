@@ -16,6 +16,18 @@ import { webAlert } from '@/lib/webAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
 
+// The web file picker's `accept="video/*"` is only a hint — a browser lets you
+// switch to "All Files" and pick a PNG/PDF/etc. Reject anything that isn't a video
+// with a clear message instead of uploading a broken file that can't be transcoded
+// (invariant 5 — never fail silently). Native already restricts to videos.
+function videosOnly(files: PendingFile[]): PendingFile[] {
+  const ok = files.filter(f => !f.type || f.type.startsWith('video/'));
+  if (ok.length < files.length) {
+    webAlert('That’s not a video', 'IamSports uploads video only — MP4 or MOV. A photo (PNG/JPG) or other file can’t be used here. Pick a video to upload.');
+  }
+  return ok;
+}
+
 // Upload a video into the Film Room. Simple path = video + title + event type +
 // date + optional team. "More details" adds player (parked — no auto-attach),
 // sport, season, game details (opponent/tournament), and score/result. A games
@@ -104,7 +116,7 @@ export default function UploadScreen() {
   }, [teamId]);
 
   async function pick() {
-    const files = await pickVideos();
+    const files = videosOnly(await pickVideos());
     if (files.length > 0) {
       setPending(files);
       if (!titleTouched && !label.trim()) setLabel(defaultUploadTitle(eventDate));   // sensible default
@@ -281,7 +293,7 @@ export default function UploadScreen() {
   async function addMore() {
     if (!done?.game || !userId) return;
     const g = done.game;
-    const files = await pickVideos();
+    const files = videosOnly(await pickVideos());
     if (files.length === 0) return;
     setUploading(true);
     setProgress(0);
