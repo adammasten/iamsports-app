@@ -4,7 +4,9 @@ import { supabase } from '@/supabase';
 import { useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
+import { confirm } from '@/lib/confirm';
 
 type Player = { player_id: string; name: string };
 // Per-player overrides: player_id -> (permission -> allowed). Absent = inherit.
@@ -67,7 +69,7 @@ export default function TeamPermissionsScreen() {
     const { error } = await supabase.rpc('set_team_coaches_pin_required', { p_team_id: teamId, p_required: next });
     if (error) {
       setData(d => (d[teamId] ? { ...d, [teamId]: { ...d[teamId], requirePin: !next } } : d));
-      Alert.alert('Could not save', error.message);
+      webAlert('Could not save', error.message);
     }
   }
 
@@ -105,15 +107,13 @@ export default function TeamPermissionsScreen() {
   }
 
   // Plain-language confirm, then run() on Confirm.
-  function confirmChange(meta: PermissionMeta, who: string, next: boolean, run: () => void) {
+  async function confirmChange(meta: PermissionMeta, who: string, next: boolean, run: () => void) {
     const title = next ? `Grant “${meta.label}”?` : `Turn off “${meta.label}”?`;
     const message = next
       ? `${who} will be able to ${meta.action}.`
       : `${who} won’t be able to ${meta.action}.`;
-    Alert.alert(title, message, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: next ? 'Grant' : 'Turn off', style: 'destructive', onPress: run },
-    ]);
+    const ok = await confirm({ title, message, confirmText: next ? 'Grant' : 'Turn off', destructive: true });
+    if (ok) run();
   }
 
   // Tap a PLAYER cell: toggle. If the new value equals the team default, CLEAR the
@@ -135,7 +135,7 @@ export default function TeamPermissionsScreen() {
         : await supabase.rpc('set_team_player_permission', { p_team_id: teamId, p_player_id: playerId, p_permission: key, p_allowed: next });
       if (error) {
         applyOverride(teamId, playerId, key, prev);                     // revert
-        Alert.alert('Could not save', error.message);
+        webAlert('Could not save', error.message);
       }
     };
 
@@ -156,7 +156,7 @@ export default function TeamPermissionsScreen() {
       const { error } = await supabase.rpc('set_team_default_permission', { p_team_id: teamId, p_permission: key, p_allowed: next });
       if (error) {
         applyDefault(teamId, key, prev ?? meta.systemDefault);          // revert (best-effort)
-        Alert.alert('Could not save', error.message);
+        webAlert('Could not save', error.message);
       }
     };
 

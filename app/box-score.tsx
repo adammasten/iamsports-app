@@ -16,7 +16,9 @@ import { COACH_ROLES, useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
+import { confirm } from '@/lib/confirm';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatEditorSheet, type EditorTarget, type StatValues } from './components/StatEditorSheet';
 
@@ -226,20 +228,18 @@ export default function BoxScoreScreen() {
     await loadStats();
   }
 
-  function confirmRevertAll() {
-    Alert.alert(
-      'Revert all manual entries?',
-      'Every hand-entered stat line for this game will be removed. If the game has tagged clips, tagged stats will show again.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Revert all', style: 'destructive', onPress: async () => {
-          if (!gameId) return;
-          const { error } = await supabase.from('game_stat_lines').delete().eq('game_id', gameId);
-          if (error) { Alert.alert('Revert failed', error.message); return; }
-          await loadStats();
-        }},
-      ]
-    );
+  async function confirmRevertAll() {
+    const ok = await confirm({
+      title: 'Revert all manual entries?',
+      message: 'Every hand-entered stat line for this game will be removed. If the game has tagged clips, tagged stats will show again.',
+      confirmText: 'Revert all',
+      destructive: true,
+    });
+    if (!ok) return;
+    if (!gameId) return;
+    const { error } = await supabase.from('game_stat_lines').delete().eq('game_id', gameId);
+    if (error) { webAlert('Revert failed', error.message); return; }
+    await loadStats();
   }
 
   const { own, opp } = editMode

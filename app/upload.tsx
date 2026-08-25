@@ -11,7 +11,8 @@ import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from 
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
 
@@ -124,7 +125,7 @@ export default function UploadScreen() {
 
   async function doUpload() {
     if (pending.length === 0) { await pick(); return; }
-    if (!userId) { Alert.alert('Not signed in'); return; }
+    if (!userId) { webAlert('Not signed in', 'Not signed in'); return; }
     if (!(await requirePermission(teamId, 'upload_video'))) return;
     setUploading(true);
     setProgress(0);
@@ -140,7 +141,7 @@ export default function UploadScreen() {
         if (ex?.id) seasonId = ex.id;
         else {
           const { data: cr, error } = await supabase.from('seasons').insert({ team_id: teamId, name: seasonName, created_by_user_id: userId }).select('id').single();
-          if (error) { Alert.alert('Could not save season', error.message); setUploading(false); return; }
+          if (error) { webAlert('Could not save season', error.message); setUploading(false); return; }
           seasonId = cr?.id ?? null;
         }
       }
@@ -155,7 +156,7 @@ export default function UploadScreen() {
         if (ex?.id) tournamentResolved = ex.id;
         else {
           const { data: cr, error } = await supabase.from('tournaments').insert({ team_id: teamId, name, created_by_user_id: userId }).select('id').single();
-          if (error) { Alert.alert('Could not save tournament', error.message); setUploading(false); return; }
+          if (error) { webAlert('Could not save tournament', error.message); setUploading(false); return; }
           tournamentResolved = cr?.id ?? null;
         }
       }
@@ -178,7 +179,7 @@ export default function UploadScreen() {
           opponent_score: oppScore === '' ? null : parseInt(oppScore, 10),
           season_id: seasonId,
         }).select('id').single();
-        if (error) { Alert.alert('Could not create game', error.message); setUploading(false); return; }
+        if (error) { webAlert('Could not create game', error.message); setUploading(false); return; }
         gameId = g?.id ?? null;
       }
 
@@ -193,11 +194,11 @@ export default function UploadScreen() {
 
       setUploading(false);
       if (r.succeeded.length === 0) {
-        Alert.alert('Upload failed', `None of the ${total} video${total === 1 ? '' : 's'} uploaded — nothing was saved. Please try again.`);
+        webAlert('Upload failed', `None of the ${total} video${total === 1 ? '' : 's'} uploaded — nothing was saved. Please try again.`);
         return;
       }
       if (r.failed.length > 0) {
-        Alert.alert(
+        webAlert(
           'Some videos didn’t upload',
           `${r.succeeded.length} of ${total} uploaded${gameId ? ' to the game' : ''}. Failed: ${r.failed.join(', ')}. The successful videos were kept — re-add the failed ones from Film Room.`,
         );
@@ -207,7 +208,7 @@ export default function UploadScreen() {
         game: gameId ? { id: gameId, teamId: teamId || null, eventType, eventDate: evDate, sport: resolvedSport, seasonId } : null,
       });
     } catch (e: any) {
-      Alert.alert('Upload error', e?.message ?? 'Unknown');
+      webAlert('Upload error', e?.message ?? 'Unknown');
       setUploading(false);
     }
   }
@@ -297,15 +298,15 @@ export default function UploadScreen() {
       }, start);
       setUploading(false);
       if (r.succeeded.length === 0) {
-        Alert.alert('Upload failed', `None of the ${files.length} video${files.length === 1 ? '' : 's'} were added.`);
+        webAlert('Upload failed', `None of the ${files.length} video${files.length === 1 ? '' : 's'} were added.`);
         return;
       }
       if (r.failed.length > 0) {
-        Alert.alert('Some videos didn’t upload', `${r.succeeded.length} of ${files.length} added. Failed: ${r.failed.join(', ')}.`);
+        webAlert('Some videos didn’t upload', `${r.succeeded.length} of ${files.length} added. Failed: ${r.failed.join(', ')}.`);
       }
       setDone({ ...done, count: done.count + r.succeeded.length, total: done.total + files.length });
     } catch (e: any) {
-      Alert.alert('Upload error', e?.message ?? 'Unknown');
+      webAlert('Upload error', e?.message ?? 'Unknown');
       setUploading(false);
     }
   }

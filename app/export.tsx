@@ -8,7 +8,8 @@ import * as MediaLibrary from 'expo-media-library';
 import { router } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, FlatList, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { AppState, FlatList, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
@@ -173,9 +174,9 @@ export default function ExportScreen() {
       const localPath = FileSystem.documentDirectory + 'highlight.mp4';
       await FileSystem.downloadAsync(videoUrl, localPath);
       await MediaLibrary.saveToLibraryAsync(localPath);
-      Alert.alert('Saved! 🎉', 'Your highlight reel has been saved to your camera roll!');
+      webAlert('Saved! 🎉', 'Your highlight reel has been saved to your camera roll!');
     } else {
-      Alert.alert('Export Ready! 🎉', 'Video exported successfully!');
+      webAlert('Export Ready! 🎉', 'Video exported successfully!');
     }
   }
 
@@ -277,13 +278,13 @@ export default function ExportScreen() {
     if (job.status === 'done') {
       await clearActiveJob();
       try { await saveExportToLibrary(job.url); }
-      catch (e: any) { Alert.alert('Save error', e?.message || 'Failed to save to camera roll'); }
+      catch (e: any) { webAlert('Save error', e?.message || 'Failed to save to camera roll'); }
       finishResume();
       return;
     }
     if (job.status === 'failed') {
       await clearActiveJob();
-      Alert.alert('Export failed', job.error || 'Unknown error');
+      webAlert('Export failed', job.error || 'Unknown error');
       finishResume();
       return;
     }
@@ -294,7 +295,7 @@ export default function ExportScreen() {
       if (!mountedRef.current) return;
       await saveExportToLibrary(url);
     } catch (e: any) {
-      Alert.alert('Export error', e?.message || 'Polling failed');
+      webAlert('Export error', e?.message || 'Polling failed');
     } finally {
       finishResume();
     }
@@ -316,10 +317,11 @@ export default function ExportScreen() {
   async function fetchGames() {
     // Embed season/tournament names + videos' event types so the step-1 filter
     // bar can offer Event/Season/Tournament without extra round-trips.
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('games')
       .select('*, seasons (name), tournaments (name), videos (id, event_type)')
       .order('created_at', { ascending: false });
+    if (error) { webAlert('Couldn’t load games', error.message); return; }
     setGames(data || []);
   }
 
@@ -410,7 +412,8 @@ export default function ExportScreen() {
   }, [games]);
 
   async function fetchTags() {
-    const { data } = await supabase.from('tags').select('*').order('category', { ascending: true });
+    const { data, error } = await supabase.from('tags').select('*').order('category', { ascending: true });
+    if (error) { webAlert('Couldn’t load tags', error.message); return; }
     setTags(data || []);
   }
 
@@ -430,7 +433,7 @@ export default function ExportScreen() {
   }
 
   function addGroup() {
-    if (currentGroup.length === 0) { Alert.alert('Select at least one tag first'); return; }
+    if (currentGroup.length === 0) { webAlert('Select at least one tag first', 'Select at least one tag first'); return; }
     setTagGroups(prev => [...prev, currentGroup]);
     setCurrentGroup([]);
   }
@@ -449,14 +452,15 @@ export default function ExportScreen() {
 
   async function loadClips() {
     const allGroups = currentGroup.length > 0 ? [...tagGroups, currentGroup] : tagGroups;
-    if (selectedGames.length === 0) { Alert.alert('Select at least one game'); return; }
-    if (allGroups.length === 0) { Alert.alert('Add at least one tag group'); return; }
+    if (selectedGames.length === 0) { webAlert('Select at least one game', 'Select at least one game'); return; }
+    if (allGroups.length === 0) { webAlert('Add at least one tag group', 'Add at least one tag group'); return; }
     setLoading(true);
 
-    const { data: videos } = await supabase
+    const { data: videos, error: videosErr } = await supabase
       .from('videos')
       .select('id, url, label, game_id, upload_status')
       .in('game_id', selectedGames);
+    if (videosErr) { webAlert('Couldn’t load videos', videosErr.message); setLoading(false); return; }
     const videoMap: Record<string, any> = {};
     // Only finalized videos can be exported — skip 'uploading'/'failed' (no complete
     // object to cut from). Their clips are excluded downstream via videoIds.
@@ -464,15 +468,16 @@ export default function ExportScreen() {
     const videoIds = Object.keys(videoMap);
 
     if (videoIds.length === 0) {
-      Alert.alert('No videos found for selected games');
+      webAlert('No videos found for selected games', 'No videos found for selected games');
       setLoading(false);
       return;
     }
 
-    const { data: clipData } = await supabase
+    const { data: clipData, error: clipErr } = await supabase
       .from('clips')
       .select('*')
       .in('video_id', videoIds);
+    if (clipErr) { webAlert('Couldn’t load clips', clipErr.message); setLoading(false); return; }
 
     const clipsWithTags = await Promise.all((clipData || []).map(async (clip: any) => {
       const { data: tagData } = await supabase
@@ -581,7 +586,7 @@ export default function ExportScreen() {
       });
 
       const data = await response.json();
-      if (!response.ok) { console.log('[export] server rejected:', response.status, data); Alert.alert('Export failed', data.error || 'Something went wrong'); setExporting(false); return; }
+      if (!response.ok) { console.log('[export] server rejected:', response.status, data); webAlert('Export failed', data.error || 'Something went wrong'); setExporting(false); return; }
 
       // Persist before polling so a backgrounded app can resume this job.
       await saveActiveJob(data.jobId);
@@ -596,11 +601,11 @@ export default function ExportScreen() {
       if (saveToCameraRoll) {
         await saveExportToLibrary(videoUrl);
       } else {
-        Alert.alert('Saved!', 'Your reel is in Film Room.');
+        webAlert('Saved!', 'Your reel is in Film Room.');
       }
     } catch (e: any) {
       console.log('[export] FAILED:', e);
-      Alert.alert('Export error', e.message);
+      webAlert('Export error', e.message);
     }
     setExporting(false);
     setExportStatus('');

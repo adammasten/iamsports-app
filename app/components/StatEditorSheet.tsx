@@ -10,7 +10,9 @@
 // isManual tells the sheet whether to show the Revert button.
 import { supabase } from '@/supabase';
 import { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
+import { confirm } from '@/lib/confirm';
 
 export type StatValues = {
   fgm: number; fga: number;
@@ -97,7 +99,7 @@ export function StatEditorSheet({ target, userId, onClose, onSaved }: Props) {
   async function save() {
     if (!target) return;
     const err = validationError();
-    if (err) { Alert.alert('Check the numbers', err); return; }
+    if (err) { webAlert('Check the numbers', err); return; }
     setBusy(true);
     // Try UPDATE first (matches on game/player/stat_side). If no row matched,
     // INSERT. Simpler than working around partial-index limitations in
@@ -115,7 +117,7 @@ export function StatEditorSheet({ target, userId, onClose, onSaved }: Props) {
       .eq('stat_side', target.statSide);
     updateQ = target.playerId ? updateQ.eq('player_id', target.playerId) : updateQ.is('player_id', null);
     const { data: updated, error: uerr } = await updateQ.select('id');
-    if (uerr) { setBusy(false); Alert.alert('Save failed', uerr.message); return; }
+    if (uerr) { setBusy(false); webAlert('Save failed', uerr.message); return; }
     if (!updated || updated.length === 0) {
       const { error: ierr } = await supabase.from('game_stat_lines').insert({
         game_id: target.gameId,
@@ -124,32 +126,30 @@ export function StatEditorSheet({ target, userId, onClose, onSaved }: Props) {
         created_by_user_id: userId,
         ...patch,
       });
-      if (ierr) { setBusy(false); Alert.alert('Save failed', ierr.message); return; }
+      if (ierr) { setBusy(false); webAlert('Save failed', ierr.message); return; }
     }
     setBusy(false);
     onSaved();
   }
 
-  function revert() {
+  async function revert() {
     if (!target) return;
-    Alert.alert(
-      'Revert this line?',
-      `Remove your manual entry for ${target.playerName}. If the game was tagged, the tagged stats will show again.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Revert', style: 'destructive', onPress: async () => {
-          setBusy(true);
-          let q = supabase.from('game_stat_lines').delete()
-            .eq('game_id', target.gameId)
-            .eq('stat_side', target.statSide);
-          q = target.playerId ? q.eq('player_id', target.playerId) : q.is('player_id', null);
-          const { error } = await q;
-          setBusy(false);
-          if (error) { Alert.alert('Revert failed', error.message); return; }
-          onSaved();
-        }},
-      ]
-    );
+    const ok = await confirm({
+      title: 'Revert this line?',
+      message: `Remove your manual entry for ${target.playerName}. If the game was tagged, the tagged stats will show again.`,
+      confirmText: 'Revert',
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    let q = supabase.from('game_stat_lines').delete()
+      .eq('game_id', target.gameId)
+      .eq('stat_side', target.statSide);
+    q = target.playerId ? q.eq('player_id', target.playerId) : q.is('player_id', null);
+    const { error } = await q;
+    setBusy(false);
+    if (error) { webAlert('Revert failed', error.message); return; }
+    onSaved();
   }
 
   return (

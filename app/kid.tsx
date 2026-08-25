@@ -8,7 +8,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
+import { confirm } from '@/lib/confirm';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getFreshToken, SUPABASE_STORAGE_URL } from '@/lib/native/video-upload';
@@ -114,7 +116,7 @@ export default function KidWallScreen() {
         .single();
       if (cancelled) return;
       if (error || !data) {
-        Alert.alert('Error', error?.message ?? 'Could not load kid');
+        webAlert('Error', error?.message ?? 'Could not load kid');
         setLoading(false);
         return;
       }
@@ -150,15 +152,12 @@ export default function KidWallScreen() {
 
   // Soft-leave: mark the roster link left (never deletes). Games the kid played
   // stay in the family's archive forever (game_lineups + parent link RLS).
-  function leaveTeam(t: { team_id: string; name: string }) {
-    Alert.alert('Leave team', `Remove ${name || 'your kid'} from ${t.name}? Their games from this team stay in your archive.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Leave', style: 'destructive', onPress: async () => {
-        const { error } = await supabase.rpc('leave_team', { p_player_id: playerId, p_team_id: t.team_id });
-        if (error) { Alert.alert('Error', error.message); return; }
-        loadTeams();
-      } },
-    ]);
+  async function leaveTeam(t: { team_id: string; name: string }) {
+    const ok = await confirm({ title: 'Leave team', message: `Remove ${name || 'your kid'} from ${t.name}? Their games from this team stay in your archive.`, confirmText: 'Leave', destructive: true });
+    if (!ok) return;
+    const { error } = await supabase.rpc('leave_team', { p_player_id: playerId, p_team_id: t.team_id });
+    if (error) { webAlert('Error', error.message); return; }
+    loadTeams();
   }
 
   // Guardians of this kid + the invite code (guardians-only read via RLS/RPC).
@@ -198,34 +197,30 @@ export default function KidWallScreen() {
     }
   }
 
-  function resetGuardianCode() {
-    Alert.alert(
-      'Reset invite code?',
-      'The current code stops working immediately. Anyone you shared it with can’t be added until you share the new one.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Reset', style: 'destructive', onPress: async () => {
-          const { data, error } = await supabase.rpc('regenerate_guardian_code', { p_player_id: playerId });
-          if (error) { Alert.alert('Reset', error.message); return; }
-          setGuardianCode(data as string);
-        } },
-      ],
-    );
+  async function resetGuardianCode() {
+    const ok = await confirm({
+      title: 'Reset invite code?',
+      message: 'The current code stops working immediately. Anyone you shared it with can’t be added until you share the new one.',
+      confirmText: 'Reset',
+      destructive: true,
+    });
+    if (!ok) return;
+    const { data, error } = await supabase.rpc('regenerate_guardian_code', { p_player_id: playerId });
+    if (error) { webAlert('Reset', error.message); return; }
+    setGuardianCode(data as string);
   }
 
-  function removeGuardian(targetUserId: string, targetName: string, isSelf: boolean) {
-    Alert.alert(
-      isSelf ? 'Leave' : 'Remove guardian',
-      isSelf ? `Remove yourself as ${name}’s guardian?` : `Remove ${targetName} from ${name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: isSelf ? 'Leave' : 'Remove', style: 'destructive', onPress: async () => {
-          const { error } = await supabase.rpc('remove_guardian', { p_player_id: playerId, p_guardian_user_id: targetUserId });
-          if (error) { Alert.alert('Error', error.message); return; }
-          if (isSelf) { await refreshKids(); goBackOrHome(); } else loadGuardians();
-        } },
-      ],
-    );
+  async function removeGuardian(targetUserId: string, targetName: string, isSelf: boolean) {
+    const ok = await confirm({
+      title: isSelf ? 'Leave' : 'Remove guardian',
+      message: isSelf ? `Remove yourself as ${name}’s guardian?` : `Remove ${targetName} from ${name}?`,
+      confirmText: isSelf ? 'Leave' : 'Remove',
+      destructive: true,
+    });
+    if (!ok) return;
+    const { error } = await supabase.rpc('remove_guardian', { p_player_id: playerId, p_guardian_user_id: targetUserId });
+    if (error) { webAlert('Error', error.message); return; }
+    if (isSelf) { await refreshKids(); goBackOrHome(); } else loadGuardians();
   }
 
   // PRIMARY guardian = the first person linked to this kid (the responsible
@@ -247,18 +242,18 @@ export default function KidWallScreen() {
       const { data } = await supabase.from('videos')
         .select('url, label').eq('game_id', it.contentId).is('deleted_at', null).eq('upload_status', 'ready');
       const vids = (data ?? []).filter((v: any) => v.url).map((v: any) => ({ key: v.url as string, filename: `${it.title} - ${v.label ?? 'video'}` }));
-      if (vids.length === 0) { Alert.alert('Download', 'No finished videos to download yet.'); return; }
+      if (vids.length === 0) { webAlert('Download', 'No finished videos to download yet.'); return; }
       try {
         const { saved, failed } = await downloadMedia(vids);
-        Alert.alert('Download', failed ? `Saved ${saved} of ${vids.length} — ${failed} couldn’t be saved.` : `Saved ${saved} video${saved === 1 ? '' : 's'} to your device.`);
-      } catch (e: any) { Alert.alert('Download', e?.message ?? 'Download failed.'); }
+        webAlert('Download', failed ? `Saved ${saved} of ${vids.length} — ${failed} couldn’t be saved.` : `Saved ${saved} video${saved === 1 ? '' : 's'} to your device.`);
+      } catch (e: any) { webAlert('Download', e?.message ?? 'Download failed.'); }
       return;
     }
-    if (!it.storagePath) { Alert.alert('Download', 'This can’t be downloaded.'); return; }
+    if (!it.storagePath) { webAlert('Download', 'This can’t be downloaded.'); return; }
     try {
       const { failed } = await downloadMedia([{ key: it.storagePath, filename: it.title }]);
-      Alert.alert('Download', failed ? 'Couldn’t save it.' : 'Saved to your device.');
-    } catch (e: any) { Alert.alert('Download', e?.message ?? 'Download failed.'); }
+      webAlert('Download', failed ? 'Couldn’t save it.' : 'Saved to your device.');
+    } catch (e: any) { webAlert('Download', e?.message ?? 'Download failed.'); }
   }
   const totalCoaches = teamAudience.reduce((n, t) => n + (t.coaches?.length ?? 0), 0);
 
@@ -287,7 +282,7 @@ export default function KidWallScreen() {
       p_jersey_number: jerseyInput.trim() || null,
     });
     if (error) {
-      Alert.alert('Error', error.message);
+      webAlert('Error', error.message);
       setAttaching(false);
       return;
     }
@@ -461,17 +456,12 @@ export default function KidWallScreen() {
 
   // Take a post off the wall — flip on_wall=false so it drops back into
   // "Shared with you" (the item stays shared with the family, just off the wall).
-  function takeOffWall(shareId: string, title: string) {
-    Alert.alert('Take off wall', `Take “${title}” off ${name || 'the'} wall? It stays in "Shared with you".`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Take off', style: 'destructive', onPress: async () => {
-          const { error } = await supabase.rpc('set_share_on_wall', { p_share_id: shareId, p_on_wall: false });
-          if (error) Alert.alert('Error', error.message);
-          else { loadWall(); loadInbox(); }
-        },
-      },
-    ]);
+  async function takeOffWall(shareId: string, title: string) {
+    const ok = await confirm({ title: 'Take off wall', message: `Take “${title}” off ${name || 'the'} wall? It stays in "Shared with you".`, confirmText: 'Take off', destructive: true });
+    if (!ok) return;
+    const { error } = await supabase.rpc('set_share_on_wall', { p_share_id: shareId, p_on_wall: false });
+    if (error) webAlert('Error', error.message);
+    else { loadWall(); loadInbox(); }
   }
 
   function openShared(item: { shareId: string; contentType: string; title: string; storagePath: string | null; startTime: number | null; endTime: number | null; contentId?: string; sharedBy?: string | null }) {
@@ -482,7 +472,7 @@ export default function KidWallScreen() {
       router.push({ pathname: '/game-player', params: { title: item.title, ...mod } });
       return;
     }
-    if (!item.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
+    if (!item.storagePath) { webAlert('Unavailable', 'This content could not be loaded.'); return; }
     router.push({
       pathname: '/shared-viewer',
       params: {
@@ -501,7 +491,7 @@ export default function KidWallScreen() {
   // Any note from the coach/sharer travels as-is; the guardian doesn't retype it.
   async function putOnWall(shareId: string) {
     const { error } = await supabase.rpc('set_share_on_wall', { p_share_id: shareId, p_on_wall: true });
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
     loadInbox();
     loadWall();
   }
@@ -513,7 +503,7 @@ export default function KidWallScreen() {
     if (!playerId) return;
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permission needed', 'Allow photo access to set a photo.');
+      webAlert('Permission needed', 'Allow photo access to set a photo.');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -552,7 +542,7 @@ export default function KidWallScreen() {
       const signed = await getSignedVideoUrl(dest);
       setPhotoUri(signed);
     } catch (e: any) {
-      Alert.alert('Photo error', e?.message ?? 'Could not set photo');
+      webAlert('Photo error', e?.message ?? 'Could not set photo');
     } finally {
       setUploadingPhoto(false);
     }
@@ -560,7 +550,7 @@ export default function KidWallScreen() {
 
   // Save name/grad via update_kid RPC. Returns to the wall view.
   async function save() {
-    if (!name.trim()) { Alert.alert("Enter the kid's name"); return; }
+    if (!name.trim()) { webAlert("Enter the kid's name", "Enter the kid's name"); return; }
     if (!playerId) return;
     setSaving(true);
     const { error } = await supabase.rpc('update_kid', {
@@ -569,7 +559,7 @@ export default function KidWallScreen() {
       grad_class: gradClass.trim() || null,
     });
     if (error) {
-      Alert.alert('Error saving', error.message);
+      webAlert('Error saving', error.message);
       setSaving(false);
       return;
     }

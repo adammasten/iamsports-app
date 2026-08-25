@@ -9,7 +9,8 @@ import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from 
 import { useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
 
@@ -102,7 +103,7 @@ export default function EditGameScreen() {
       const { data: g, error } = await supabase.from('games')
         .select('id, title, opponent, game_date, team_id, team_score, opponent_score, season_id, tournament_id')
         .eq('id', gameId).single();
-      if (error || !g) { Alert.alert('Error', error?.message ?? 'Game not found'); goBackOrHome(); return; }
+      if (error || !g) { webAlert('Error', error?.message ?? 'Game not found'); goBackOrHome(); return; }
 
       setGameTitleText(g.title ?? '');
       setOpponent(g.opponent ?? '');
@@ -169,7 +170,7 @@ export default function EditGameScreen() {
           if (ex?.id) seasonId = ex.id;
           else {
             const { data: cr, error } = await supabase.from('seasons').insert({ team_id: teamId, name: seasonName, created_by_user_id: userId }).select('id').single();
-            if (error) { Alert.alert('Could not save season', error.message); setSaving(false); return; }
+            if (error) { webAlert('Could not save season', error.message); setSaving(false); return; }
             seasonId = cr?.id ?? null;
           }
         }
@@ -180,7 +181,7 @@ export default function EditGameScreen() {
           if (ex?.id) tournamentResolved = ex.id;
           else {
             const { data: cr, error } = await supabase.from('tournaments').insert({ team_id: teamId, name, created_by_user_id: userId }).select('id').single();
-            if (error) { Alert.alert('Could not save tournament', error.message); setSaving(false); return; }
+            if (error) { webAlert('Could not save tournament', error.message); setSaving(false); return; }
             tournamentResolved = cr?.id ?? null;
           }
         }
@@ -198,7 +199,7 @@ export default function EditGameScreen() {
         season_id: seasonId,
         tournament_id: tournamentResolved,
       }).eq('id', gameId);
-      if (gErr) { Alert.alert('Could not save game', gErr.message); setSaving(false); return; }
+      if (gErr) { webAlert('Could not save game', gErr.message); setSaving(false); return; }
 
       // Cascade the shared attributes to every video in the game.
       const videoPatch: Record<string, any> = {
@@ -211,12 +212,12 @@ export default function EditGameScreen() {
       };
       if (teamChanged) videoPatch.visibility = teamId ? 'team' : 'private_to_creator';
       const { error: vErr } = await supabase.from('videos').update(videoPatch).eq('game_id', gameId);
-      if (vErr) { Alert.alert('Saved game, but its videos didn’t update', vErr.message); setSaving(false); return; }
+      if (vErr) { webAlert('Saved game, but its videos didn’t update', vErr.message); setSaving(false); return; }
 
       setSaving(false);
       goBackOrHome();
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Unknown');
+      webAlert('Error', e?.message ?? 'Unknown');
       setSaving(false);
     }
   }

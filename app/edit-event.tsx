@@ -10,8 +10,10 @@ import { goBackOrHome } from '@/lib/nav';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import DateTimeField from './components/DateTimeField';
-import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { webAlert, alertThenGo } from '@/lib/webAlert';
+import { confirm } from '@/lib/confirm';
 
 const DEVICE_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return 'America/Chicago'; } })();
 
@@ -42,30 +44,6 @@ function fmtTimeInput(iso: string | null, tz: string): string {
   if (!iso) return '';
   try { return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz }); } catch { return ''; }
 }
-// Confirm success, THEN navigate — cross-platform. React Native's Alert button
-// callbacks DO NOT fire on web, so an onPress-based router.back() there silently
-// never runs (which let a coach re-submit and create duplicate series). On web we
-// use window.alert (blocking) then navigate directly; native keeps the Alert.
-function alertThenGo(message: string, go: () => void) {
-  if (Platform.OS === 'web') {
-    if (typeof window !== 'undefined') window.alert(message);
-    go();
-    return;
-  }
-  Alert.alert('Done', message, [{ text: 'OK', onPress: go }]);
-}
-
-// A plain alert that actually shows on web too (RN's Alert.alert is a no-op there,
-// which silently swallowed validation + error messages).
-function webSafeAlert(title: string, message: string) {
-  if (Platform.OS === 'web') {
-    if (typeof window !== 'undefined') window.alert(message);
-    return;
-  }
-  Alert.alert(title, message);
-}
-
-
 export default function EditEventScreen() {
   const insets = useSafeAreaInsets();
   const { userId, activeTeam } = useTeamContext();
@@ -122,16 +100,16 @@ export default function EditEventScreen() {
   // that path was removed to avoid double-sends. See migration_notif_backbone_*.
 
   async function onSave() {
-    if (!activeTeam || !userId) { webSafeAlert('Not ready', 'No team selected.'); return; }
-    if (!validYMD(date)) { webSafeAlert('Date', 'Enter the date as YYYY-MM-DD.'); return; }
+    if (!activeTeam || !userId) { webAlert('Not ready', 'No team selected.'); return; }
+    if (!validYMD(date)) { webAlert('Date', 'Enter the date as YYYY-MM-DD.'); return; }
     let st: { h: number; m: number } | null = null, at: { h: number; m: number } | null = null, et: { h: number; m: number } | null = null;
     if (!timeTbd) {
       st = parseTime(startTime);
-      if (startTime.trim() && !st) { webSafeAlert('Start time', 'Try a time like “6:00 PM”.'); return; }
+      if (startTime.trim() && !st) { webAlert('Start time', 'Try a time like “6:00 PM”.'); return; }
       at = parseTime(arrivalTime);
-      if (arrivalTime.trim() && !at) { webSafeAlert('Arrival time', 'Try a time like “5:30 PM”.'); return; }
+      if (arrivalTime.trim() && !at) { webAlert('Arrival time', 'Try a time like “5:30 PM”.'); return; }
       et = parseTime(endTime);
-      if (endTime.trim() && !et) { webSafeAlert('End time', 'Try a time like “8:00 PM”.'); return; }
+      if (endTime.trim() && !et) { webAlert('End time', 'Try a time like “8:00 PM”.'); return; }
     }
     const startsAt = st ? combine(date, st) : null;
     const arrivalAt = at ? combine(date, at) : null;
@@ -141,9 +119,9 @@ export default function EditEventScreen() {
 
     // Recurring practice / team event → materialize the whole series server-side.
     if (canRepeat && repeat) {
-      if (weekdays.size === 0) { webSafeAlert('Repeat', 'Pick at least one day of the week.'); return; }
-      if (!validYMD(untilDate)) { webSafeAlert('Repeat until', 'Enter the end date as YYYY-MM-DD.'); return; }
-      if (untilDate.trim() < date.trim()) { webSafeAlert('Repeat until', 'The end date must be on or after the first date.'); return; }
+      if (weekdays.size === 0) { webAlert('Repeat', 'Pick at least one day of the week.'); return; }
+      if (!validYMD(untilDate)) { webAlert('Repeat until', 'Enter the end date as YYYY-MM-DD.'); return; }
+      if (untilDate.trim() < date.trim()) { webAlert('Repeat until', 'The end date must be on or after the first date.'); return; }
       setSaving(true);
       try {
         const n = await createPracticeSeries({
@@ -152,9 +130,9 @@ export default function EditEventScreen() {
           startTime: hhmm(st), arrivalTime: hhmm(at), endTime: hhmm(et),
           eventTimezone: tz, venueName, venueAddress, uniform, notes,
         });
-        alertThenGo(`Added ${n} occurrence${n === 1 ? '' : 's'}.`, () => router.back());
+        alertThenGo('Done', `Added ${n} occurrence${n === 1 ? '' : 's'}.`, () => router.back());
       } catch (e: any) {
-        webSafeAlert('Recurring event', e?.message ?? String(e));
+        webAlert('Recurring event', e?.message ?? String(e));
       } finally { setSaving(false); }
       return;
     }
@@ -168,9 +146,9 @@ export default function EditEventScreen() {
           startTime: hhmm(st), arrivalTime: hhmm(at), endTime: hhmm(et), eventTimezone: tz,
           venueName, venueAddress, uniform, notes,
         });
-        alertThenGo(`Updated ${n} occurrence${n === 1 ? '' : 's'}.`, () => router.back());
+        alertThenGo('Done', `Updated ${n} occurrence${n === 1 ? '' : 's'}.`, () => router.back());
       } catch (e: any) {
-        webSafeAlert('Update series', e?.message ?? String(e));
+        webAlert('Update series', e?.message ?? String(e));
       } finally { setSaving(false); }
       return;
     }
@@ -196,34 +174,29 @@ export default function EditEventScreen() {
       await saveEvent(input, userId);
       router.back();
     } catch (e: any) {
-      webSafeAlert('Save event', e?.message ?? String(e));
+      webAlert('Save event', e?.message ?? String(e));
     } finally { setSaving(false); }
   }
 
   async function onCancelSeries() {
     if (!existing?.seriesId) return;
     const from = existing.localDate;
-    const run = async () => {
-      try { const n = await cancelSeries(existing.seriesId!, from); alertThenGo(`Canceled ${n} upcoming occurrence${n === 1 ? '' : 's'}.`, () => router.back()); }
-      catch (e: any) { webSafeAlert('Cancel series', e?.message ?? String(e)); }
-    };
-    if (Platform.OS === 'web') { if (window.confirm('Cancel this and every later occurrence in the series? Past ones stay as history.')) run(); return; }
-    Alert.alert('Cancel series', 'Cancel this and every later occurrence? Past ones stay as history.', [
-      { text: 'Keep them' }, { text: 'Cancel series', style: 'destructive', onPress: run },
-    ]);
+    const ok = await confirm({ title: 'Cancel series', message: 'Cancel this and every later occurrence? Past ones stay as history.', confirmText: 'Cancel series', destructive: true });
+    if (!ok) return;
+    try { const n = await cancelSeries(existing.seriesId!, from); alertThenGo('Done', `Canceled ${n} upcoming occurrence${n === 1 ? '' : 's'}.`, () => router.back()); }
+    catch (e: any) { webAlert('Cancel series', e?.message ?? String(e)); }
   }
 
   async function doCancel() {
     if (!existing) return;
     try { await cancelEvent(existing.id); router.back(); }
-    catch (e: any) { webSafeAlert('Cancel event', e?.message ?? String(e)); }
+    catch (e: any) { webAlert('Cancel event', e?.message ?? String(e)); }
   }
   async function onCancelEvent() {
     if (!existing) return;
-    if (Platform.OS === 'web') { if (window.confirm(`Cancel “${existing.title ?? 'this event'}”? It stays on the schedule marked canceled.`)) await doCancel(); return; }
-    Alert.alert('Cancel event', `Mark “${existing.title ?? 'this event'}” canceled? It stays on the schedule, struck through.`, [
-      { text: 'Keep it', style: 'cancel' }, { text: 'Cancel event', style: 'destructive', onPress: doCancel },
-    ]);
+    const ok = await confirm({ title: 'Cancel event', message: `Mark “${existing.title ?? 'this event'}” canceled? It stays on the schedule, struck through.`, confirmText: 'Cancel event', destructive: true });
+    if (!ok) return;
+    await doCancel();
   }
 
   return (

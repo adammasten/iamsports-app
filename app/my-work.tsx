@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
 import { downloadMedia } from '@/lib/native/download-media';
@@ -27,6 +27,7 @@ import { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 import ContentCard, { type CardAction } from '@/components/content-card/ContentCard';
 import { confirm } from '@/lib/confirm';
+import { webAlert } from '@/lib/webAlert';
 import WebTopNav from './components/WebTopNav';
 import { deriveShareStatus } from '@/lib/core/shareStatus';
 
@@ -372,7 +373,7 @@ export default function MyWorkScreen() {
       .select('id, label, url, thumbnail_path, sort_order, game_id, created_at, tagging_complete, event_type, upload_status, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))')
       .eq('uploaded_by_user_id', userId)
       .is('deleted_at', null);
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
 
     const byId = new Map<string, Game>();
     const loose: (GameVideo & { createdAt: string })[] = [];
@@ -454,46 +455,34 @@ export default function MyWorkScreen() {
   // clip count. Flipping the last incomplete video to done turns the game green.
   // Delete a game. videos.game_id and clips.video_id both CASCADE, so one delete
   // removes the game, its videos, and their clips — warn about that.
-  function confirmDeleteGame(game: Game) {
+  async function confirmDeleteGame(game: Game) {
     const n = game.videos.length;
-    Alert.alert(
-      'Delete game',
-      `Delete “${game.title}”? It (and its ${n} video${n === 1 ? '' : 's'}) moves to Recently Deleted — a team admin can restore it for 30 days.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            // delete_game clears the game_lineups guard, then deletes (cascades
-            // videos/clips). A raw games.delete() would error once a lineup exists.
-            const { error } = await supabase.rpc('delete_game', { p_game_id: game.id });
-            if (error) { Alert.alert('Error', error.message); return; }
-            loadGames();
-          },
-        },
-      ],
-    );
+    const ok = await confirm({
+      title: 'Delete game',
+      message: `Delete “${game.title}”? It (and its ${n} video${n === 1 ? '' : 's'}) moves to Recently Deleted — a team admin can restore it for 30 days.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    // delete_game clears the game_lineups guard, then deletes (cascades
+    // videos/clips). A raw games.delete() would error once a lineup exists.
+    const { error } = await supabase.rpc('delete_game', { p_game_id: game.id });
+    if (error) { webAlert('Error', error.message); return; }
+    loadGames();
   }
 
   // Delete a single video (game footage or loose). clips.video_id CASCADEs.
-  function confirmDeleteVideo(video: GameVideo) {
-    Alert.alert(
-      'Delete video',
-      `Delete “${video.label}”? It moves to Recently Deleted — restorable for 30 days.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase.rpc('soft_delete_video', { p_video_id: video.id });
-            if (error) { Alert.alert('Error', error.message); return; }
-            loadGames();
-          },
-        },
-      ],
-    );
+  async function confirmDeleteVideo(video: GameVideo) {
+    const ok = await confirm({
+      title: 'Delete video',
+      message: `Delete “${video.label}”? It moves to Recently Deleted — restorable for 30 days.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    const { error } = await supabase.rpc('soft_delete_video', { p_video_id: video.id });
+    if (error) { webAlert('Error', error.message); return; }
+    loadGames();
   }
 
   // Open the game picker to attach a LOOSE video (fromGameId null) or MOVE an
@@ -501,7 +490,7 @@ export default function MyWorkScreen() {
   function openAttachPicker(video: GameVideo, fromGameId: string | null = null) {
     const targets = games.filter(g => g.id !== fromGameId);
     if (targets.length === 0) {
-      Alert.alert(
+      webAlert(
         fromGameId ? 'No other games' : 'No games yet',
         fromGameId
           ? 'There are no other games to move this into.'
@@ -548,7 +537,7 @@ export default function MyWorkScreen() {
     }
 
     const { error } = await supabase.from('videos').update(patch).eq('id', video.id);
-    if (error) { Alert.alert('Could not add to game', error.message); return; }
+    if (error) { webAlert('Could not add to game', error.message); return; }
     loadGames();
   }
 
@@ -797,7 +786,7 @@ export default function MyWorkScreen() {
   }
 
   function openReel(reel: Reel) {
-    if (!reel.storagePath) { Alert.alert('Unavailable', 'This reel’s video could not be loaded.'); return; }
+    if (!reel.storagePath) { webAlert('Unavailable', 'This reel’s video could not be loaded.'); return; }
     // Omit startTime/endTime so shared-viewer plays the whole rendered reel.
     router.push({
       pathname: '/shared-viewer',
@@ -828,7 +817,7 @@ export default function MyWorkScreen() {
     const { error } = await supabase.from('videos').update({ label: next }).eq('id', video.id);
     if (error) {
       applyLocal(video.label); // revert
-      Alert.alert('Error', error.message);
+      webAlert('Error', error.message);
     }
   }
 
@@ -840,7 +829,7 @@ export default function MyWorkScreen() {
     const hasKids = pickerGroups.some(g => g.key === 'kids');
     const hasTeams = coachedTeams.length > 0;
     if (!hasKids && !hasTeams) {
-      Alert.alert('No one to share with', 'Add a kid, or join a team as a coach, to share a reel.');
+      webAlert('No one to share with', 'Add a kid, or join a team as a coach, to share a reel.');
       return;
     }
     setTierReel(item);
@@ -860,10 +849,10 @@ export default function MyWorkScreen() {
           p_audience: 'player',
           p_target_player_id: playerId,
         });
-        if (error) { Alert.alert('Couldn’t share', error.message); return; }
+        if (error) { webAlert('Couldn’t share', error.message); return; }
         if (note && shareId) await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: note });
         addDestinations(item.contentId, [{ kind: 'player', kidName, playerId }]);
-        Alert.alert('Shared', `Sent to ${kidName}’s family.` + (note ? ' With your note.' : ''));
+        webAlert('Shared', `Sent to ${kidName}’s family.` + (note ? ' With your note.' : ''));
       },
     });
   }
@@ -903,9 +892,9 @@ export default function MyWorkScreen() {
     else if (dest.kind === 'coaches') q = q.eq('audience', 'coaches').eq('team_id', dest.teamId);
     else q = q.eq('audience', 'player').eq('target_player_id', dest.playerId);
     const { data, error } = await q.select('id');
-    if (error) { Alert.alert('Couldn’t remove', error.message); return; }
+    if (error) { webAlert('Couldn’t remove', error.message); return; }
     if (!data || data.length === 0) {
-      Alert.alert('Couldn’t remove', 'You can only remove things you posted, or content on a team you coach.');
+      webAlert('Couldn’t remove', 'You can only remove things you posted, or content on a team you coach.');
       return;
     }
     removeDestinationLocal(item.contentId, dest);
@@ -931,7 +920,7 @@ export default function MyWorkScreen() {
   // Add / edit / clear the per-share note for one destination. Opens the note
   // sheet pre-filled; set_share_note is sharer-gated and nullif-clears on empty.
   function editDestinationNote(item: Postable, dest: Destination) {
-    if (!dest.shareId) { Alert.alert('Not ready', 'Reopen this screen and try again.'); return; }
+    if (!dest.shareId) { webAlert('Not ready', 'Reopen this screen and try again.'); return; }
     const shareId = dest.shareId;
     setNoteSheet({
       audience: audienceForDest(dest),
@@ -939,7 +928,7 @@ export default function MyWorkScreen() {
       run: async (note: string) => {
         const trimmed = note.trim();
         const { error } = await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: trimmed || null });
-        if (error) { Alert.alert('Error', error.message); return; }
+        if (error) { webAlert('Error', error.message); return; }
         updateDestinationNote(item.contentId, dest, trimmed || null);
       },
     });
@@ -968,11 +957,11 @@ export default function MyWorkScreen() {
     if (!s || !next) return;
     if (s.kind === 'reel') {
       const { error } = await supabase.from('highlight_reels').update({ name: next }).eq('id', s.id);
-      if (error) { Alert.alert('Couldn’t rename', error.message); return; }
+      if (error) { webAlert('Couldn’t rename', error.message); return; }
       setReels(prev => prev.map(r => (r.id === s.id ? { ...r, name: next } : r)));
     } else {
       const { error } = await supabase.from('games').update({ title: next }).eq('id', s.id);
-      if (error) { Alert.alert('Couldn’t rename', error.message); return; }
+      if (error) { webAlert('Couldn’t rename', error.message); return; }
       setGames(prev => prev.map(g => (g.id === s.id ? { ...g, title: next } : g)));
     }
   }
@@ -981,13 +970,13 @@ export default function MyWorkScreen() {
   // through getSignedVideoUrl → sign-media, so you can only download what you're
   // entitled to watch. Camera roll on phone, browser download on web.
   async function downloadReel(reel: Reel) {
-    if (!reel.storagePath) { Alert.alert('Download', 'This reel isn’t ready yet.'); return; }
+    if (!reel.storagePath) { webAlert('Download', 'This reel isn’t ready yet.'); return; }
     setDownloadingId(reel.id);
     try {
       const { failed } = await downloadMedia([{ key: reel.storagePath, filename: reel.name }]);
-      Alert.alert('Download', failed ? 'Couldn’t save the reel.' : 'Saved to your device.');
+      webAlert('Download', failed ? 'Couldn’t save the reel.' : 'Saved to your device.');
     } catch (e: any) {
-      Alert.alert('Download', e?.message ?? 'Download failed.');
+      webAlert('Download', e?.message ?? 'Download failed.');
     } finally {
       setDownloadingId(null);
     }
@@ -1002,16 +991,15 @@ export default function MyWorkScreen() {
     if (ready.length === 0) return;
 
     if (action === 'remove') {
-      Alert.alert(
-        'Remove from device?',
-        `The videos stay in the cloud — you can save them offline again later.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: async () => {
-            for (const v of ready) await removeVideoFromCache(v.id);
-          }},
-        ],
-      );
+      confirm({
+        title: 'Remove from device?',
+        message: `The videos stay in the cloud — you can save them offline again later.`,
+        confirmText: 'Remove',
+        destructive: true,
+      }).then(async ok => {
+        if (!ok) return;
+        for (const v of ready) await removeVideoFromCache(v.id);
+      });
       return;
     }
 
@@ -1027,15 +1015,15 @@ export default function MyWorkScreen() {
 
   async function downloadGame(game: Game) {
     const items = game.videos.filter(v => v.url && v.uploadStatus === 'ready').map(v => ({ key: v.url, filename: `${game.title} - ${v.label}` }));
-    if (items.length === 0) { Alert.alert('Download', 'This game has no finished videos yet.'); return; }
+    if (items.length === 0) { webAlert('Download', 'This game has no finished videos yet.'); return; }
     setDownloadingId(game.id);
     try {
       const { saved, failed } = await downloadMedia(items);
-      Alert.alert('Download', failed
+      webAlert('Download', failed
         ? `Saved ${saved} of ${items.length}. ${failed} couldn’t be saved.`
         : `Saved ${saved} video${saved === 1 ? '' : 's'} to your device.`);
     } catch (e: any) {
-      Alert.alert('Download', e?.message ?? 'Download failed.');
+      webAlert('Download', e?.message ?? 'Download failed.');
     } finally {
       setDownloadingId(null);
     }
@@ -1045,15 +1033,15 @@ export default function MyWorkScreen() {
   // Slower than downloadGame (re-encodes on the server) — an explicit opt-in.
   async function stitchGame(game: Game) {
     const keys = game.videos.filter(v => v.url && v.uploadStatus === 'ready').map(v => v.url);
-    if (keys.length === 0) { Alert.alert('Combine', 'This game has no finished videos yet.'); return; }
+    if (keys.length === 0) { webAlert('Combine', 'This game has no finished videos yet.'); return; }
     if (keys.length === 1) { downloadGame(game); return; } // one video — nothing to combine
     setStitch({ title: game.title, label: 'Starting…', progress: 0 });
     try {
       await stitchAndDownloadGame(keys, game.title, (s) =>
         setStitch({ title: game.title, label: s.label, progress: s.progress }));
-      Alert.alert('Combine', 'Saved the combined game to your device.');
+      webAlert('Combine', 'Saved the combined game to your device.');
     } catch (e: any) {
-      Alert.alert('Combine', e?.message ?? 'Combining failed.');
+      webAlert('Combine', e?.message ?? 'Combining failed.');
     } finally {
       setStitch(null);
     }
@@ -1085,7 +1073,7 @@ export default function MyWorkScreen() {
   }
 
   function openSaved(e: SavedEntry) {
-    if (!e.storagePath) { Alert.alert('Unavailable', 'This content could not be loaded.'); return; }
+    if (!e.storagePath) { webAlert('Unavailable', 'This content could not be loaded.'); return; }
     router.push({ pathname: '/shared-viewer', params: {
       title: e.title, storagePath: e.storagePath, contentType: e.contentType, contentId: e.contentId,
       shareId: e.shareId,
@@ -1096,7 +1084,7 @@ export default function MyWorkScreen() {
 
   async function removeSaved(e: SavedEntry) {
     const { error } = await supabase.from('saved_items').delete().eq('id', e.savedId);
-    if (error) { Alert.alert('Couldn’t remove', error.message); return; }
+    if (error) { webAlert('Couldn’t remove', error.message); return; }
     setSavedItems(prev => prev.filter(x => x.savedId !== e.savedId));
   }
 
@@ -1105,9 +1093,9 @@ export default function MyWorkScreen() {
     setDownloadingId(e.savedId);
     try {
       const { failed } = await downloadMedia([{ key: e.storagePath, filename: e.title }]);
-      Alert.alert('Download', failed ? 'Couldn’t save this video.' : 'Saved to your device.');
+      webAlert('Download', failed ? 'Couldn’t save this video.' : 'Saved to your device.');
     } catch (err: any) {
-      Alert.alert('Download', err?.message ?? 'Download failed.');
+      webAlert('Download', err?.message ?? 'Download failed.');
     } finally {
       setDownloadingId(null);
     }
@@ -1132,7 +1120,7 @@ export default function MyWorkScreen() {
           p_target_player_id: null,
           p_team_id: teamId,
         });
-        if (teamErr) { Alert.alert('Error', teamErr.message); return; }
+        if (teamErr) { webAlert('Error', teamErr.message); return; }
         // The note goes on the TEAM share (the team wall audience).
         if (note && teamShareId) await supabase.rpc('set_share_note', { p_share_id: teamShareId, p_note: note });
 
@@ -1145,12 +1133,12 @@ export default function MyWorkScreen() {
             p_target_player_id: null,
             p_team_id: teamId,
           });
-          if (pubErr) { Alert.alert('Error', pubErr.message); return; }
+          if (pubErr) { webAlert('Error', pubErr.message); return; }
           dests.push({ kind: 'public' });
         }
 
         addDestinations(item.contentId, dests);
-        Alert.alert('Posted', alsoPublic ? `Posted to ${teamName} wall and public.` : `Posted to ${teamName} wall.`);
+        webAlert('Posted', alsoPublic ? `Posted to ${teamName} wall and public.` : `Posted to ${teamName} wall.`);
       },
     });
   }
@@ -1169,10 +1157,10 @@ export default function MyWorkScreen() {
           p_target_player_id: null,
           p_team_id: teamId,
         });
-        if (error) { Alert.alert('Error', error.message); return; }
+        if (error) { webAlert('Error', error.message); return; }
         if (note && shareId) await supabase.rpc('set_share_note', { p_share_id: shareId, p_note: note });
         addDestinations(item.contentId, [{ kind: 'coaches', teamId, teamName }]);
-        Alert.alert('Posted', `Posted to ${teamName} coaches’ board.` + (note ? ' With your note.' : ''));
+        webAlert('Posted', `Posted to ${teamName} coaches’ board.` + (note ? ' With your note.' : ''));
       },
     });
   }
@@ -1183,7 +1171,7 @@ export default function MyWorkScreen() {
     const ok = await confirm({ title: 'Delete reel', message: `Delete “${reel.name}”? It moves to Recently Deleted — restorable for 30 days.`, confirmText: 'Delete', destructive: true });
     if (!ok) return;
     const { error } = await supabase.rpc('soft_delete_reel', { p_reel_id: reel.id });
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
     setReels(prev => prev.filter(r => r.id !== reel.id));
   }
 
@@ -1403,7 +1391,7 @@ export default function MyWorkScreen() {
                             active: game.destinations.length > 0,
                             onPress: () => {
                               // A shared game plays only its finalized videos — nothing ready → nothing to share.
-                              if (!game.videos.some(v => v.uploadStatus === 'ready')) { Alert.alert('Share', 'No finished videos to share yet.'); return; }
+                              if (!game.videos.some(v => v.uploadStatus === 'ready')) { webAlert('Share', 'No finished videos to share yet.'); return; }
                               if (game.destinations.length) manageSharing(item, game.destinations); else confirmPostToWall(item);
                             },
                           },

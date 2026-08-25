@@ -4,7 +4,8 @@ import { supabase } from '@/supabase';
 import { useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Dropdown, { type DropdownOption } from './components/Dropdown';
 
@@ -52,7 +53,7 @@ export default function EditReelScreen() {
     (async () => {
       if (!reelId) { setLoading(false); return; }
       const { data: r, error } = await supabase.from('highlight_reels').select('id, name, team_id').eq('id', reelId).single();
-      if (error || !r) { Alert.alert('Error', error?.message ?? 'Reel not found'); goBackOrHome(); return; }
+      if (error || !r) { webAlert('Error', error?.message ?? 'Reel not found'); goBackOrHome(); return; }
       setName(r.name ?? '');
       setTeamId(r.team_id ?? '');
       const { data: rt } = await supabase.from('reel_tags').select('tag_id').eq('reel_id', reelId);
@@ -93,22 +94,22 @@ export default function EditReelScreen() {
 
   async function save() {
     if (!reelId) return;
-    if (!name.trim()) { Alert.alert('Name required', 'Give the reel a name.'); return; }
+    if (!name.trim()) { webAlert('Name required', 'Give the reel a name.'); return; }
     setSaving(true);
     const { error: rErr } = await supabase.from('highlight_reels')
       .update({ name: name.trim(), team_id: teamId || null }).eq('id', reelId);
-    if (rErr) { Alert.alert('Error', rErr.message); setSaving(false); return; }
+    if (rErr) { webAlert('Error', rErr.message); setSaving(false); return; }
 
     // Diff reel_tags against what was loaded.
     const toAdd = [...selected].filter(id => !origTagIds.has(id));
     const toRemove = [...origTagIds].filter(id => !selected.has(id));
     if (toRemove.length > 0) {
       const { error } = await supabase.from('reel_tags').delete().eq('reel_id', reelId).in('tag_id', toRemove);
-      if (error) { Alert.alert('Error', error.message); setSaving(false); return; }
+      if (error) { webAlert('Error', error.message); setSaving(false); return; }
     }
     if (toAdd.length > 0) {
       const { error } = await supabase.from('reel_tags').insert(toAdd.map(tag_id => ({ reel_id: reelId, tag_id })));
-      if (error) { Alert.alert('Error', error.message); setSaving(false); return; }
+      if (error) { webAlert('Error', error.message); setSaving(false); return; }
     }
     setSaving(false);
     goBackOrHome();

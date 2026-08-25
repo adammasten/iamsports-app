@@ -6,20 +6,11 @@ import { goBackOrHome } from '@/lib/nav';
 import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { webAlert, alertThenGo } from '@/lib/webAlert';
 
 const DEVICE_TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return 'America/Chicago'; } })();
-
-// RN's Alert.alert is a no-op on web; these show a real message / navigate there.
-function webSafeAlert(title: string, message: string) {
-  if (Platform.OS === 'web') { if (typeof window !== 'undefined') window.alert(message); return; }
-  Alert.alert(title, message);
-}
-function alertThenGo(message: string, go: () => void) {
-  if (Platform.OS === 'web') { if (typeof window !== 'undefined') window.alert(message); go(); return; }
-  Alert.alert('Done', message, [{ text: 'OK', onPress: go }]);
-}
 
 type Row = { date: string; time: string; opponent: string; location: string; home: boolean };
 
@@ -59,9 +50,9 @@ export default function ImportScheduleScreen() {
   const remove = (i: number) => setRows(rs => rs.filter((_, j) => j !== i));
 
   async function confirm() {
-    if (!userId || !teamId) { webSafeAlert('Import', 'Not ready.'); return; }
+    if (!userId || !teamId) { webAlert('Import', 'Not ready.'); return; }
     const valid = rows.filter(r => validYMD(r.date));
-    if (valid.length === 0) { webSafeAlert('Import', 'No rows have a valid date (YYYY-MM-DD). Fix the dates or cancel.'); return; }
+    if (valid.length === 0) { webAlert('Import', 'No rows have a valid date (YYYY-MM-DD). Fix the dates or cancel.'); return; }
     // Insert the whole batch in ONE transaction with notifications suppressed —
     // a season import must not fire one alert per game.
     const payload = valid.map(r => {
@@ -76,9 +67,9 @@ export default function ImportScheduleScreen() {
     setSaving(true);
     const { data, error } = await supabase.rpc('import_game_events', { p_team_id: teamId, p_rows: payload });
     setSaving(false);
-    if (error) { webSafeAlert('Import', error.message); return; }
+    if (error) { webAlert('Import', error.message); return; }
     const n = (data as number) ?? valid.length;
-    alertThenGo(`${n} game${n === 1 ? '' : 's'} added to the schedule.`, () => router.replace('/schedule'));
+    alertThenGo('Done', `${n} game${n === 1 ? '' : 's'} added to the schedule.`, () => router.replace('/schedule'));
   }
 
   return (

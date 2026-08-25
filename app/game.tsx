@@ -7,7 +7,9 @@ import { supabase } from '@/supabase';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { FlatList, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
+import { confirm } from '@/lib/confirm';
 
 // Note: the per-video "Save Offline" badge used to live here — it moved to the
 // game card on my-work.tsx (Film Room) as a single per-GAME action. Videos on
@@ -32,6 +34,9 @@ export default function GameScreen() {
   // Inline per-video label rename (Q1 → Q3): which video + working draft.
   const [renamingVideoId, setRenamingVideoId] = useState<string | null>(null);
   const [videoDraft, setVideoDraft] = useState('');
+  // Web-safe per-video options menu (Alert's button list is a no-op on the web
+  // app). Non-null opens the options sheet for that video.
+  const [optionsVideo, setOptionsVideo] = useState<any>(null);
 
   useEffect(() => {
     if (id) { fetchGame(); fetchVideos(); }
@@ -40,7 +45,7 @@ export default function GameScreen() {
 
   async function fetchVideos() {
     const { data, error } = await supabase.from('videos').select('*').eq('game_id', id).order('sort_order');
-    if (error) Alert.alert('Error', error.message);
+    if (error) webAlert('Error', error.message);
     else setVideos(data || []);
   }
 
@@ -59,7 +64,7 @@ export default function GameScreen() {
     const { error } = await supabase.from('videos').update({ label: next }).eq('id', video.id);
     if (error) {
       setVideos(prev => prev.map(v => (v.id === video.id ? { ...v, label: video.label } : v)));
-      Alert.alert('Error', error.message);
+      webAlert('Error', error.message);
     }
   }
 
@@ -80,13 +85,13 @@ export default function GameScreen() {
   }
 
   async function uploadVideo() {
-    if (!pendingFile) { Alert.alert('Choose a video first'); return; }
+    if (!pendingFile) { webAlert('Choose a video first', 'Choose a video first'); return; }
     // team_id comes from the GAME's own row (fetchGame), never the active team —
     // they can differ (Film Room entry, or a mid-flow team switch). A game with
     // no readable team is a broken state: block and surface it, never misfile.
-    if (!userId) { Alert.alert('Not signed in'); return; }
+    if (!userId) { webAlert('Not signed in', 'Not signed in'); return; }
     if (!gameTeamId) {
-      Alert.alert('Couldn’t determine this game’s team — can’t add video');
+      webAlert('Couldn’t add video', 'Couldn’t determine this game’s team — can’t add video');
       return;
     }
     if (!(await requirePermission(gameTeamId, 'upload_video'))) return;
@@ -142,7 +147,7 @@ export default function GameScreen() {
           .then(undefined, () => {});
         fetchVideos();
       }
-      Alert.alert(
+      webAlert(
         'Upload Error',
         `${e?.message || 'Unknown'}\n${String(e?.stack || '').slice(0, 300)}`
       );
@@ -154,16 +159,23 @@ export default function GameScreen() {
     }
   }
 
+  async function doDeleteVideo(videoId: string) {
+    await supabase.from('videos').delete().eq('id', videoId);
+    fetchVideos();
+  }
+
   async function deleteVideo(videoId: string) {
-    Alert.alert('Delete Video', 'Delete this video?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive', onPress: async () => {
-          await supabase.from('videos').delete().eq('id', videoId);
-          fetchVideos();
-        }
-      }
-    ]);
+    const ok = await confirm({ title: 'Delete Video', message: 'Delete this video?', confirmText: 'Delete', destructive: true });
+    if (ok) doDeleteVideo(videoId);
+  }
+
+  // Tap on a not-yet-ready video: explain its state and offer to delete it.
+  async function handleNotReadyVideo(item: any) {
+    const message = item.upload_status === 'uploading'
+      ? 'Still uploading — check back in a moment.'
+      : 'This upload didn’t finish.';
+    const ok = await confirm({ title: item.label, message, confirmText: 'Delete', destructive: true });
+    if (ok) doDeleteVideo(item.id);
   }
 
   return (
@@ -245,16 +257,8 @@ export default function GameScreen() {
                 <TouchableOpacity
                   style={styles.videoCardMain}
                   onPress={() => item.upload_status && item.upload_status !== 'ready'
-                    ? Alert.alert(item.label, item.upload_status === 'uploading' ? 'Still uploading — check back in a moment.' : 'This upload didn’t finish.', [
-                        { text: 'Delete', style: 'destructive', onPress: () => deleteVideo(item.id) },
-                        { text: 'Cancel', style: 'cancel' },
-                      ])
-                    : Alert.alert(item.label, 'What would you like to do?', [
-                        { text: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: item.id, url: item.url, label: item.label } }) },
-                        { text: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: item.id, label: item.label } }) },
-                        { text: 'Rename', onPress: () => startVideoRename(item) },
-                        { text: 'Cancel', style: 'cancel' }
-                      ])}
+                    ? handleNotReadyVideo(item)
+                    : setOptionsVideo(item)}
                   onLongPress={() => deleteVideo(item.id)}
                 >
                   <Text style={styles.videoLabel}>{item.label}</Text>
@@ -267,6 +271,45 @@ export default function GameScreen() {
           )}
         />
       )}
+
+      {/* Web-safe per-video options menu (replaces the native-only Alert menu). */}
+      <Modal visible={!!optionsVideo} transparent animationType="fade" onRequestClose={() => setOptionsVideo(null)}>
+        <TouchableOpacity style={styles.optionsOverlay} activeOpacity={1} onPress={() => setOptionsVideo(null)}>
+          <View style={styles.optionsSheet}>
+            <Text style={styles.optionsTitle}>{optionsVideo?.label}</Text>
+            <TouchableOpacity
+              style={styles.optionRow}
+              onPress={() => {
+                const v = optionsVideo; setOptionsVideo(null);
+                router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label } });
+              }}
+            >
+              <Text style={styles.optionText}>Tag Video</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.optionRow}
+              onPress={() => {
+                const v = optionsVideo; setOptionsVideo(null);
+                router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } });
+              }}
+            >
+              <Text style={styles.optionText}>View Clips</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.optionRow}
+              onPress={() => {
+                const v = optionsVideo; setOptionsVideo(null);
+                startVideoRename(v);
+              }}
+            >
+              <Text style={styles.optionText}>Rename</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.optionRow} onPress={() => setOptionsVideo(null)}>
+              <Text style={styles.optionCancel}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -298,4 +341,10 @@ const styles = StyleSheet.create({
   },
   videoHint: { fontSize: 12, color: '#aaa' },
   empty: { textAlign: 'center', color: '#888', marginTop: 60, fontSize: 16 },
+  optionsOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  optionsSheet: { width: '100%', maxWidth: 360, backgroundColor: '#fff', borderRadius: 14, overflow: 'hidden' },
+  optionsTitle: { fontSize: 15, fontWeight: '700', color: '#333', padding: 16, textAlign: 'center' },
+  optionRow: { paddingVertical: 16, paddingHorizontal: 16, borderTopWidth: 1, borderTopColor: '#eee', alignItems: 'center' },
+  optionText: { fontSize: 16, color: '#534AB7', fontWeight: '600' },
+  optionCancel: { fontSize: 16, color: '#888' },
 });

@@ -2,7 +2,9 @@ import { supabase } from '@/supabase';
 import { useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
+import { confirm } from '@/lib/confirm';
 
 export default function ClipsScreen() {
   const params = useLocalSearchParams();
@@ -43,7 +45,7 @@ export default function ClipsScreen() {
       .select('*')
       .eq('video_id', videoId)
       .order('start_time');
-    if (error) { Alert.alert('Error', error.message); setLoading(false); return; }
+    if (error) { webAlert('Error', error.message); setLoading(false); return; }
 
     const clipsWithTags = await Promise.all((clipsData || []).map(async (clip) => {
       const { data: tagData } = await supabase
@@ -63,16 +65,11 @@ export default function ClipsScreen() {
   }
 
   async function deleteClip(clipId: string) {
-    Alert.alert('Delete Clip', 'Permanently delete this clip?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive', onPress: async () => {
-          await supabase.from('clip_tags').delete().eq('clip_id', clipId);
-          await supabase.from('clips').delete().eq('id', clipId);
-          fetchClips();
-        }
-      }
-    ]);
+    const ok = await confirm({ title: 'Delete Clip', message: 'Permanently delete this clip?', confirmText: 'Delete', destructive: true });
+    if (!ok) return;
+    await supabase.from('clip_tags').delete().eq('clip_id', clipId);
+    await supabase.from('clips').delete().eq('id', clipId);
+    fetchClips();
   }
 
   function formatTime(seconds: number) {
