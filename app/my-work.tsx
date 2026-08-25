@@ -1258,6 +1258,7 @@ export default function MyWorkScreen() {
                           { label: 'Delete', destructive: true, onPress: () => confirmDeleteVideo(v) },
                         ] })
                       : setOverflowSheet({ title: v.label, options: [
+                          { label: 'Edit details', onPress: () => router.push({ pathname: '/edit-video', params: { videoId: v.id } }) },
                           { label: 'Add to a game', onPress: () => openAttachPicker(v) },
                           { label: 'Tag Video', onPress: () => router.push({ pathname: '/tagging-overlay', params: { videoId: v.id, url: v.url, label: v.label, personal: '1' } }) },
                           { label: 'View Clips', onPress: () => router.push({ pathname: '/clips', params: { videoId: v.id, label: v.label } }) },

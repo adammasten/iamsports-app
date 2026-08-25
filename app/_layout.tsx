@@ -257,6 +257,7 @@ export default function RootLayout() {
           <Stack.Screen name="game-detail" options={{ headerShown: false }} />
           <Stack.Screen name="game-player" options={{ headerShown: false }} />
           <Stack.Screen name="edit-reel" options={{ headerShown: false }} />
+          <Stack.Screen name="edit-video" options={{ headerShown: false }} />
           <Stack.Screen name="box-score" options={{ headerShown: false }} />
           <Stack.Screen name="account" options={{ headerShown: false }} />
           <Stack.Screen name="recently-deleted" options={{ headerShown: false }} />
