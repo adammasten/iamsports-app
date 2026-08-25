@@ -31,15 +31,30 @@ export async function fetchCoachTags(userId: string): Promise<string[]> {
 }
 
 // ── The Vault: the community bank (visibility='community') ──────────────
-export type VaultPlay = LibraryPlay & { sport: string; saveCount: number };
+export type VaultPlay = LibraryPlay & { sport: string; saveCount: number; ownerUserId: string };
 
 export async function fetchVaultPlays(sport?: string): Promise<VaultPlay[]> {
-  let q = supabase.from('library_plays').select('id, name, doc, tags, sport, save_count')
+  let q = supabase.from('library_plays').select('id, name, doc, tags, sport, save_count, owner_user_id')
     .eq('visibility', 'community').order('save_count', { ascending: false }).order('name');
   if (sport) q = q.eq('sport', sport);
   const { data, error } = await q;
   if (error) throw error;
-  return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, doc: (r.doc ?? null) as PlayDoc | null, tags: Array.isArray(r.tags) ? r.tags : [], sport: r.sport, saveCount: r.save_count ?? 0 }));
+  return (data ?? []).map((r: any) => ({ id: r.id, name: r.name, doc: (r.doc ?? null) as PlayDoc | null, tags: Array.isArray(r.tags) ? r.tags : [], sport: r.sport, saveCount: r.save_count ?? 0, ownerUserId: r.owner_user_id }));
+}
+
+// Am I a super admin? Gates moderation controls (e.g. deleting others' Vault plays).
+// RLS still enforces the real rule (library_plays_all: owner OR is_super_admin()).
+export async function amISuperAdmin(): Promise<boolean> {
+  const { data, error } = await supabase.rpc('am_i_super_admin');
+  if (error) return false;
+  return data === true;
+}
+
+// Remove a play from the Vault. RLS permits only the play's owner or a super admin,
+// so a normal user can only ever delete a play they published themselves.
+export async function deleteVaultPlay(id: string): Promise<void> {
+  const { error } = await supabase.from('library_plays').delete().eq('id', id);
+  if (error) throw error;
 }
 
 // Copy a community play into MY library (server-side deep copy; bumps save_count).

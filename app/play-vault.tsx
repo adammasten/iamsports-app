@@ -3,10 +3,10 @@
 // is the action: "Add to Playbook" copies the diagram into your own library.
 import PlayPlayer from '@/components/PlayPlayer';
 import { useTeamContext } from '@/context';
-import { fetchVaultPlays, grabPlay, type VaultPlay } from '@/lib/core/playbook/library';
+import { amISuperAdmin, deleteVaultPlay, fetchVaultPlays, grabPlay, type VaultPlay } from '@/lib/core/playbook/library';
+import { confirm } from '@/lib/confirm';
 import { tagColor } from '@/lib/core/playbook/tags';
 import { goBackOrHome } from '@/lib/nav';
-import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import WebTopNav from './components/WebTopNav';
@@ -25,11 +25,33 @@ export default function PlayVault() {
   const [tag, setTag] = useState<string | null>(null);
   const [grabbing, setGrabbing] = useState<string | null>(null);
   const [done, setDone] = useState<Record<string, boolean>>({});
+  const [isSuper, setIsSuper] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     fetchVaultPlays().then(setPlays).catch(e => webSafeAlert('The Vault', e?.message ?? 'Could not load plays.')).finally(() => setLoading(false));
+    amISuperAdmin().then(setIsSuper).catch(() => setIsSuper(false));
   }, []);
+
+  // You can remove a play from the Vault only if you published it, or if you're a
+  // super admin (moderation). RLS enforces the same rule server-side.
+  async function del(p: VaultPlay) {
+    const ok = await confirm({
+      title: `Remove “${p.doc?.name ?? p.name}” from the Vault?`,
+      message: isSuper && p.ownerUserId !== userId
+        ? 'Moderation: this permanently removes the community play for everyone. Copies people already added to their own playbooks are unaffected.'
+        : 'This permanently removes your play from the Vault. Copies people already added are unaffected.',
+      confirmText: 'Remove', destructive: true,
+    });
+    if (!ok) return;
+    setDeleting(p.id);
+    try {
+      await deleteVaultPlay(p.id);
+      setPlays(prev => prev.filter(x => x.id !== p.id));
+    } catch (e: any) { webSafeAlert('Remove', e?.message ?? 'Could not remove the play.'); }
+    finally { setDeleting(null); }
+  }
 
   const sports = useMemo(() => Array.from(new Set(plays.map(p => p.sport))).sort(), [plays]);
   const tags = useMemo(() => {
@@ -86,6 +108,11 @@ export default function PlayVault() {
                 <View style={styles.nameRow}>
                   <Text style={styles.name} numberOfLines={1}>{p.doc?.name ?? p.name}</Text>
                   {p.saveCount > 0 ? <Text style={styles.saves}>★ {p.saveCount}</Text> : null}
+                  {(isSuper || p.ownerUserId === userId) ? (
+                    <Pressable onPress={() => del(p)} disabled={deleting === p.id} hitSlop={8} style={styles.delBtn}>
+                      <Text style={styles.del}>{deleting === p.id ? '…' : '🗑'}</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
                 {p.tags.length > 0 ? (
                   <View style={styles.tagWrap}>
@@ -129,6 +156,8 @@ const styles = StyleSheet.create({
   nameRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   name: { color: '#f1f4f6', fontSize: 16, fontWeight: '700', flex: 1 },
   saves: { color: '#e0a52e', fontSize: 13, fontWeight: '800', marginLeft: 8 },
+  delBtn: { marginLeft: 8, paddingHorizontal: 2 },
+  del: { fontSize: 15, opacity: 0.75 },
   tagWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   tagChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
   tagDot: { width: 7, height: 7, borderRadius: 4 },
