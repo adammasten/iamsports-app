@@ -3,7 +3,8 @@ import { goBackOrHome } from '@/lib/nav';
 import { alertThenGo, webAlert } from '@/lib/webAlert';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -27,10 +28,20 @@ export default function JoinTeamScreen() {
 
   const cleanCode = () => code.trim().toUpperCase();
 
-  async function lookup() {
-    if (!code.trim()) return;
+  // Arriving from the onboarding one-box: pre-fill the code and look it up so the
+  // user lands straight on the roster picker instead of re-typing.
+  const params = useLocalSearchParams();
+  useEffect(() => {
+    const c = (Array.isArray(params.code) ? params.code[0] : params.code) as string | undefined;
+    if (c && !preview) { setCode(c.toUpperCase()); lookup(c); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function lookup(override?: string) {
+    const cc = (override ?? code).trim().toUpperCase();
+    if (!cc) return;
     setLoading(true);
-    const { data, error } = await supabase.rpc('preview_roster_by_code', { p_code: cleanCode() });
+    const { data, error } = await supabase.rpc('preview_roster_by_code', { p_code: cc });
     setLoading(false);
     if (error || !data) { webAlert('Team code not found', 'That didn’t match a team join code.\n\nIf it’s a PLAYER’S invite code (to be added as a guardian of one kid), go back and use “Have a code?” instead.'); return; }
     setPreview(data as Preview);
@@ -96,7 +107,7 @@ export default function JoinTeamScreen() {
             autoFocus
             maxLength={8}
           />
-          <TouchableOpacity style={styles.primaryBtn} onPress={lookup} disabled={loading || !code.trim()}>
+          <TouchableOpacity style={styles.primaryBtn} onPress={() => lookup()} disabled={loading || !code.trim()}>
             {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Continue</Text>}
           </TouchableOpacity>
         </View>

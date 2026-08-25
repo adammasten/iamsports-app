@@ -2,8 +2,8 @@ import { useTeamContext } from '@/context';
 import { goBackOrHome } from '@/lib/nav';
 import { alertThenGo, webAlert } from '@/lib/webAlert';
 import { supabase } from '@/supabase';
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -15,6 +15,14 @@ export default function JoinCoachScreen() {
   const { refreshTeams, setActiveTeam } = useTeamContext();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // Pre-fill the code when arriving from the onboarding one-box.
+  const params = useLocalSearchParams();
+  useEffect(() => {
+    const c = (Array.isArray(params.code) ? params.code[0] : params.code) as string | undefined;
+    if (c) setCode(c.toUpperCase());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function redeem() {
     if (!code.trim()) return;

@@ -7,7 +7,7 @@ import { SPORTS } from '@/lib/core/upload-meta';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, AppState, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
@@ -75,6 +75,16 @@ export default function SelectTeamScreen() {
   const [showNewKid, setShowNewKid] = useState(false);
   const [newKidName, setNewKidName] = useState('');
   const [creatingKid, setCreatingKid] = useState(false);
+
+  // Onboarding "start fresh" deep-links: /select-team?action=newteam|newkid opens
+  // the matching create modal straight away, so a new user acts in one tap.
+  const params = useLocalSearchParams();
+  useEffect(() => {
+    const action = Array.isArray(params.action) ? params.action[0] : params.action;
+    if (action === 'newteam') setShowNewTeam(true);
+    else if (action === 'newkid') setShowNewKid(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.action]);
   // player_id -> signed photo URL, minted from each kid's photo_path.
   const [kidPhotoUris, setKidPhotoUris] = useState<Record<string, string>>({});
   // Unseen-notification count for the header bell badge. Refetched on focus (clears

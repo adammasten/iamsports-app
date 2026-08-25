@@ -2,7 +2,8 @@ import { useTeamContext } from '@/context';
 import { goBackOrHome } from '@/lib/nav';
 import { alertThenGo, webAlert } from '@/lib/webAlert';
 import { supabase } from '@/supabase';
-import { useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -20,10 +21,19 @@ export default function ClaimKidScreen() {
 
   const cleanCode = () => code.trim().toUpperCase();
 
-  async function lookup() {
-    if (!code.trim()) return;
+  // Arriving from the onboarding one-box: pre-fill + look up the player code.
+  const params = useLocalSearchParams();
+  useEffect(() => {
+    const c = (Array.isArray(params.code) ? params.code[0] : params.code) as string | undefined;
+    if (c && !preview) { setCode(c.toUpperCase()); lookup(c); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function lookup(override?: string) {
+    const cc = (override ?? code).trim().toUpperCase();
+    if (!cc) return;
     setLoading(true);
-    const { data, error } = await supabase.rpc('preview_guardian_code', { p_code: cleanCode() });
+    const { data, error } = await supabase.rpc('preview_guardian_code', { p_code: cc });
     setLoading(false);
     if (error || !data) { webAlert('Player code not found', 'That didn’t match a player’s invite code.\n\nIf it’s a TEAM join code (to join a whole team), go back and use “Join team” instead.'); return; }
     setPreview(data as Preview);
@@ -62,7 +72,7 @@ export default function ClaimKidScreen() {
             autoFocus
             maxLength={8}
           />
-          <TouchableOpacity style={styles.primaryBtn} onPress={lookup} disabled={loading || !code.trim()}>
+          <TouchableOpacity style={styles.primaryBtn} onPress={() => lookup()} disabled={loading || !code.trim()}>
             {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Continue</Text>}
           </TouchableOpacity>
         </View>
