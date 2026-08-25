@@ -1,4 +1,4 @@
-import { COACH_ROLES, useTeamContext } from '@/context';
+import { useTeamContext } from '@/context';
 import { TeamLogo } from '@/components/team-logo';
 import { SkeletonCards } from '@/components/skeleton-cards';
 import { DebugPanel } from '@/components/debug-panel';
@@ -8,6 +8,7 @@ import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import BottomNav from './components/BottomNav';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, AppState, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
@@ -67,7 +68,6 @@ export function initials(name: string): string {
 export default function SelectTeamScreen() {
   const insets = useSafeAreaInsets();
   const { userId, userTeams, userKids, setActiveTeam, refreshTeams, refreshKids } = useTeamContext();
-  const isCoachAnywhere = userTeams.some(t => COACH_ROLES.includes(t.role));
   const [showNewTeam, setShowNewTeam] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamSport, setNewTeamSport] = useState('Basketball');
@@ -559,28 +559,8 @@ export default function SelectTeamScreen() {
         )}
       </ScrollView>
 
-      {/* Bottom nav — native only; web uses the top nav above. */}
-      {Platform.OS !== 'web' ? (
-      <View style={[styles.bottomNav, { paddingBottom: insets.bottom + 8 }]}>
-        <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="home" size={24} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/search')}>
-          <Ionicons name="search" size={24} color="#888" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navCenter} onPress={() => router.push('/upload')}>
-          <Ionicons name="add" size={30} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem} onPress={() => router.push('/my-work')}>
-          <Ionicons name="folder-outline" size={24} color="#888" />
-        </TouchableOpacity>
-        {isCoachAnywhere ? (
-          <TouchableOpacity style={styles.navItem} onPress={() => router.push('/coaches-corner')}>
-            <Ionicons name="clipboard-outline" size={24} color="#888" />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-      ) : null}
+      {/* The shared persistent bottom nav (native only; web uses the top nav). */}
+      <BottomNav active="home" />
     </View>
   );
 }
