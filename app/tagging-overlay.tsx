@@ -452,6 +452,18 @@ export default function TaggingOverlayScreen() {
           grouped[t.category].push(t);
         }
       });
+      // Names-hidden tagger (a non-member hired to tag): RLS hides the kids' NAMES,
+      // so the raw query returns no player tags. Swap in the sanitized jersey-only
+      // vocabulary — real tag_ids, jersey labels — so the owner still gets true
+      // player attribution and the tagger never sees a name. Members/owners get
+      // 'not authorized' (data null) → names kept unchanged.
+      if (tagTeamId) {
+        const { data: hp } = await supabase.rpc('tagger_player_tags', { p_team: tagTeamId });
+        if (!cancelled && Array.isArray(hp) && hp.length) {
+          grouped.players = (hp as any[]).map(r => ({ id: r.tag_id, name: r.label, category: 'players' }));
+        }
+      }
+      if (cancelled) return;
       setTags(grouped);
       setSpecialTagIds({ highlight: highlightId, poe: poeId });
       setPeriodTags(periods);

@@ -196,6 +196,18 @@ export default function TaggingStudioWeb() {
         if (t.category === 'special') { if (t.name === '★ Highlight') highlight = t.id; else if (t.name === 'POE') poe = t.id; }
         else if (grouped[t.category] && !hidden.has(t.id)) grouped[t.category].push({ id: t.id, name: t.name, category: t.category });
       });
+      // Names-hidden tagger (a non-member hired to tag): the raw query returns NO
+      // player tags — RLS hides the kids' names. Swap in the sanitized jersey-only
+      // vocabulary: same REAL tag_ids, only the display label changes, so the owner
+      // still gets true player attribution and the tagger never sees a name. For
+      // members/owners the RPC raises 'not authorized' → data is null → keep names.
+      if (teamId) {
+        const { data: hp } = await supabase.rpc('tagger_player_tags', { p_team: teamId });
+        if (!cancelled && Array.isArray(hp) && hp.length) {
+          grouped.players = (hp as any[]).map(r => ({ id: r.tag_id, name: r.label, category: 'players' }));
+        }
+      }
+      if (cancelled) return;
       setTags(grouped);
       setSpecial({ highlight, poe });
     })();
