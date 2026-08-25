@@ -33,6 +33,7 @@ export default function TextAlertsScreen() {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [notEnabled, setNotEnabled] = useState(false);
+  const [agreed, setAgreed] = useState(false);   // explicit opt-in checkbox, not pre-checked
 
   useEffect(() => {
     if (!userId) return;
@@ -40,6 +41,7 @@ export default function TextAlertsScreen() {
   }, [userId]);
 
   async function onSend() {
+    if (!agreed) { webSafeAlert('Text alerts', 'Please check the consent box to receive text alerts.'); return; }
     if (!phone.trim()) { webSafeAlert('Text alerts', 'Enter your mobile number.'); return; }
     setBusy(true);
     try {
@@ -85,12 +87,17 @@ export default function TextAlertsScreen() {
         <View style={styles.card}>
           <Text style={styles.label}>Mobile number</Text>
           <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="(555) 123-4567" placeholderTextColor="#667" keyboardType="phone-pad" autoComplete="tel" />
-          <Text style={styles.consent}>
-            By tapping “Send code,” you agree to receive team schedule alerts from IamSports at this number (game/practice changes, snack reminders). Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help.{' '}
-            <Text style={styles.link} onPress={() => router.push('/terms')}>Terms</Text> · <Text style={styles.link} onPress={() => router.push('/privacy')}>Privacy</Text>
-          </Text>
-          <TouchableOpacity style={[styles.primary, busy && { opacity: 0.5 }]} onPress={onSend} disabled={busy}>
-            <Text style={styles.primaryTxt}>{busy ? 'Sending…' : 'Send code'}</Text>
+          {/* Express consent: an explicit, NOT pre-checked box the user must actively
+              tick (TCPA / carrier A2P requirement). "Send my code" stays disabled until it's on. */}
+          <TouchableOpacity style={styles.consentRow} activeOpacity={0.8} onPress={() => setAgreed(a => !a)}>
+            <View style={[styles.checkbox, agreed && styles.checkboxOn]}>{agreed ? <Text style={styles.checkmark}>✓</Text> : null}</View>
+            <Text style={styles.consent}>
+              Yes — text me my team’s schedule alerts from IamSports at this number: game &amp; practice changes, cancellations, and snack reminders. Message frequency varies (about 2–6 per month). Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help.{' '}
+              <Text style={styles.link} onPress={() => router.push('/terms')}>Terms</Text> · <Text style={styles.link} onPress={() => router.push('/privacy')}>Privacy</Text>
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.primary, (busy || !agreed) && { opacity: 0.5 }]} onPress={onSend} disabled={busy || !agreed}>
+            <Text style={styles.primaryTxt}>{busy ? 'Sending…' : 'Send my code'}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -118,7 +125,11 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 14, padding: 16 },
   label: { color: '#8b7bff', fontSize: 12, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 8 },
   input: { backgroundColor: '#0e1b2c', borderColor: '#25333f', borderWidth: 1, borderRadius: 10, color: '#f1f4f6', paddingHorizontal: 12, paddingVertical: 12, fontSize: 16 },
-  consent: { color: '#8b96a3', fontSize: 12, lineHeight: 18, marginTop: 12 },
+  consentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 14 },
+  checkbox: { width: 22, height: 22, borderRadius: 5, borderWidth: 1.5, borderColor: '#4a5a6a', backgroundColor: '#0e1b2c', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  checkboxOn: { backgroundColor: '#ff6a2c', borderColor: '#ff6a2c' },
+  checkmark: { color: '#160b02', fontSize: 14, fontWeight: '900' },
+  consent: { color: '#8b96a3', fontSize: 12, lineHeight: 18, flex: 1 },
   link: { color: '#8b7bff', fontWeight: '700' },
   primary: { backgroundColor: '#ff6a2c', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 16 },
   primaryTxt: { color: '#160b02', fontSize: 16, fontWeight: '800' },
