@@ -36,6 +36,7 @@ function message(n: Notif): string {
     case 'share_to_team': return `${n.actor_name} shared a ${ent} with ${team}`;
     case 'share_to_coaches': return `${n.actor_name} posted a ${ent} to the coaches’ board`;
     case 'new_comment': return `${n.actor_name} commented on a ${ent}`;
+    case 'team_message': return `${n.actor_name} posted an announcement to ${team}`;
     default: return `${n.actor_name} did something with ${player}`;
   }
 }
@@ -73,6 +74,10 @@ export default function NotificationsScreen() {
       case 'new_comment':
         if (n.team_id) setActiveTeam(n.team_id);
         router.push('/coaches-corner');
+        return;
+      case 'team_message':
+        if (n.team_id) setActiveTeam(n.team_id);
+        router.push('/messages');
         return;
       default:
         if (n.target_player_id) router.push({ pathname: '/kid', params: { playerId: n.target_player_id } });

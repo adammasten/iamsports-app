@@ -9,7 +9,7 @@ import { isVideoPosted, loadVideoMeta, saveVideoMeta } from '@/lib/core/video-me
 import { goBackOrHome } from '@/lib/nav';
 import { webAlert } from '@/lib/webAlert';
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
