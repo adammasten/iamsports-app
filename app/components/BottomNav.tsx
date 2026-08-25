@@ -5,7 +5,7 @@
 // bar); Schedule — the highest-frequency destination — took its place.
 import { COACH_ROLES, useTeamContext } from '@/context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
 import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -15,16 +15,28 @@ export type NavTab = 'home' | 'schedule' | 'filmroom' | 'coaches';
 // much bottom padding so content isn't hidden behind it.
 export const BOTTOM_NAV_HEIGHT = 64;
 
+// `active` can be passed to override, but by default the highlighted tab is derived
+// from the current route — so this works both as a per-screen bar AND (later) as the
+// team navigator's tabBar without every caller threading the prop.
 export default function BottomNav({ active }: { active?: NavTab }) {
   const insets = useSafeAreaInsets();
+  const pathname = usePathname();
   const { userTeams } = useTeamContext();
   const isCoachAnywhere = userTeams.some(t => COACH_ROLES.includes(t.role));
   if (Platform.OS === 'web') return null;
 
-  const tint = (t: NavTab) => (active === t ? '#fff' : '#888');
+  const current: NavTab | undefined = active ?? (
+    pathname.startsWith('/select-team') ? 'home' :
+    pathname.startsWith('/schedule') ? 'schedule' :
+    pathname.startsWith('/my-work') ? 'filmroom' :
+    pathname.startsWith('/coaches-corner') ? 'coaches' :
+    undefined
+  );
+
+  const tint = (t: NavTab) => (current === t ? '#fff' : '#888');
   // navigate() reuses the route if it's already in history (tab-like), rather than
   // stacking a new copy on every tap.
-  const go = (path: string, t: NavTab) => { if (active !== t) router.navigate(path as any); };
+  const go = (path: string, t: NavTab) => { if (current !== t) router.navigate(path as any); };
 
   return (
     <View style={[styles.bar, { paddingBottom: insets.bottom + 8 }]}>

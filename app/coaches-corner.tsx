@@ -5,6 +5,7 @@ import { showContentActions } from './moderationActions';
 import { confirm } from '@/lib/confirm';
 import { router, useFocusEffect } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
+import BottomNav from './components/BottomNav';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -434,6 +435,7 @@ export default function CoachesCornerScreen() {
         )}
       </View>
       </View>{/* pageWrap */}
+      <BottomNav active="coaches" />
     </View>
   );
 }

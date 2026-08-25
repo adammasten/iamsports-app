@@ -29,6 +29,7 @@ import ContentCard, { type CardAction } from '@/components/content-card/ContentC
 import { confirm } from '@/lib/confirm';
 import { webAlert } from '@/lib/webAlert';
 import WebTopNav from './components/WebTopNav';
+import BottomNav from './components/BottomNav';
 import { deriveShareStatus } from '@/lib/core/shareStatus';
 
 // "My Work" — lists the current user's highlight reels (highlight_reels rows
@@ -1683,6 +1684,7 @@ export default function MyWorkScreen() {
           onCancel={() => setNoteSheet(null)}
         />
       )}
+      <BottomNav active="filmroom" />
     </View>
   );
 }
