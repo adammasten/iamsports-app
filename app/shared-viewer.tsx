@@ -95,8 +95,8 @@ export default function SharedViewerScreen() {
   // (same fix game-player uses), else the scrubber + ±5s collapse to 0.
   const pd = (player as { duration?: number }).duration;
   const duration = srcDuration || (typeof pd === 'number' && Number.isFinite(pd) ? pd : 0);
-  const status = useEvent(player, 'statusChange', { status: 'idle' as string, oldStatus: undefined, error: undefined });
-  const ready = status.status === 'readyToPlay';
+  const status = useEvent(player, 'statusChange', { status: 'idle', oldStatus: undefined, error: undefined });
+  const ready = status?.status === 'readyToPlay';
 
   // See game-player: stop playback before the native video surface is torn down
   // (prevents the "distorted freeze" on back), and only restore portrait if we

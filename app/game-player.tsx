@@ -74,7 +74,7 @@ export default function GamePlayerScreen() {
   // fallback never engages there — mobile behavior is unchanged.
   const pd = (player as { duration?: number }).duration;
   const duration = srcDuration || (typeof pd === 'number' && Number.isFinite(pd) ? pd : 0);
-  const status = useEvent(player, 'statusChange', { status: 'idle' as string, oldStatus: undefined, error: undefined });
+  const status = useEvent(player, 'statusChange', { status: 'idle', oldStatus: undefined, error: undefined });
 
   // Load the game's READY videos in order. Recipient (shareId) → resolve_shared_game
   // (RLS-safe for non-members); owner/member (gameId) → direct videos query.
@@ -132,8 +132,8 @@ export default function GamePlayerScreen() {
 
   // Status → ready / bounded auto-retry (re-mint signed URL) → tap-to-retry.
   useEffect(() => {
-    if (status.status === 'readyToPlay') { retryRef.current = 0; setVideoReady(true); setLoadError(false); if (Platform.OS === 'web') { try { player.play(); } catch {} } return; }
-    if (status.status === 'error') {
+    if (status?.status === 'readyToPlay') { retryRef.current = 0; setVideoReady(true); setLoadError(false); if (Platform.OS === 'web') { try { player.play(); } catch {} } return; }
+    if (status?.status === 'error') {
       if (retryRef.current < 3) {
         retryRef.current += 1;
         if (retryTimer.current) clearTimeout(retryTimer.current);

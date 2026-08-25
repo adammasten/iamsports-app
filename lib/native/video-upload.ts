@@ -112,7 +112,10 @@ async function patchChunk(uploadUrl: string, bytes: Uint8Array, offset: number, 
       'Upload-Offset': String(offset),
       'Content-Type': 'application/offset+octet-stream',
     },
-    body: bytes,
+    // RN's fetch accepts a Uint8Array body at runtime, but TS's BodyInit type
+    // doesn't include it — cast rather than copy (this is the chunked-PATCH upload
+    // hot loop; a .buffer copy per chunk would cost memory on the speed path).
+    body: bytes as unknown as BodyInit,
   });
   if (!resp.ok && resp.status !== 204) {
     const body = await resp.text();

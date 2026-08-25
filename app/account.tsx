@@ -6,12 +6,13 @@ import { confirm } from '@/lib/confirm';
 import { router } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // 🧪 Phase 0b spike toggle — shows the background-upload test card even in a
 // TestFlight/release build. Set to false (or delete the card) once 0b is done.
-const SPIKE_SHOW_BG_TEST = true;
+const SPIKE_SHOW_BG_TEST = false;
 
 // Account controls. Two very different "leaving" paths, deliberately ranked:
 //   • Deactivate (top, friendly) — reversible; NOTHING is deleted. Log back in
@@ -42,12 +43,12 @@ export default function AccountScreen() {
 
   async function saveName() {
     const next = name.trim();
-    if (!next) { Alert.alert('Name required', 'Enter what you’d like to be called.'); return; }
+    if (!next) { webAlert('Name required', 'Enter what you’d like to be called.'); return; }
     setNameSaving(true);
     const { error } = await supabase.rpc('set_my_display_name', { p_name: next });
     setNameSaving(false);
-    if (error) { Alert.alert('Error', error.message); return; }
-    Alert.alert('Saved', `You’ll show as “${next}” on your shares and comments.`);
+    if (error) { webAlert('Error', error.message); return; }
+    webAlert('Saved', `You’ll show as “${next}” on your shares and comments.`);
   }
 
   async function signOut() {
@@ -63,7 +64,7 @@ export default function AccountScreen() {
     if (!ok) return;
     setBusy(true);
     const { error } = await supabase.rpc('deactivate_my_account');
-    if (error) { setBusy(false); Alert.alert('Error', error.message); return; }
+    if (error) { setBusy(false); webAlert('Error', error.message); return; }
     await supabase.auth.signOut();
     setBusy(false);
   }
@@ -77,7 +78,7 @@ export default function AccountScreen() {
     if (!ok) return;
     setBusy(true);
     const { error } = await supabase.functions.invoke('delete-account');
-    if (error) { setBusy(false); Alert.alert('Couldn’t delete account', error.message); return; }
+    if (error) { setBusy(false); webAlert('Couldn’t delete account', error.message); return; }
     await supabase.auth.signOut();
     setBusy(false);
   }

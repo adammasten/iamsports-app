@@ -8,7 +8,8 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack, router, useRootNavigationState, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { webAlert } from '@/lib/webAlert';
 import 'react-native-reanimated';
 import { TERMS_VERSION } from '@/constants/legal';
 import NameCaptureSheet from './components/NameCaptureSheet';
@@ -80,9 +81,12 @@ function AuthGate() {
         // intentionally fall through to onboarding.
         router.replace('/onboarding');   // STUB screen — real onboarding is a separate task
       } else {
-        // Has a confirmed team OR a linked kid → into the working app. (Role-aware
-        // home ordering is a later task; everyone lands here for now.)
-        router.replace('/select-team');
+        // Has a confirmed team OR a linked kid → into the working app. Only force
+        // them to home from an ENTRY route; otherwise leave them on the route they
+        // actually opened — a web refresh, a shared link, or a bookmark to
+        // /my-work, /messages, /account, /game-player, etc. should NOT bounce home.
+        const ENTRY_ROUTES = ['/', '/login', '/landing', '/onboarding'];
+        if (ENTRY_ROUTES.includes(pathname)) router.replace('/select-team');
       }
     }
     setBooted(true);
@@ -138,7 +142,7 @@ function NameCaptureGate() {
     setSubmitting(true);
     const { error } = await supabase.rpc('set_my_display_name', { p_name: name.trim() });
     setSubmitting(false);
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
     setNeedsName(false);
   }
 
@@ -176,7 +180,7 @@ function TermsGate() {
     setSubmitting(true);
     const { error } = await supabase.rpc('accept_terms', { p_version: TERMS_VERSION });
     setSubmitting(false);
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
     setNeedsAccept(false);
   }
   async function decline() {

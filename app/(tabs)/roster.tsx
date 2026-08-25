@@ -132,7 +132,7 @@ export default function RosterScreen() {
 
   // Open the cross-platform chooser (works on web AND native, unlike a
   // multi-button Alert.alert which silently no-ops on RN Web).
-  function mergeDupe(d: { keep_id: string; keep_name: string; dup_id: string; dup_name: string }) {
+  function mergeDupe(d: DupePair) {
     setMergePair(d);
   }
   // After the coach picks which profile to keep, spell out — in plain words —
@@ -168,7 +168,7 @@ export default function RosterScreen() {
     const { error } = await supabase.rpc('merge_players', { p_keep: keep, p_dup: dup });
     setMerging(false);
     setMergePair(null);
-    if (error) { Alert.alert('Merge', error.message); return; }
+    if (error) { webAlert('Merge', error.message); return; }
     load();
   }
 
@@ -192,13 +192,13 @@ export default function RosterScreen() {
 
   async function addPlayer() {
     if (!activeTeam) return;
-    if (!newName.trim() && !newJersey.trim()) { Alert.alert('Add player', 'Enter a name or a jersey number.'); return; }
+    if (!newName.trim() && !newJersey.trim()) { webAlert('Add player', 'Enter a name or a jersey number.'); return; }
     setBusy(true);
     const { error } = await supabase.rpc('create_roster_placeholder', {
       p_team_id: activeTeam.id, p_name: newName.trim() || null, p_jersey: newJersey.trim() || null,
     });
     setBusy(false);
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
     setNewName(''); setNewJersey(''); setShowAdd(false);
     load();
   }
@@ -208,7 +208,7 @@ export default function RosterScreen() {
     setEditingId(null);
     if (!next) return;
     const { error } = await supabase.rpc('update_kid_profile', { p_player_id: playerId, p_name: next });
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
     load();
   }
 
@@ -230,17 +230,17 @@ export default function RosterScreen() {
     // Guarded RPC: soft-leaves (keeps everything) for a kid with history; only
     // hard-deletes a truly blank placeholder. Returns 'deleted' | 'left' | 'detached'.
     const { data, error } = await supabase.rpc('remove_roster_placeholder', { p_player_id: p.playerId, p_team_id: activeTeam.id });
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
     load();
-    if (data === 'deleted') Alert.alert('Deleted', `“${p.name}” was removed.`);
-    else Alert.alert('Removed', `“${p.name}” was taken off ${activeTeam.name}. Their history is kept.`);
+    if (data === 'deleted') webAlert('Deleted', `“${p.name}” was removed.`);
+    else webAlert('Removed', `“${p.name}” was taken off ${activeTeam.name}. Their history is kept.`);
   }
 
   const shareCode = async (label: string, code: string) => {
     if (Platform.OS === 'web') {
       // Desktop browsers don't reliably support the native share sheet — copy instead.
-      try { await navigator.clipboard.writeText(code); Alert.alert('Copied', `${label}: ${code}`); }
-      catch { Alert.alert(label, code); }
+      try { await navigator.clipboard.writeText(code); webAlert('Copied', `${label}: ${code}`); }
+      catch { webAlert(label, code); }
     } else {
       Share.share({ message: `${label}: ${code}` });
     }
@@ -255,20 +255,20 @@ export default function RosterScreen() {
     });
     if (!ok) return;
     const { data, error } = await supabase.rpc('regenerate_team_code', { p_team_id: activeTeam.id });
-    if (error) { Alert.alert('Reset', error.message); return; }
+    if (error) { webAlert('Reset', error.message); return; }
     setTeamCode(data as string);
   }
 
   async function generateCode() {
     if (!activeTeam) return;
     const { data, error } = await supabase.rpc('regenerate_team_code', { p_team_id: activeTeam.id });
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
     setTeamCode(data as string);
   }
 
   async function getGuardianCode(playerId: string) {
     const { data, error } = await supabase.rpc('regenerate_guardian_code', { p_player_id: playerId });
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
     setPlayers(prev => prev.map(p => p.playerId === playerId ? { ...p, guardianCode: data as string } : p));
   }
 
@@ -311,7 +311,7 @@ export default function RosterScreen() {
   async function makeCoachCode() {
     if (!activeTeam) return;
     const { data, error } = await supabase.rpc('regenerate_coach_code', { p_team_id: activeTeam.id });
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { webAlert('Error', error.message); return; }
     setCoachCode(data as string);
   }
   async function removeCoach(uid: string, name: string) {
@@ -319,7 +319,7 @@ export default function RosterScreen() {
     const ok = await confirm({ title: `Remove ${name}?`, message: `Remove ${name}'s coach access to ${activeTeam.name}? Their own parent access (if any) is kept.`, confirmText: 'Remove', destructive: true });
     if (!ok) return;
     const { error } = await supabase.rpc('remove_team_coach', { p_team_id: activeTeam.id, p_user_id: uid });
-    if (error) { Alert.alert('Remove coach', error.message); return; }
+    if (error) { webAlert('Remove coach', error.message); return; }
     load();
   }
   const roleLabel = (r: string) => r === 'admin' ? 'Admin' : r === 'head_coach' ? 'Head coach' : 'Coach';
@@ -329,10 +329,10 @@ export default function RosterScreen() {
   async function saveTeamName() {
     if (!activeTeam) return;
     const name = teamNameInput.trim();
-    if (!name) { Alert.alert('Team name', 'Enter a team name.'); return; }
+    if (!name) { webAlert('Team name', 'Enter a team name.'); return; }
     if (name === activeTeam.name) { setEditingTeamName(false); return; }
     const { error } = await supabase.from('teams').update({ name }).eq('id', activeTeam.id);
-    if (error) { Alert.alert('Rename team', error.message); return; }
+    if (error) { webAlert('Rename team', error.message); return; }
     setEditingTeamName(false);
     await refreshTeams();
   }

@@ -1,8 +1,9 @@
 import { useTeamContext } from '@/context';
 import { goBackOrHome } from '@/lib/nav';
+import { alertThenGo, webAlert } from '@/lib/webAlert';
 import { supabase } from '@/supabase';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // A co-guardian (co-parent / grandparent) enters a kid's code to be added as a
@@ -24,20 +25,20 @@ export default function ClaimKidScreen() {
     setLoading(true);
     const { data, error } = await supabase.rpc('preview_guardian_code', { p_code: cleanCode() });
     setLoading(false);
-    if (error || !data) { Alert.alert('Player code not found', 'That didn’t match a player’s invite code.\n\nIf it’s a TEAM join code (to join a whole team), go back and use “Join team” instead.'); return; }
+    if (error || !data) { webAlert('Player code not found', 'That didn’t match a player’s invite code.\n\nIf it’s a TEAM join code (to join a whole team), go back and use “Join team” instead.'); return; }
     setPreview(data as Preview);
   }
 
   async function confirmAttach() {
     if (!preview) return;
-    if (preview.already_mine) { Alert.alert('Already added', `You’re already ${preview.first_name}’s guardian.`, [{ text: 'OK', onPress: goBackOrHome }]); return; }
-    if (preview.full) { Alert.alert('Full', `${preview.first_name}’s guardian list is full (4).`); return; }
+    if (preview.already_mine) { alertThenGo('Already added', `You’re already ${preview.first_name}’s guardian.`, goBackOrHome); return; }
+    if (preview.full) { webAlert('Full', `${preview.first_name}’s guardian list is full (4).`); return; }
     setBusy(true);
     const { error } = await supabase.rpc('claim_or_link_guardian', { p_code: cleanCode() });
     setBusy(false);
-    if (error) { Alert.alert('Add guardian', error.message); return; }
+    if (error) { webAlert('Add guardian', error.message); return; }
     await Promise.all([refreshKids(), refreshTeams()]);
-    Alert.alert('Added', `You’re now ${preview.first_name}’s guardian.`, [{ text: 'OK', onPress: goBackOrHome }]);
+    alertThenGo('Added', `You’re now ${preview.first_name}’s guardian.`, goBackOrHome);
   }
 
   return (

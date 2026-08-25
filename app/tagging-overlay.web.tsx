@@ -121,7 +121,7 @@ export default function TaggingStudioWeb() {
   const { duration: srcDuration } = useEvent(player, 'sourceLoad', { duration: 0, videoSource: null, availableVideoTracks: [], availableSubtitleTracks: [], availableAudioTracks: [] });
   const pd = (player as { duration?: number }).duration;
   const duration = srcDuration || (typeof pd === 'number' && Number.isFinite(pd) ? pd : 0);
-  const status = useEvent(player, 'statusChange', { status: 'idle' as string, oldStatus: undefined, error: undefined });
+  const status = useEvent(player, 'statusChange', { status: 'idle', oldStatus: undefined, error: undefined });
 
   const [videoReady, setVideoReady] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -139,14 +139,14 @@ export default function TaggingStudioWeb() {
   // signed URL) on error, then a tap-to-retry surface — so a cold-load or bad URL
   // is visible instead of a silent black frame.
   useEffect(() => {
-    if (status.status === 'readyToPlay') {
+    if (status?.status === 'readyToPlay') {
       retryRef.current = 0; setVideoReady(true); setLoadError(false);
       // WEB: start playback on first ready (a manual play right after replace()
       // races the load and aborts — same fix game-player uses). Coach pauses with Space.
       if (!didAutoPlay.current) { didAutoPlay.current = true; try { player.play(); } catch {} }
       return;
     }
-    if (status.status === 'error') {
+    if (status?.status === 'error') {
       if (retryRef.current < 3) { retryRef.current += 1; const id = setTimeout(() => loadSignedSource(), 2000); return () => clearTimeout(id); }
       setLoadError(true);
     }

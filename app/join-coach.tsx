@@ -1,9 +1,10 @@
 import { useTeamContext } from '@/context';
 import { goBackOrHome } from '@/lib/nav';
+import { alertThenGo, webAlert } from '@/lib/webAlert';
 import { supabase } from '@/supabase';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Enter a team's COACH code → join as a coach (Coaches' Corner + coach tools).
@@ -20,10 +21,10 @@ export default function JoinCoachScreen() {
     setBusy(true);
     const { data, error } = await supabase.rpc('redeem_coach_code', { p_code: code.trim().toUpperCase() });
     setBusy(false);
-    if (error || !data) { Alert.alert('Coach code', error?.message ?? 'That code didn’t match a team.'); return; }
+    if (error || !data) { webAlert('Coach code', error?.message ?? 'That code didn’t match a team.'); return; }
     await refreshTeams();
     setActiveTeam(data as string);
-    Alert.alert('You’re in', 'You’ve joined as a coach — you now have Coaches’ Corner and the coach tools.', [{ text: 'OK', onPress: () => router.replace('/') }]);
+    alertThenGo('You’re in', 'You’ve joined as a coach — you now have Coaches’ Corner and the coach tools.', () => router.replace('/'));
   }
 
   return (

@@ -1,9 +1,10 @@
 import { useTeamContext } from '@/context';
 import { goBackOrHome } from '@/lib/nav';
+import { alertThenGo, webAlert } from '@/lib/webAlert';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Parent join flow: enter the team code → SEE the roster → tap your player to
@@ -31,13 +32,13 @@ export default function JoinTeamScreen() {
     setLoading(true);
     const { data, error } = await supabase.rpc('preview_roster_by_code', { p_code: cleanCode() });
     setLoading(false);
-    if (error || !data) { Alert.alert('Team code not found', 'That didn’t match a team join code.\n\nIf it’s a PLAYER’S invite code (to be added as a guardian of one kid), go back and use “Have a code?” instead.'); return; }
+    if (error || !data) { webAlert('Team code not found', 'That didn’t match a team join code.\n\nIf it’s a PLAYER’S invite code (to be added as a guardian of one kid), go back and use “Have a code?” instead.'); return; }
     setPreview(data as Preview);
   }
 
   async function finish(msg: string) {
     await Promise.all([refreshKids(), refreshTeams()]);
-    Alert.alert('Joined', msg, [{ text: 'OK', onPress: () => goBackOrHome() }]);
+    alertThenGo('Joined', msg, goBackOrHome);
   }
 
   async function claimSpot(p: PreviewPlayer) {
@@ -45,7 +46,7 @@ export default function JoinTeamScreen() {
     setBusy(true);
     const { error } = await supabase.rpc('claim_roster_spot', { p_code: cleanCode(), p_player_id: p.player_id });
     setBusy(false);
-    if (error) { Alert.alert('Claim', error.message); return; }
+    if (error) { webAlert('Claim', error.message); return; }
     finish(`${p.first_name} is on ${preview.team_name}.`);
   }
 
@@ -54,19 +55,19 @@ export default function JoinTeamScreen() {
     setBusy(true);
     const { error } = await supabase.rpc('join_team_with_code', { p_code: cleanCode(), p_player_id: playerId });
     setBusy(false);
-    if (error) { Alert.alert('Join', error.message); return; }
+    if (error) { webAlert('Join', error.message); return; }
     finish(`${name} is on ${preview.team_name}.`);
   }
 
   async function addNewAndJoin() {
     const name = newName.trim();
-    if (!name || !preview) { Alert.alert('Add player', 'Enter your player’s name.'); return; }
+    if (!name || !preview) { webAlert('Add player', 'Enter your player’s name.'); return; }
     setBusy(true);
     const { data: newId, error: e1 } = await supabase.rpc('create_kid', { name });
-    if (e1 || !newId) { setBusy(false); Alert.alert('Add player', e1?.message ?? 'Could not create player'); return; }
+    if (e1 || !newId) { setBusy(false); webAlert('Add player', e1?.message ?? 'Could not create player'); return; }
     const { error: e2 } = await supabase.rpc('join_team_with_code', { p_code: cleanCode(), p_player_id: newId });
     setBusy(false);
-    if (e2) { Alert.alert('Join', e2.message); return; }
+    if (e2) { webAlert('Join', e2.message); return; }
     finish(`${name} is on ${preview.team_name}.`);
   }
 
