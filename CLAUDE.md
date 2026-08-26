@@ -175,8 +175,7 @@ team default → code default) but is **not yet referenced by any RLS policy**.
 ### Tagging & bundles
 
 The live tagging screen is **`app/tagging-overlay.tsx`** (full-screen landscape
-overlay). **`app/tagging.tsx` is an ORPHAN** (no route to `/tagging`) slated for
-deletion — do not treat it as live.
+overlay). (The old `app/tagging.tsx` orphan has since been deleted.)
 
 `clip_tags.bundle_number` is the heart of the model:
 - `0` → **clip-level** tag (whole play).

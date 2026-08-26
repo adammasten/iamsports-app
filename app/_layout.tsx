@@ -218,7 +218,6 @@ export default function RootLayout() {
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="landing" options={{ headerShown: false }} />
-          <Stack.Screen name="playbook-dev" options={{ headerShown: false }} />
           <Stack.Screen name="playbook" options={{ headerShown: false }} />
           <Stack.Screen name="playbook-install" options={{ headerShown: false }} />
           <Stack.Screen name="playbook-all" options={{ headerShown: false }} />
@@ -246,8 +245,6 @@ export default function RootLayout() {
           <Stack.Screen name="messages" options={{ headerShown: false }} />
           <Stack.Screen name="text-alerts" options={{ headerShown: false }} />
           <Stack.Screen name="kid" options={{ headerShown: false }} />
-          <Stack.Screen name="team" options={{ headerShown: false }} />
-          <Stack.Screen name="clips-library" options={{ headerShown: false }} />
           <Stack.Screen name="my-work" options={{ headerShown: false }} />
           <Stack.Screen name="coaches-corner" options={{ headerShown: false }} />
           <Stack.Screen name="team-permissions" options={{ headerShown: false }} />
