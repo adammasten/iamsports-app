@@ -173,6 +173,17 @@ export default function LoginScreen() {
         </>
       )}
       </View>
+
+      {/* Public legal links — discoverable to a logged-out visitor / A2P reviewer.
+          These open the STANDALONE static pages (not the in-app routes), so they
+          load clean with no app chrome and no redirect. */}
+      {isWeb ? (
+        <View style={styles.legalRow}>
+          <Text style={styles.legalLink} onPress={() => Linking.openURL('https://www.iamsports.com/legal/privacy')}>Privacy Policy</Text>
+          <Text style={styles.legalDot}> · </Text>
+          <Text style={styles.legalLink} onPress={() => Linking.openURL('https://www.iamsports.com/legal/terms')}>Terms of Use</Text>
+        </View>
+      ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -198,4 +209,7 @@ const styles = StyleSheet.create({
   dividerText: { color: T.sub, fontSize: 13, fontFamily: BODY },
   secondaryButton: { width: '100%', borderWidth: 1.5, borderColor: isWeb ? T.text : T.primary, borderRadius: 10, padding: 14, alignItems: 'center' },
   secondaryButtonText: { color: isWeb ? T.text : T.primary, fontSize: 15, fontWeight: '700', fontFamily: BODY },
+  legalRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 22 },
+  legalLink: { color: T.sub, fontSize: 13, fontFamily: BODY, fontWeight: '600', textDecorationLine: 'underline' },
+  legalDot: { color: T.sub, fontSize: 13, fontFamily: BODY },
 });

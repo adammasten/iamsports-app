@@ -1,6 +1,13 @@
 import { router } from 'expo-router';
 import { useRef } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+
+// Public legal pages open the STANDALONE static docs on web (clean, no app chrome,
+// no redirect); native falls back to the in-app reader routes.
+const openLegal = (page: 'privacy' | 'terms') =>
+  Platform.OS === 'web'
+    ? Linking.openURL(`https://www.iamsports.com/legal/${page}`)
+    : router.push(`/${page}` as any);
 
 // Public marketing landing — the web front door (logged-out web users land here;
 // AuthGate routes native users straight to /login). Rebuilt from the iamsports.com
@@ -184,9 +191,9 @@ export default function Landing() {
               <View style={styles.footLinks}>
                 <Text style={styles.footDim}>© 2026 IamSports LLC</Text>
                 <Text style={styles.footDim}>·</Text>
-                <Pressable onPress={() => router.push('/terms')}><Text style={styles.footLink}>Terms</Text></Pressable>
+                <Pressable onPress={() => openLegal('terms')}><Text style={styles.footLink}>Terms</Text></Pressable>
                 <Text style={styles.footDim}>·</Text>
-                <Pressable onPress={() => router.push('/privacy')}><Text style={styles.footLink}>Privacy</Text></Pressable>
+                <Pressable onPress={() => openLegal('privacy')}><Text style={styles.footLink}>Privacy</Text></Pressable>
               </View>
             </View>
           </View>
