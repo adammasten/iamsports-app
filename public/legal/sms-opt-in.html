@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IamSports SMS Opt-In</title>
+<meta name="robots" content="index,follow">
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #ffffff; color: #1a1a1a;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 40px 22px 80px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.5px; }
+  .entity { color: #666; font-size: 14px; margin: 0 0 24px; }
+  h2 { font-size: 18px; margin: 30px 0 8px; }
+  p { margin: 0 0 14px; }
+  a { color: #2957c8; }
+  ul { margin: 0 0 14px; padding-left: 20px; }
+  li { margin-bottom: 4px; }
+  /* Faithful mockup of the in-app "Text alerts" opt-in screen */
+  .mock { max-width: 360px; margin: 20px 0; background: #0e1b2c; border-radius: 16px; padding: 20px; color: #f1f4f6; }
+  .mock .mtitle { font-size: 20px; font-weight: 800; margin: 0 0 14px; }
+  .mock .label { color: #9db0bd; font-size: 13px; font-weight: 700; margin: 0 0 6px; }
+  .mock .field { border: 1px solid #2a3a48; border-radius: 8px; padding: 12px; color: #667; background: #0b1520; }
+  .mock .consent { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0; }
+  .mock .box { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 5px; border: 1.5px solid #4a5a6a; background: #0e1b2c; margin-top: 2px; }
+  .mock .ctext { color: #8b96a3; font-size: 12px; line-height: 18px; }
+  .mock .ctext a { color: #6ea8ff; }
+  .mock .btn { text-align: center; background: #ff6a2c; opacity: 0.5; color: #160b02; font-weight: 800; border-radius: 8px; padding: 13px; }
+  .cap { color: #888; font-size: 12px; margin-top: 6px; }
+  footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid #e5e5e5; color: #666; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>How you opt in to IamSports text alerts</h1>
+  <p class="entity">Operated by I AM SPORTS LLC, Austin, Texas, USA · <a href="mailto:adam.admin@iamsports.com">adam.admin@iamsports.com</a></p>
+
+  <p>IamSports sends team schedule alerts by SMS only to people who actively opt in inside the app. This page publicly documents that consent flow. Below is the exact opt-in screen users see (Account → Manage text alerts).</p>
+
+  <h2>The opt-in screen (reproduced exactly)</h2>
+  <div class="mock" role="img" aria-label="IamSports Text alerts opt-in screen mockup">
+    <div class="mtitle">Text alerts</div>
+    <div class="label">Mobile number</div>
+    <div class="field">(555) 123-4567</div>
+    <div class="consent">
+      <div class="box" aria-hidden="true"></div>
+      <div class="ctext">
+        Yes — text me my team's schedule alerts from IamSports at this number: game &amp; practice changes, cancellations, and snack reminders. Message frequency varies (about 2–6 per month). Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help.
+        <a href="/legal/terms">Terms</a> · <a href="/legal/privacy">Privacy</a>
+      </div>
+    </div>
+    <div class="btn">Send my code</div>
+  </div>
+  <p class="cap">The consent checkbox is <strong>not pre-checked</strong>. The "Send my code" button stays <strong>disabled</strong> until the user actively checks the box.</p>
+
+  <h2>How consent is captured</h2>
+  <ul>
+    <li>The user enters their own mobile number.</li>
+    <li>The user must <strong>actively check</strong> the consent box shown above — it is never pre-checked.</li>
+    <li>Only then does "Send my code" become active. The app sends a one-time verification code to the number.</li>
+    <li>Only after the code is confirmed is the number opted in. Consent is collected solely from the person who owns the number; it is never purchased, sold, or shared.</li>
+  </ul>
+
+  <h2>Program details</h2>
+  <ul>
+    <li><strong>Program:</strong> IamSports team schedule alerts.</li>
+    <li><strong>Message types:</strong> game/practice added, moved, or canceled; occasional snack-duty reminders.</li>
+    <li><strong>Frequency:</strong> varies, about 2–6 messages per family per month.</li>
+    <li><strong>Cost:</strong> message and data rates may apply.</li>
+    <li><strong>Opt out:</strong> reply STOP at any time. <strong>Help:</strong> reply HELP, or email <a href="mailto:adam.admin@iamsports.com">adam.admin@iamsports.com</a>.</li>
+    <li><strong>No sharing:</strong> mobile numbers and opt-in data are never shared with third parties for marketing. See the <a href="/legal/privacy">Privacy Policy</a>.</li>
+  </ul>
+
+  <footer>
+    I AM SPORTS LLC · Austin, TX, USA · <a href="mailto:adam.admin@iamsports.com">adam.admin@iamsports.com</a><br>
+    <a href="/legal/privacy">Privacy Policy</a> · <a href="/legal/terms">Terms of Use</a>
+  </footer>
+</div>
+</body>
+</html>

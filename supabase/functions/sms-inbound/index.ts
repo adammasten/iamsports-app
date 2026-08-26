@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
       await svc.from("sms_opt_outs").update({ opted_back_in_at: now }).eq("phone_number", from);
       return twiml("You're re-subscribed to IamSports alerts. Reply STOP to opt out.");
     }
-    if (word === "HELP") return twiml("IamSports team alerts. Reply STOP to opt out. Msg&data rates may apply.");
+    if (word === "HELP") return twiml("IamSports team schedule alerts. Help: adam.admin@iamsports.com. Msg&data rates may apply. Reply STOP to opt out.");
   } catch { /* fall through */ }
   return twiml();
 });
