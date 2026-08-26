@@ -29,7 +29,7 @@ trust prompt, or reload the VS Code window (stdio servers need a one-time approv
 |---|---|---|
 | **supabase** | HTTP (`mcp.supabase.com`, project `wscfpkaltajnrhiusoze`) | Live DB — read-only SQL (`execute_sql`), list/apply migrations, advisors, storage. **Verify schema/data against the live DB here before writing SQL or diagnosing "missing data."** Needs interactive OAuth. |
 | **context7** | stdio (`npx -y @upstash/context7-mcp`) | Live, version-accurate library docs (Expo, RN, Supabase, RevenueCat…). **Use instead of possibly-stale training data** for API/library specifics. Optional API key for higher rate limits. |
-| **playwright** | stdio (`npx @playwright/mcp@latest`) | Real-browser automation to drive/test the **web app** (iamsports-app.vercel.app): sign-up, cold-start, click-throughs, screenshots. First run may need `npx playwright install chromium`. |
+| **playwright** | stdio (`npx @playwright/mcp@latest`) | Real-browser automation to drive/test the **web app** (iamsports.com): sign-up, cold-start, click-throughs, screenshots. First run may need `npx playwright install chromium`. |
 
 **GitHub is NOT an MCP** — GitHub access is the `gh` CLI + git over SSH, not a
 configured server. Keep this table in sync whenever an MCP is added or removed.

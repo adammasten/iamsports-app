@@ -11,7 +11,7 @@
 // before public launch.
 
 export const SUPPORT_EMAIL = 'adam.admin@iamsports.com'; // real, monitored inbox (confirmed 2026-07-24)
-export const TERMS_URL = 'https://iamsports.app/terms'; // TODO: host the Terms here
+export const TERMS_URL = 'https://iamsports.com/terms'; // live on the .com (Vercel)
 export const TERMS_EFFECTIVE = 'July 18, 2026';
 
 // Bump when the Terms change materially — the gate re-prompts everyone whose

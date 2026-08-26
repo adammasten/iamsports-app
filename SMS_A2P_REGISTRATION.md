@@ -14,7 +14,7 @@ Use the LLC's legal details exactly as on the EIN paperwork:
 - **Legal business name:** {LLC legal name}
 - **Business type:** Private company / LLC
 - **EIN (Tax ID):** {LLC EIN}
-- **Business address / phone / website:** {…} / {…} / iamsports-app.vercel.app
+- **Business address / phone / website:** {…} / {…} / iamsports.com
 - **Business email:** {your support email}
 - **Brand vetting:** request **Standard vetting** (external vetting via Campaign
   Registry / WMC). Higher trust score → higher messages-per-second. Worth it for scale.
