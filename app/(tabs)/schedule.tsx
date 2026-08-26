@@ -303,7 +303,7 @@ export default function ScheduleScreen() {
 
   return (
     <View style={styles.root}>
-      {Platform.OS === 'web' ? <WebTopNav /> : null}
+      {Platform.OS === 'web' ? <WebTopNav active="schedule" /> : null}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: Platform.OS === 'web' ? 16 : insets.top + 12, paddingHorizontal: 16, paddingBottom: 44, maxWidth: 760, width: '100%', alignSelf: 'center' }}>
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>

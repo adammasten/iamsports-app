@@ -18,9 +18,10 @@ const C = {
   accent: '#6c5ce7', badge: '#EF5350', panel: '#1b1e26',
 };
 
-type Dest = 'home' | 'filmroom' | 'playbook' | 'coaches' | 'messages' | 'tagging';
+type Dest = 'home' | 'schedule' | 'filmroom' | 'playbook' | 'coaches' | 'messages' | 'tagging';
 const LINKS: { key: Dest; label: string; href: string }[] = [
   { key: 'home', label: 'Home', href: '/select-team' },
+  { key: 'schedule', label: 'Schedule', href: '/schedule' },
   { key: 'filmroom', label: 'Film Room', href: '/my-work' },
   { key: 'messages', label: 'Messages', href: '/messages' },
   { key: 'playbook', label: 'My Playbook', href: '/my-playbook' },
