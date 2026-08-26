@@ -7,7 +7,7 @@ import { pickAndUploadTeamLogo } from '@/lib/native/team-logo-upload';
 import { supabase } from '@/supabase';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { loadTeamWall, type WallPost } from '@/lib/core/homeFeed';
 import { sportHasPlaybook } from '@/lib/core/playbook/capability';
 import { showContentActions } from '../moderationActions';
@@ -238,6 +238,15 @@ export default function HomeScreen() {
           <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/select-team')}>
             <Text style={styles.primaryBtnText}>Pick a team</Text>
           </TouchableOpacity>
+          {/* Public legal links on the homepage — discoverable to a logged-out
+              visitor / A2P reviewer who lands on the root domain first. Web only. */}
+          {Platform.OS === 'web' ? (
+            <View style={styles.legalFooter}>
+              <Text style={styles.legalLink} onPress={() => Linking.openURL('https://www.iamsports.com/legal/privacy')}>Privacy Policy</Text>
+              <Text style={styles.legalDim}> · </Text>
+              <Text style={styles.legalLink} onPress={() => Linking.openURL('https://www.iamsports.com/legal/terms')}>Terms of Use</Text>
+            </View>
+          ) : null}
         </View>
       </View>
     );
@@ -413,6 +422,9 @@ const styles = StyleSheet.create({
 
   primaryBtn: { backgroundColor: '#534AB7', borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 16 },
   primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  legalFooter: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 40 },
+  legalLink: { color: '#8b96a3', fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
+  legalDim: { color: '#8b96a3', fontSize: 13 },
 
   teamBody: { paddingBottom: 40 },
   content: { alignItems: 'center', justifyContent: 'center', minHeight: 220 },
