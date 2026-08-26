@@ -61,7 +61,7 @@ You are responsible for the content you upload. You represent that you have the 
   },
 ];
 
-export const PRIVACY_EFFECTIVE = 'August 12, 2026';
+export const PRIVACY_EFFECTIVE = 'August 26, 2026';
 
 // Privacy Policy — shown in app/privacy.tsx, linked from the landing footer + the
 // Account screen. Same content as the public /privacy page. NOT LEGAL ADVICE; have
@@ -96,23 +96,31 @@ export const PRIVACY: TermsSection[] = [
     body: `We share your content only as you direct — with the people and teams you choose inside the app. We also use trusted service providers (for example, cloud hosting and video processing) that process data on our behalf and may not use it for their own purposes. We may disclose information if required by law.`,
   },
   {
-    heading: '7. How we protect your information',
+    heading: '7. Text message (SMS) alerts',
+    body: `If you choose to receive text alerts, IamSports collects your mobile phone number to send you your team's schedule and logistics messages — for example, when a game or practice is added, moved, or canceled, plus occasional reminders (such as a snack sign-up). You opt in inside the app: you enter your number and actively check a consent box, and we then send a one-time code to verify the number. Only verified, opted-in numbers ever receive texts, and we collect consent only from the person who owns the number.
+
+Message frequency varies (roughly 2–6 messages per family per month). Message and data rates may apply. Reply STOP to any message to unsubscribe, or HELP for help.
+
+We do not sell, rent, or share your mobile phone number or your SMS opt-in information with third parties or affiliates for their own marketing or promotional purposes. Your mobile opt-in data and consent are never shared with any third party. We share your number only with the messaging provider that delivers these texts on our behalf, and solely to send the messages you asked for. You can turn off text alerts at any time by replying STOP or by removing your number in the app.`,
+  },
+  {
+    heading: '8. How we protect your information',
     body: `Your uploaded video is stored privately and is accessible only to your account and the people you share it with. We use access controls at the database level so users cannot see content that does not belong to them or that has not been shared with them. No system is perfectly secure, but protecting your family's video is a priority we take seriously.`,
   },
   {
-    heading: '8. Your choices and your rights',
+    heading: '9. Your choices and your rights',
     body: `You can delete videos, clips, and other content you've created at any time. You can delete your account, which removes your associated data. You can contact us with questions about the data we hold about you.`,
   },
   {
-    heading: '9. Data retention',
+    heading: '10. Data retention',
     body: `We keep your content for as long as your account is active or as needed to provide the service. When you delete content or your account, we remove the associated data, subject to reasonable backup and legal-retention periods.`,
   },
   {
-    heading: '10. Changes to this policy',
+    heading: '11. Changes to this policy',
     body: `We'll update this policy as IamSports grows, especially as we move from limited pre-launch to general availability. When we make material changes, we'll take reasonable steps to let you know.`,
   },
   {
-    heading: '11. Contact',
+    heading: '12. Contact',
     body: `Questions about this policy or your data: ${SUPPORT_EMAIL}.`,
   },
 ];
