@@ -29,11 +29,15 @@ function fmtDate(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
-function fmtTime(ev: ScheduleEvent): string {
+// Full time RANGE — "4:00 – 5:00 PM". Per spec this line must never truncate.
+function fmtTimeRange(ev: ScheduleEvent): string {
   if (ev.timeStatus === 'tbd') return 'Time TBD';
   if (ev.timeStatus === 'all_day') return 'All day';
   if (!ev.startsAt) return 'Time TBD';
-  try { return new Date(ev.startsAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: ev.eventTimezone }); } catch { return ''; }
+  const t = (iso: string) => { try { return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: ev.eventTimezone }); } catch { return ''; } };
+  const start = t(ev.startsAt);
+  const end = ev.endsAt ? t(ev.endsAt) : '';
+  return end ? `${start} – ${end}` : start;
 }
 // A universal maps link (opens Google/Apple Maps on phones, the map site on web).
 function mapsUrl(ev: ScheduleEvent): string | null {
@@ -45,9 +49,41 @@ function scoreLabel(ev: ScheduleEvent): string | null {
   const wl = ev.teamScore === ev.opponentScore ? 'T' : ev.teamScore > ev.opponentScore ? 'W' : 'L';
   return `${wl} ${ev.teamScore}-${ev.opponentScore}`;
 }
-const TYPE_COLOR: Record<string, string> = {
-  game: '#ff6a2c', scrimmage: '#e0a52e', tournament_game: '#e2574a', practice: '#3ec46d', team_event: '#4a90e2',
+// Event-type badge palette — a small map (not conditionals) so future event
+// types slot in with their own color. game-family shares green; practice = blue.
+const TYPE_BADGE: Record<string, { bg: string; fg: string }> = {
+  game: { bg: '#123a25', fg: '#3ec46d' },
+  scrimmage: { bg: '#123a25', fg: '#3ec46d' },
+  tournament_game: { bg: '#123a25', fg: '#3ec46d' },
+  practice: { bg: '#0f2942', fg: '#6ea8ff' },
+  team_event: { bg: '#241f3a', fg: '#a894f0' },
 };
+function railParts(ymd: string): { dow: string; day: string; mon: string } {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return {
+    dow: dt.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(),
+    day: String(d),
+    mon: dt.toLocaleDateString('en-US', { month: 'short' }).toUpperCase(),
+  };
+}
+function sportIcon(sport: string | null): keyof typeof Ionicons.glyphMap {
+  switch ((sport || '').toLowerCase()) {
+    case 'football': return 'american-football';
+    case 'soccer': return 'football';
+    case 'baseball': case 'softball': return 'baseball';
+    case 'volleyball': return 'tennisball';
+    default: return 'basketball';
+  }
+}
+// State color rule (consistent app-wide): blue = needs your input, green =
+// handled, gray = resolved/inactive, amber = tentative (Maybe).
+function rsvpLabel(s: RsvpStatus | null): string {
+  return s === 'going' ? 'Going ✓' : s === 'maybe' ? 'Maybe' : s === 'out' ? 'Not going' : 'Are you going?';
+}
+function rsvpColor(s: RsvpStatus | null): string {
+  return s === 'going' ? '#3ec46d' : s === 'maybe' ? '#e0a52e' : s === 'out' ? '#8b96a3' : '#6ea8ff';
+}
 
 // A schedule row is either a standalone event or a tournament (a dated group of
 // its games). Tournament groups are anchored by their earliest (asc) / latest
@@ -243,8 +279,8 @@ export default function ScheduleScreen() {
   }, [teamNameById]);
 
   const renderRow = (ev: ScheduleEvent, canRsvp: boolean) => (
-    <Row key={ev.id} ev={ev} onPress={() => openEvent(ev)} canRsvp={canRsvp}
-      teamLabel={scope === 'all' ? teamNameById.get(ev.teamId) : undefined}
+    <Row key={ev.id} ev={ev} onPress={() => openEvent(ev)}
+      teamName={teamNameById.get(ev.teamId) ?? activeTeam?.name ?? 'Team'}
       isCoach={isCoach} myKids={canRsvp ? userKids.filter(k => k.team_id === ev.teamId) : []}
       att={attendance.filter(a => a.eventId === ev.id)} rosterCount={rosterCounts[ev.teamId] ?? 0} onRsvp={onRsvp}
       onRemind={isCoach && canRsvp ? () => remindRsvp(ev) : undefined}
@@ -274,6 +310,11 @@ export default function ScheduleScreen() {
           <Text style={styles.caption} numberOfLines={1}>{scope === 'all' ? 'All my teams' : (activeTeam?.name ?? 'Schedule')}</Text>
           <Text style={styles.title}>Schedule</Text>
         </View>
+        {isCoach && activeTeam ? (
+          <TouchableOpacity style={styles.iconCircle} onPress={() => router.push('/team-settings')} accessibilityLabel="Team settings">
+            <Ionicons name="settings-outline" size={19} color="#c7d2dc" />
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity style={styles.iconCircle} onPress={() => router.push('/messages')} accessibilityLabel="Team messages">
           <Ionicons name="chatbubble-ellipses-outline" size={20} color="#c7d2dc" />
         </TouchableOpacity>
@@ -374,99 +415,119 @@ function TournamentGroup({ name, range, count, collapsed, onToggle, onAddGame, c
   );
 }
 
-const RSVP_ON: Record<RsvpStatus, object> = { going: { backgroundColor: '#3ec46d', borderColor: '#3ec46d' }, maybe: { backgroundColor: '#e0a52e', borderColor: '#e0a52e' }, out: { backgroundColor: '#c0392b', borderColor: '#c0392b' } };
-
-function Row({ ev, onPress, teamLabel, isCoach, myKids, att, rosterCount, canRsvp, onRsvp, onRemind, snack, myUserId, onClaimSnack, onReleaseSnack }: {
-  ev: ScheduleEvent; onPress: () => void; teamLabel?: string; isCoach: boolean;
-  myKids: UserKidRow[]; att: Attendance[]; rosterCount: number; canRsvp: boolean;
+// One card skeleton for every event; only content + state vary (spec §5). Four
+// zones: header · date-rail+details · footer(attendance[, snacks]) · accent border.
+function Row({ ev, onPress, teamName, isCoach, myKids, att, rosterCount, onRsvp, onRemind, snack, myUserId, onClaimSnack, onReleaseSnack }: {
+  ev: ScheduleEvent; onPress: () => void; teamName: string; isCoach: boolean;
+  myKids: UserKidRow[]; att: Attendance[]; rosterCount: number;
   onRsvp: (eventId: string, playerId: string, status: RsvpStatus) => void;
   onRemind?: () => void;
   snack?: SnackSignup; myUserId: string | null;
   onClaimSnack?: () => void; onReleaseSnack?: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const accent = ev.teamAccentColor;
   const canceled = ev.status === 'canceled';
+  const badge = TYPE_BADGE[ev.eventType] ?? { bg: '#22303c', fg: '#9db0bd' };
+  const rail = railParts(ev.localDate);
+  const isGame = isGameFamily(ev.eventType);
+  const title = isGame
+    ? (ev.opponent ? `vs. ${ev.opponent}` : (ev.title || 'Game'))
+    : (ev.title || (ev.eventType === 'practice' ? 'Team practice' : eventTypeLabel(ev.eventType)));
   const dir = !canceled ? mapsUrl(ev) : null;
-  const score = scoreLabel(ev);
-  // Drop the redundant type title (the chip says it) — but keep a meaningful heading:
-  // the opponent for games, or a custom title for team events.
-  const subheading = ev.title || (isGameFamily(ev.eventType) && ev.opponent ? `vs ${ev.opponent}` : null);
   const venue = ev.venueName?.trim() || ev.venueAddress?.trim()?.split(',')[0]?.trim() || null;
+  const score = scoreLabel(ev);
   const going = att.filter(a => a.status === 'going').length;
-  const noAnswer = Math.max(0, rosterCount - att.length);
-  const color = TYPE_COLOR[ev.eventType] ?? '#4a90e2';
-  const showCounts = !canceled && (rosterCount > 0 || att.length > 0);
+  const pending = Math.max(0, rosterCount - att.length);
+
+  // Inline RSVP only for a single-kid household; >1 kid routes to detail (Adam's
+  // call), 0-kid coach gets a Remind action, other 0-kid users get no action.
+  const soloKid = myKids.length === 1 ? myKids[0] : null;
+  const soloStatus = soloKid ? (att.find(a => a.playerId === soloKid.player_id)?.status ?? null) : null;
+  const setSolo = (s: RsvpStatus) => { if (soloKid) { onRsvp(ev.id, soloKid.player_id, s); setExpanded(false); } };
 
   return (
-    <View style={[styles.card, canceled && { opacity: 0.7 }]}>
-      {/* Row 1 — identity: chip + date·time (primary bold) + chevron */}
-      <TouchableOpacity style={styles.cardHead} onPress={onPress} activeOpacity={0.7}>
-        <View style={[styles.badge, { backgroundColor: color + '22', borderColor: color }]}>
-          <Text style={[styles.badgeTxt, { color }]}>{eventTypeLabel(ev.eventType)}</Text>
+    <View style={[styles.card, { borderLeftColor: accent }, canceled && { opacity: 0.65 }]}>
+      {/* Zone 1 — header: team icon + name (never truncate) + type badge */}
+      <TouchableOpacity style={styles.z1} onPress={onPress} activeOpacity={0.7}>
+        <View style={[styles.teamIcon, { backgroundColor: accent + '22' }]}>
+          <Ionicons name={sportIcon(ev.teamSport)} size={13} color={accent} />
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.cardWhen, canceled && styles.canceled]} numberOfLines={1}>{fmtDate(ev.localDate)} · {fmtTime(ev)}</Text>
-          {(subheading || teamLabel || ev.homeAway || ev.seriesId) ? (
-            <Text style={styles.cardSub} numberOfLines={1}>
-              {[teamLabel, subheading, ev.homeAway ? (ev.homeAway === 'home' ? 'Home' : 'Away') : null, ev.seriesId ? '↻' : null].filter(Boolean).join(' · ')}
-            </Text>
-          ) : null}
+        <Text style={styles.teamName}>{teamName}</Text>
+        {canceled ? <Text style={styles.canceledTag}>Canceled</Text>
+          : score ? <Text style={styles.scoreChip}>{score}</Text> : null}
+        <View style={[styles.typeBadge, { backgroundColor: badge.bg }]}>
+          <Text style={[styles.typeBadgeTxt, { color: badge.fg }]}>{eventTypeLabel(ev.eventType)}</Text>
         </View>
-        {canceled ? <Text style={styles.canceledTag}>Canceled</Text> : score ? <Text style={styles.score}>{score}</Text> : null}
-        <Text style={styles.arrow}>›</Text>
       </TouchableOpacity>
 
-      {/* Row 2 — venue: one full-width tappable line → maps (fixes the truncated pill) */}
-      {venue && dir ? (
-        <TouchableOpacity style={styles.venueRow} onPress={() => Linking.openURL(dir)} hitSlop={4}>
-          <Text style={styles.venueTxt} numberOfLines={1}>📍 {venue} · <Text style={styles.venueDir}>directions</Text></Text>
-        </TouchableOpacity>
-      ) : dir ? (
-        <TouchableOpacity style={styles.venueRow} onPress={() => Linking.openURL(dir)} hitSlop={4}>
-          <Text style={styles.venueDir} numberOfLines={1}>📍 Directions</Text>
-        </TouchableOpacity>
-      ) : venue ? (
-        <Text style={[styles.venueTxt, styles.venueRow]} numberOfLines={1}>📍 {venue}</Text>
-      ) : null}
-
-      {/* Row 3 — RSVP: the primary control. Full-width segmented, one tap, no navigation. */}
-      {canRsvp && !canceled ? myKids.map(k => {
-        const cur = att.find(a => a.playerId === k.player_id)?.status ?? null;
-        return (
-          <View key={k.player_id} style={styles.rsvpBlock}>
-            {myKids.length > 1 ? <Text style={styles.rsvpKid} numberOfLines={1}>{k.name}</Text> : null}
-            <View style={styles.rsvpSeg}>
-              {(['going', 'maybe', 'out'] as RsvpStatus[]).map(s => (
-                <TouchableOpacity key={s} onPress={() => onRsvp(ev.id, k.player_id, s)} style={[styles.seg, cur === s && RSVP_ON[s]]}>
-                  <Text style={[styles.segTxt, cur === s && styles.segTxtOn]}>{s === 'going' ? '✓ Going' : s === 'maybe' ? 'Maybe' : 'Out'}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        );
-      }) : null}
-
-      {/* Row 4 — counts caption (tap → event detail) + (coach) Remind link */}
-      {showCounts ? (
-        <View style={styles.countsRow}>
-          <TouchableOpacity onPress={onPress} hitSlop={4}>
-            <Text style={styles.counts}>{going} going · {noAnswer} haven&apos;t answered</Text>
-          </TouchableOpacity>
-          {onRemind ? <Text style={styles.remindLink} onPress={onRemind}>Remind</Text> : null}
+      {/* Zone 2 — date rail + details */}
+      <TouchableOpacity style={styles.z2} onPress={onPress} activeOpacity={0.7}>
+        <View style={styles.rail}>
+          <Text style={styles.railDow}>{rail.dow}</Text>
+          <Text style={styles.railDay}>{rail.day}</Text>
+          <Text style={styles.railMon}>{rail.mon}</Text>
+          {isGame && ev.homeAway ? (
+            <View style={styles.haChip}><Text style={styles.haChipTxt}>{ev.homeAway === 'home' ? 'HOME' : 'AWAY'}</Text></View>
+          ) : null}
         </View>
-      ) : null}
+        <View style={styles.hairV} />
+        <View style={styles.details}>
+          <Text style={[styles.evTitle, canceled && styles.strike]}>{title}</Text>
+          {/* Time — full range, NEVER truncated (wins over everything, spec §1/§5) */}
+          <View style={styles.timeRow}>
+            <Ionicons name="time-outline" size={13} color="#9db0bd" />
+            <Text style={styles.timeTxt}>{fmtTimeRange(ev)}</Text>
+          </View>
+          {venue || dir ? (
+            <View style={styles.locRow}>
+              <Ionicons name="location-outline" size={12} color="#7d8a97" />
+              {venue ? <Text style={styles.locTxt} numberOfLines={1}>{venue}</Text> : null}
+              {dir ? <Text style={styles.locDir} onPress={() => Linking.openURL(dir)}>{venue ? ' · directions' : 'directions'}</Text> : null}
+            </View>
+          ) : null}
+        </View>
+      </TouchableOpacity>
 
-      {/* Row 5 — snacks footer: subordinate to RSVP, the only green element on the card */}
-      {!canceled && ev.snacksEnabled ? (
-        <View style={styles.snackFoot}>
-          <Text style={styles.snackLabel} numberOfLines={1}>🍎 Snacks · {snack ? (snack.claimedByUserId === myUserId ? 'you' : snack.claimerName) : 'nobody signed up'}</Text>
-          {snack ? (
-            snack.claimedByUserId === myUserId ? (
-              <Text style={styles.snackMine}>You&apos;re bringing them · <Text style={styles.snackUndo} onPress={onReleaseSnack}>undo</Text></Text>
-            ) : (
-              <Text style={styles.snackCovered}>Covered</Text>
-            )
-          ) : onClaimSnack ? (
-            <Text style={styles.snackClaim} onPress={onClaimSnack}>I&apos;ll bring them</Text>
+      {/* Zone 3 — footer: attendance (always) + snacks (per team setting) */}
+      {!canceled ? (
+        <View style={styles.footer}>
+          <View style={styles.fRow}>
+            <View style={styles.fLeft}>
+              <Ionicons name="people-outline" size={13} color="#7d8a97" />
+              <Text style={styles.fLabel} numberOfLines={1}>{going} going · {pending} pending</Text>
+            </View>
+            {expanded && soloKid ? (
+              <View style={styles.rsvpBtns}>
+                <TouchableOpacity style={[styles.rsvpBtn, soloStatus === 'going' && styles.rsvpGoing]} onPress={() => setSolo('going')} accessibilityLabel="Going"><Text style={[styles.rsvpBtnTxt, soloStatus === 'going' && styles.rsvpBtnTxtOn]}>✓</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.rsvpBtn, soloStatus === 'maybe' && styles.rsvpMaybe]} onPress={() => setSolo('maybe')} accessibilityLabel="Maybe"><Text style={[styles.rsvpBtnTxt, soloStatus === 'maybe' && styles.rsvpBtnTxtOn]}>Maybe</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.rsvpBtn, soloStatus === 'out' && styles.rsvpOut]} onPress={() => setSolo('out')} accessibilityLabel="Not going"><Text style={[styles.rsvpBtnTxt, soloStatus === 'out' && styles.rsvpBtnTxtOn]}>✗</Text></TouchableOpacity>
+              </View>
+            ) : soloKid ? (
+              <TouchableOpacity onPress={() => setExpanded(true)} hitSlop={6}>
+                <Text style={[styles.fAction, { color: rsvpColor(soloStatus) }]}>{rsvpLabel(soloStatus)}</Text>
+              </TouchableOpacity>
+            ) : myKids.length > 1 ? (
+              <TouchableOpacity onPress={onPress} hitSlop={6}><Text style={[styles.fAction, { color: '#6ea8ff' }]}>RSVP ›</Text></TouchableOpacity>
+            ) : onRemind ? (
+              <TouchableOpacity onPress={onRemind} hitSlop={6}><Text style={[styles.fAction, { color: '#8b7bff' }]}>Remind</Text></TouchableOpacity>
+            ) : null}
+          </View>
+
+          {ev.snacksEnabledForType ? (
+            <View style={[styles.fRow, styles.fRowTop]}>
+              <View style={styles.fLeft}>
+                <Ionicons name="nutrition-outline" size={13} color="#7d8a97" />
+                <Text style={styles.fLabel} numberOfLines={1}>Snacks · {snack ? (snack.claimedByUserId === myUserId ? 'you' : snack.claimerName) : 'nobody yet'}</Text>
+              </View>
+              {snack ? (
+                snack.claimedByUserId === myUserId ? (
+                  <TouchableOpacity onPress={onReleaseSnack} hitSlop={6}><Text style={[styles.fAction, { color: '#3ec46d' }]}>You&apos;re bringing them ✓</Text></TouchableOpacity>
+                ) : null
+              ) : onClaimSnack ? (
+                <TouchableOpacity onPress={onClaimSnack} hitSlop={6}><Text style={[styles.fAction, { color: '#3ec46d' }]}>I&apos;ll bring them</Text></TouchableOpacity>
+              ) : null}
+            </View>
           ) : null}
         </View>
       ) : null}
@@ -500,38 +561,51 @@ const styles = StyleSheet.create({
 
   section: { color: '#62707e', fontSize: 12, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 14, marginBottom: 8 },
 
-  card: { backgroundColor: '#12202e', borderColor: '#1f2f3d', borderWidth: 1, borderRadius: 14, padding: 13, marginBottom: 10 },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  badge: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4, minWidth: 66, alignItems: 'center' },
-  badgeTxt: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
-  cardWhen: { color: '#f1f4f6', fontSize: 16, fontWeight: '800', letterSpacing: -0.2 },
-  cardSub: { color: '#8b96a3', fontSize: 12.5, marginTop: 2, fontWeight: '600' },
-  canceled: { textDecorationLine: 'line-through', color: '#8b96a3' },
-  canceledTag: { color: '#c0392b', fontSize: 12, fontWeight: '800' },
-  score: { color: '#ff6a2c', fontSize: 14, fontWeight: '800' },
-  arrow: { color: '#3a4b5a', fontSize: 20 },
-
-  venueRow: { marginTop: 9 },
-  venueTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '600' },
-  venueDir: { color: '#6ea8ff', fontWeight: '700' },
-
-  rsvpBlock: { marginTop: 12 },
-  rsvpKid: { color: '#9db0bd', fontSize: 12.5, fontWeight: '700', marginBottom: 6 },
-  rsvpSeg: { flexDirection: 'row', gap: 6 },
-  seg: { flex: 1, borderWidth: 1, borderColor: '#2a3a48', borderRadius: 10, paddingVertical: 9, alignItems: 'center' },
-  segTxt: { color: '#c7d2dc', fontSize: 13.5, fontWeight: '800' },
-  segTxtOn: { color: '#0a1210' },
-
-  countsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },
-  counts: { color: '#8b96a3', fontSize: 12.5, fontWeight: '700' },
-  remindLink: { color: '#8b7bff', fontSize: 12.5, fontWeight: '800' },
-
-  snackFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 11, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#1b2735' },
-  snackLabel: { color: '#8b96a3', fontSize: 12.5, fontWeight: '600', flex: 1 },
-  snackMine: { color: '#9db0bd', fontSize: 12.5, fontWeight: '700' },
-  snackUndo: { color: '#8b96a3', fontWeight: '700', textDecorationLine: 'underline' },
-  snackCovered: { color: '#62707e', fontSize: 12.5, fontWeight: '700' },
-  snackClaim: { color: '#3ec46d', fontSize: 13, fontWeight: '800' },
+  // ── Card (spec §1 anatomy): 3px accent left border, square left / 14px right ──
+  card: {
+    backgroundColor: '#12202e', borderColor: '#1f2f3d', borderWidth: 1, borderLeftWidth: 3,
+    borderTopRightRadius: 14, borderBottomRightRadius: 14, borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
+    padding: 12, marginBottom: 12,
+  },
+  // Zone 1 — header
+  z1: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  teamIcon: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  teamName: { flex: 1, color: '#e9eef2', fontSize: 14, fontWeight: '500' }, // wraps, never truncates
+  scoreChip: { color: '#ff8a4c', fontSize: 13, fontWeight: '800' },
+  canceledTag: { color: '#e2574a', fontSize: 11, fontWeight: '800' },
+  typeBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  typeBadgeTxt: { fontSize: 11, fontWeight: '500', letterSpacing: 0.2 },
+  // Zone 2 — date rail + details
+  z2: { flexDirection: 'row', marginTop: 12 },
+  rail: { width: 52, alignItems: 'center' },
+  railDow: { color: '#7d8a97', fontSize: 12, fontWeight: '600', letterSpacing: 0.3 },
+  railDay: { color: '#f1f4f6', fontSize: 26, fontWeight: '500', lineHeight: 30 },
+  railMon: { color: '#7d8a97', fontSize: 12, fontWeight: '600', letterSpacing: 0.3 },
+  haChip: { marginTop: 5, backgroundColor: '#1b2735', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  haChipTxt: { color: '#9db0bd', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  hairV: { width: StyleSheet.hairlineWidth, backgroundColor: '#283644', marginHorizontal: 12, alignSelf: 'stretch' },
+  details: { flex: 1, justifyContent: 'center' },
+  evTitle: { color: '#f1f4f6', fontSize: 17, fontWeight: '500' }, // wraps, never truncates
+  strike: { textDecorationLine: 'line-through', color: '#8b96a3' },
+  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
+  timeTxt: { color: '#c7d2dc', fontSize: 15, fontWeight: '500' }, // NEVER truncated — no numberOfLines
+  locRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  locTxt: { color: '#8b96a3', fontSize: 13, flexShrink: 1 }, // venue truncates first
+  locDir: { color: '#6ea8ff', fontSize: 13, fontWeight: '600' },
+  // Zone 3 — footer (label-left / action-right, always same positions)
+  footer: { marginTop: 12, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#283644' },
+  fRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 24, gap: 8 },
+  fRowTop: { marginTop: 8, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#1b2735' },
+  fLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  fLabel: { color: '#8b96a3', fontSize: 12, fontWeight: '500', flexShrink: 1 },
+  fAction: { fontSize: 12, fontWeight: '500' },
+  rsvpBtns: { flexDirection: 'row', gap: 6 },
+  rsvpBtn: { minWidth: 44, minHeight: 34, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2a3a48', alignItems: 'center', justifyContent: 'center' },
+  rsvpBtnTxt: { color: '#c7d2dc', fontSize: 13, fontWeight: '700' },
+  rsvpBtnTxtOn: { color: '#0a1210' },
+  rsvpGoing: { backgroundColor: '#3ec46d', borderColor: '#3ec46d' },
+  rsvpMaybe: { backgroundColor: '#e0a52e', borderColor: '#e0a52e' },
+  rsvpOut: { backgroundColor: '#8b96a3', borderColor: '#8b96a3' },
 
   tourn: { backgroundColor: '#12202e', borderColor: '#25333f', borderWidth: 1, borderRadius: 12, marginBottom: 10, overflow: 'hidden' },
   tournHead: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 13, paddingVertical: 12, backgroundColor: '#16283b' },

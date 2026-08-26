@@ -55,6 +55,10 @@ export type ScheduleEvent = {
   seriesId: string | null;
   snacksEnabled: boolean;
   version: number;
+  // Team-level presentation/behavior (joined from teams):
+  teamAccentColor: string;        // wayfinding cue on the schedule card
+  teamSport: string | null;       // for the header sport icon
+  snacksEnabledForType: boolean;  // does THIS event's type get a snack row (team setting)
   // From the linked game (game-family only):
   gameId: string | null;
   opponent: string | null;
@@ -62,18 +66,38 @@ export type ScheduleEvent = {
   opponentScore: number | null;
 };
 
+// Curated palette (mirrors the SQL trigger) — a deterministic fallback so a card
+// always has an accent even if the joined color is somehow missing.
+// The curated accent palette (mirrors the SQL trigger). Exported so the team-
+// settings screen offers the exact same swatches.
+export const ACCENT_PALETTE = [
+  '#6C63FF', '#2FB380', '#3B9EDB', '#E0A52E', '#E2574A', '#A468E0',
+  '#2BB3A3', '#FF6A2C', '#E86AA6', '#86C34A', '#5B8DEF', '#C9A227',
+];
+export function accentFallback(teamId: string): string {
+  let h = 0;
+  for (let i = 0; i < teamId.length; i++) h = (h * 31 + teamId.charCodeAt(i)) | 0;
+  return ACCENT_PALETTE[Math.abs(h) % ACCENT_PALETTE.length];
+}
+
 export async function loadEvents(teamIds: string | string[]): Promise<ScheduleEvent[]> {
   const ids = Array.isArray(teamIds) ? teamIds : [teamIds];
   if (ids.length === 0) return [];
   const { data, error } = await supabase
     .from('events')
-    .select('id, team_id, event_type, title, local_date, starts_at, ends_at, arrival_at, event_timezone, time_status, home_away, venue_name, venue_address, status, uniform, notes, tournament_id, season_id, series_id, snacks_enabled, version, games(id, opponent, team_score, opponent_score, deleted_at)')
+    .select('id, team_id, event_type, title, local_date, starts_at, ends_at, arrival_at, event_timezone, time_status, home_away, venue_name, venue_address, status, uniform, notes, tournament_id, season_id, series_id, snacks_enabled, version, teams(accent_color, sport, snacks_enabled_games, snacks_enabled_practices), games(id, opponent, team_score, opponent_score, deleted_at)')
     .in('team_id', ids)
     .order('local_date', { ascending: true });
   if (error) throw error;
   return (data ?? []).map((r: any) => {
     const games = Array.isArray(r.games) ? r.games : r.games ? [r.games] : [];
     const g = games.find((x: any) => !x.deleted_at) ?? games[0] ?? null;
+    const t = Array.isArray(r.teams) ? r.teams[0] : r.teams;
+    // Snacks are gated by the team's per-type setting: game-family follows the
+    // "games" toggle, practice follows the "practices" toggle, everything else off.
+    const snacksForType = isGameFamily(r.event_type)
+      ? (t?.snacks_enabled_games ?? true)
+      : r.event_type === 'practice' ? (t?.snacks_enabled_practices ?? false) : false;
     return {
       id: r.id, teamId: r.team_id, eventType: r.event_type, title: r.title,
       localDate: r.local_date, startsAt: r.starts_at, endsAt: r.ends_at, arrivalAt: r.arrival_at,
@@ -81,6 +105,9 @@ export async function loadEvents(teamIds: string | string[]): Promise<ScheduleEv
       venueName: r.venue_name, venueAddress: r.venue_address, status: r.status,
       uniform: r.uniform, notes: r.notes, tournamentId: r.tournament_id, seasonId: r.season_id,
       seriesId: r.series_id, snacksEnabled: r.snacks_enabled ?? true, version: r.version,
+      teamAccentColor: t?.accent_color ?? accentFallback(r.team_id),
+      teamSport: t?.sport ?? null,
+      snacksEnabledForType: snacksForType,
       gameId: g?.id ?? null, opponent: g?.opponent ?? null,
       teamScore: g?.team_score ?? null, opponentScore: g?.opponent_score ?? null,
     };

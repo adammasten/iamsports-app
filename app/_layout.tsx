@@ -251,6 +251,7 @@ export default function RootLayout() {
           <Stack.Screen name="my-work" options={{ headerShown: false }} />
           <Stack.Screen name="coaches-corner" options={{ headerShown: false }} />
           <Stack.Screen name="team-permissions" options={{ headerShown: false }} />
+          <Stack.Screen name="team-settings" options={{ headerShown: false }} />
           <Stack.Screen name="upload" options={{ headerShown: false }} />
           <Stack.Screen name="shared-viewer" options={{ headerShown: false }} />
           <Stack.Screen name="edit-game" options={{ headerShown: false }} />
