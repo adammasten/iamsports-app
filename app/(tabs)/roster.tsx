@@ -1,7 +1,7 @@
 import { COACH_ROLES, useTeamContext } from '@/context';
 import { confirm } from '@/lib/confirm';
 import { supabase } from '@/supabase';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -374,6 +374,12 @@ export default function RosterScreen() {
       )}
       <Text style={styles.subtitle}>Roster</Text>
 
+      {isCoach ? (
+        <TouchableOpacity onPress={() => router.push('/link-players')} style={styles.linkPlayersRow} hitSlop={6}>
+          <Text style={styles.linkPlayersTxt}>🔗 Link players across teams</Text>
+        </TouchableOpacity>
+      ) : null}
+
       {isCoach && teamCode && (
         <View style={styles.codeCard}>
           <Text style={styles.codeCardLabel}>Team join code</Text>
@@ -630,6 +636,8 @@ const styles = StyleSheet.create({
   mergeOptionMeta: { color: '#9fa4af', fontSize: 13, marginTop: 4 },
   title: { fontSize: 22, fontWeight: '800', color: '#f4f4f6' },
   subtitle: { fontSize: 14, fontWeight: '600', color: '#9096a3', marginBottom: 16 },
+  linkPlayersRow: { paddingVertical: 8, marginBottom: 8 },
+  linkPlayersTxt: { color: '#6ea8ff', fontSize: 14, fontWeight: '700' },
   teamNameRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   teamNameEdit: { color: '#8b7bff', fontSize: 13, fontWeight: '700' },
   teamNameEditRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
