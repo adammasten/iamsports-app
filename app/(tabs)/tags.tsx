@@ -3,6 +3,7 @@ import { hideTag, loadHiddenTagIds, unhideTag } from '@/lib/core/hiddenTags';
 import { computeSortOrderUpdates } from '@/lib/core/tag-reorder';
 import { supabase } from '@/supabase';
 import { confirm } from '@/lib/confirm';
+import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -124,6 +125,11 @@ export default function TagsScreen() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
+          {activeTeam ? (
+            <TouchableOpacity onPress={() => router.navigate('/')} hitSlop={8} style={{ marginBottom: 8 }}>
+              <Text style={styles.backTeam}>← {activeTeam.name}</Text>
+            </TouchableOpacity>
+          ) : null}
           <Text style={styles.title}>My Tags</Text>
           <Text style={styles.context}>
             {activeTeam ? activeTeam.name : 'No team selected'}
@@ -228,6 +234,7 @@ export default function TagsScreen() {
 const styles = StyleSheet.create({
   content: { padding: 20, paddingTop: 60, paddingBottom: 60 },
   header: { marginBottom: 24 },
+  backTeam: { color: '#6ea8ff', fontSize: 14, fontWeight: '700' },
   title: { fontSize: 28, fontWeight: '700', marginBottom: 2 },
   context: { fontSize: 14, color: '#534AB7', fontWeight: '600', marginBottom: 4 },
   subtitle: { fontSize: 12, color: '#888' },

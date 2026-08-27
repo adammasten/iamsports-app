@@ -321,6 +321,14 @@ export default function HomeScreen() {
             )}
           </View>
 
+          {/* Team drill-ins — Roster / Tags moved off the bottom bar into the team. */}
+          <View style={styles.teamTools}>
+            <TouchableOpacity onPress={() => router.push('/roster')} style={styles.teamTool}><Text style={styles.teamToolTxt}>👥 Roster</Text></TouchableOpacity>
+            {isCoach ? (
+              <TouchableOpacity onPress={() => router.push('/tags')} style={styles.teamTool}><Text style={styles.teamToolTxt}>🏷️ Tags</Text></TouchableOpacity>
+            ) : null}
+          </View>
+
           <Text style={styles.subtitle}>The published team feed — watch-only. Make &amp; post from the Film Room.</Text>
 
           {hasPlaybook ? (
@@ -416,6 +424,9 @@ const styles = StyleSheet.create({
   renameSave: { color: '#1D9E75', fontSize: 14, fontWeight: '800' },
   renameCancel: { color: '#9aa0aa', fontSize: 14, fontWeight: '700' },
   subtitle: { color: '#888', fontSize: 13, lineHeight: 18, textAlign: 'center', marginBottom: 14 },
+  teamTools: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 12 },
+  teamTool: { backgroundColor: '#16232f', borderColor: '#25333f', borderWidth: 1, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
+  teamToolTxt: { color: '#c7d2dc', fontSize: 13.5, fontWeight: '700' },
   playbookBtn: { alignSelf: 'center', backgroundColor: '#534AB7', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, marginBottom: 14 },
   playbookBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   recentlyDeletedLink: { color: '#888', fontSize: 13, fontWeight: '600', textAlign: 'center', marginBottom: 14 },

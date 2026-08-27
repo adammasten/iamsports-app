@@ -1,48 +1,21 @@
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import BottomNav from '../components/BottomNav';
 import { Tabs } from 'expo-router';
 import React from 'react';
 
+// Nav unification: these four screens (Team wall / Roster / Schedule / My Tags)
+// used to carry their own Expo tab bar (Team·Roster·Schedule·Tags), which fought
+// the app-wide BottomNav and swapped the bottom bar as you moved. Now the ONE
+// shared BottomNav (Home · Schedule · ➕ · Film Room · Coaches') is rendered as the
+// tab bar here too, so the bar is identical everywhere. BottomNav returns null on
+// web (WebTopNav handles the web nav). Team wall / Roster / My Tags are drill-ins
+// reached from within a team, not standalone bottom tabs.
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        headerShown: false,
-        tabBarButton: HapticTab,
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Team',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="roster"
-        options={{
-          title: 'Roster',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="person.3.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="schedule"
-        options={{
-          title: 'Schedule',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="calendar" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="tags"
-        options={{
-          title: 'My Tags',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="tag.fill" color={color} />,
-        }}
-      />
+    <Tabs tabBar={() => <BottomNav />} screenOptions={{ headerShown: false }}>
+      <Tabs.Screen name="index" />
+      <Tabs.Screen name="roster" />
+      <Tabs.Screen name="schedule" />
+      <Tabs.Screen name="tags" />
     </Tabs>
   );
 }

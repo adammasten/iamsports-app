@@ -347,6 +347,9 @@ export default function RosterScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingTop: insets.top + 12, paddingHorizontal: 16, paddingBottom: 40 }}>
+      <TouchableOpacity onPress={() => router.navigate('/')} hitSlop={8} style={{ marginBottom: 8 }}>
+        <Text style={styles.linkPlayersTxt}>← {activeTeam.name}</Text>
+      </TouchableOpacity>
       {editingTeamName ? (
         <View style={styles.teamNameEditRow}>
           <TextInput
