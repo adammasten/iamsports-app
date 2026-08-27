@@ -327,6 +327,9 @@ export default function ExportScreen() {
 
   // ---- Step 1 game picker: the Film Room's filter/sort stack ----
   const [gameTagsById, setGameTagsById] = useState<Map<string, Set<string>>>(new Map());
+  // Per-clip tag sets (one entry per tagged clip, with its game) — powers the
+  // used-tags scoping (slice 1) and player co-occurrence dimming (slice 2).
+  const [clipTagSets, setClipTagSets] = useState<{ gameId: string; tags: Set<string> }[]>([]);
   const [visibleGameItems, setVisibleGameItems] = useState<FilterableItem[]>([]);
 
   const teamNameById = useMemo(() => {
@@ -381,6 +384,30 @@ export default function ExportScreen() {
     return m;
   }, [tags]);
 
+  // SLICE 1 — tags actually applied to clips in the SELECTED games. The picker
+  // scopes to this, so a basketball export never shows football (or unused) tags.
+  const usedTagIds = useMemo(() => {
+    const sel = new Set(selectedGames);
+    const s = new Set<string>();
+    clipTagSets.forEach(c => { if (sel.has(c.gameId)) c.tags.forEach(t => s.add(t)); });
+    return s;
+  }, [clipTagSets, selectedGames]);
+
+  // SLICE 2 — when the group-in-progress includes player tag(s), the set of tags
+  // that co-occur (on the same clip, in the selected games) with ALL those
+  // players. Picker dims tags outside this set. null = no player picked → no dim.
+  const playerCoTagIds = useMemo(() => {
+    const playerIds = currentGroup.filter(id => gameTagMeta.get(id)?.category === 'players');
+    if (playerIds.length === 0) return null;
+    const sel = new Set(selectedGames);
+    const s = new Set<string>();
+    clipTagSets.forEach(c => {
+      if (!sel.has(c.gameId)) return;
+      if (playerIds.every(pid => c.tags.has(pid))) c.tags.forEach(t => s.add(t));
+    });
+    return s;
+  }, [clipTagSets, selectedGames, currentGroup, gameTagMeta]);
+
   // Clip-tags per game (game → videos → clips → clip_tags), keyed by game id —
   // same batched pattern as the Film Room, so Player/Offense/Defense/Plays work.
   useEffect(() => {
@@ -390,6 +417,7 @@ export default function ExportScreen() {
       games.forEach((g: any) => (g.videos || []).forEach((v: any) => videoToGame.set(v.id, g.id)));
       const videoIds = [...videoToGame.keys()];
       const byId = new Map<string, Set<string>>();
+      const perClipMap = new Map<string, { gameId: string; tags: Set<string> }>();
       if (videoIds.length > 0) {
         const { data: clipRows } = await supabase.from('clips').select('id, video_id').in('video_id', videoIds);
         const clipToGame = new Map<string, string>();
@@ -403,10 +431,14 @@ export default function ExportScreen() {
             const s = byId.get(gid) ?? new Set<string>();
             s.add(ct.tag_id);
             byId.set(gid, s);
+            // per-clip set (powers player co-occurrence dimming)
+            const pc = perClipMap.get(ct.clip_id) ?? { gameId: gid, tags: new Set<string>() };
+            pc.tags.add(ct.tag_id);
+            perClipMap.set(ct.clip_id, pc);
           });
         }
       }
-      if (!cancelled) setGameTagsById(byId);
+      if (!cancelled) { setGameTagsById(byId); setClipTagSets([...perClipMap.values()]); }
     })();
     return () => { cancelled = true; };
   }, [games]);
@@ -758,28 +790,38 @@ export default function ExportScreen() {
           </View>
         </View>
 
+        {/* SLICE 1: only tags actually applied in the selected games. */}
         {categories.map(cat => {
-          const catTags = tags.filter(t => t.category === cat);
+          const catTags = tags.filter(t => t.category === cat && usedTagIds.has(t.id));
           if (catTags.length === 0) return null;
           return (
             <View key={cat} style={styles.section}>
               <Text style={styles.sectionTitle}>{cat.toUpperCase()}</Text>
               <View style={styles.tagGrid}>
-                {catTags.map(tag => (
-                  <TouchableOpacity
-                    key={tag.id}
-                    style={[styles.tagBtn, currentGroup.includes(tag.id) && styles.tagBtnSelected]}
-                    onPress={() => toggleTagInGroup(tag.id)}
-                  >
-                    <Text style={[styles.tagBtnText, currentGroup.includes(tag.id) && styles.tagBtnTextSelected]}>
-                      {tag.name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                {catTags.map(tag => {
+                  const selected = currentGroup.includes(tag.id);
+                  // SLICE 2: dim tags that don't co-occur with the picked player(s).
+                  const dimmed = !!playerCoTagIds && !playerCoTagIds.has(tag.id) && !selected;
+                  return (
+                    <TouchableOpacity
+                      key={tag.id}
+                      style={[styles.tagBtn, selected && styles.tagBtnSelected, dimmed && styles.tagBtnDimmed]}
+                      onPress={() => toggleTagInGroup(tag.id)}
+                    >
+                      <Text style={[styles.tagBtnText, selected && styles.tagBtnTextSelected]}>
+                        {tag.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
           );
         })}
+        {/* Empty-state hint when the selected games have no applied tags yet. */}
+        {!categories.some(cat => tags.some(t => t.category === cat && usedTagIds.has(t.id))) ? (
+          <Text style={styles.emptyTagsHint}>No tags found in the selected game{selectedGames.length === 1 ? '' : 's'} yet. Tag some plays first, or pick a different game.</Text>
+        ) : null}
 
         <View style={styles.groupActions}>
           <TouchableOpacity
@@ -967,6 +1009,8 @@ const styles = StyleSheet.create({
   tagGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   tagBtn: { backgroundColor: colors.surface, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.border },
   tagBtnSelected: { backgroundColor: colors.brand, borderColor: colors.brand },
+  tagBtnDimmed: { opacity: 0.3 },
+  emptyTagsHint: { color: colors.textMuted, fontSize: 13, lineHeight: 19, marginTop: 4, marginBottom: 8 },
   tagBtnText: { fontSize: 13, color: colors.text, fontWeight: '500' },
   tagBtnTextSelected: { color: '#fff' },
   tagBtnHighlight: {
