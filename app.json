@@ -3,7 +3,7 @@
     "name": "IamSports",
     "slug": "iamsports",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "hoopsapp",
     "userInterfaceStyle": "automatic",
@@ -54,7 +54,11 @@
         }
       ],
       "./plugins/strip-push-entitlement",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-screen-orientation",
+        { "initialOrientation": "PORTRAIT" }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

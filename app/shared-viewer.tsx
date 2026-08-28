@@ -11,8 +11,7 @@ import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useEvent } from 'expo';
-import { useLocalSearchParams } from 'expo-router';
-import * as ScreenOrientation from 'expo-screen-orientation';
+import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
@@ -27,6 +26,7 @@ function param(v: string | string[] | undefined): string { return (Array.isArray
 
 export default function SharedViewerScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
   const { userId } = useTeamContext();
@@ -101,15 +101,12 @@ export default function SharedViewerScreen() {
   // See game-player: stop playback before the native video surface is torn down
   // (prevents the "distorted freeze" on back), and only restore portrait if we
   // actually rotated to landscape via the ⛶ button.
-  const didLockLandscapeRef = useRef(false);
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       try { player.pause(); } catch { /* released */ }
-      if (Platform.OS !== 'web' && didLockLandscapeRef.current) {
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-      }
+      // Navigator owns orientation; popping returns to a portrait screen.
     };
   }, [player]);
 
@@ -172,10 +169,9 @@ export default function SharedViewerScreen() {
       } catch { /* fullscreen denied */ }
       return;
     }
-    const goLandscape = !isLandscape;
-    didLockLandscapeRef.current = goLandscape;
-    ScreenOrientation.lockAsync(goLandscape ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-  }, [isLandscape]);
+    // Native: flip THIS screen's orientation via the navigator (no lockAsync).
+    navigation.setOptions({ orientation: isLandscape ? 'portrait' : 'landscape' } as any);
+  }, [isLandscape, navigation]);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const onFs = () => setWebFs(!!(document as any).fullscreenElement);

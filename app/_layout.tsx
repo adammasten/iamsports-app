@@ -215,7 +215,7 @@ export default function RootLayout() {
   return (
     <TeamProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack>
+        <Stack screenOptions={{ orientation: 'portrait' }}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="landing" options={{ headerShown: false }} />
           <Stack.Screen name="playbook" options={{ headerShown: false }} />
@@ -229,7 +229,7 @@ export default function RootLayout() {
           <Stack.Screen name="login" options={{ headerShown: false }} />
           <Stack.Screen name="onboarding" options={{ headerShown: false }} />
           <Stack.Screen name="game" options={{ headerShown: false }} />
-          <Stack.Screen name="tagging-overlay" options={{ headerShown: false, contentStyle: { backgroundColor: '#000' } }} />
+          <Stack.Screen name="tagging-overlay" options={{ headerShown: false, contentStyle: { backgroundColor: '#000' }, orientation: 'landscape' }} />
           <Stack.Screen name="team-archive" options={{ headerShown: false }} />
           <Stack.Screen name="notifications" options={{ headerShown: false }} />
           <Stack.Screen name="search" options={{ headerShown: false }} />

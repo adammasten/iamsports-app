@@ -9,10 +9,9 @@ import { goBackOrHome } from '@/lib/nav';
 import { supabase } from '@/supabase';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { getCachedPathSync } from '@/lib/native/video-cache';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import * as ScreenOrientation from 'expo-screen-orientation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,6 +29,7 @@ function fmt(s: number): string {
 
 export default function GamePlayerScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
   const params = useLocalSearchParams();
@@ -59,9 +59,6 @@ export default function GamePlayerScreen() {
   const retryRef = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
-  // True only once the ⛶ button has rotated us to landscape, so we restore portrait
-  // on exit ONLY when we actually changed it (a redundant lock mid-nav is glitchy).
-  const didLockLandscapeRef = useRef(false);
 
   const player = useVideoPlayer(null, p => { p.timeUpdateEventInterval = 0.25; });
   const { currentTime } = useEvent(player, 'timeUpdate', { currentTime: 0, currentLiveTimestamp: null, currentOffsetFromLive: null, bufferedPosition: 0 });
@@ -100,9 +97,9 @@ export default function GamePlayerScreen() {
       mounted.current = false;
       if (retryTimer.current) clearTimeout(retryTimer.current);
       try { player.pause(); } catch { /* already released */ }
-      if (Platform.OS !== 'web' && didLockLandscapeRef.current) {
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-      }
+      // No orientation restore needed: this screen defaults to portrait via the
+      // navigator, and popping back returns to a portrait screen. The navigator
+      // is the single orientation authority now.
     };
   }, [player]);
 
@@ -185,10 +182,11 @@ export default function GamePlayerScreen() {
       } catch { /* fullscreen denied */ }
       return;
     }
-    const goLandscape = !isLandscape;
-    didLockLandscapeRef.current = goLandscape;
-    ScreenOrientation.lockAsync(goLandscape ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-  }, [isLandscape]);
+    // Native: flip THIS screen's orientation through the navigator. react-native-
+    // screens updates the view controller's supported orientations and rotates —
+    // no imperative ScreenOrientation.lockAsync (that was the two-authority race).
+    navigation.setOptions({ orientation: isLandscape ? 'portrait' : 'landscape' } as any);
+  }, [isLandscape, navigation]);
   // Keep the ⛶/⤡ icon in sync with the browser's actual fullscreen state.
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;

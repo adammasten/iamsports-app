@@ -10,12 +10,11 @@ import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { useEvent } from 'expo';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
-import * as ScreenOrientation from 'expo-screen-orientation';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, InteractionManager, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -365,46 +364,15 @@ export default function TaggingOverlayScreen() {
     }
   }, [statusEvent, remoteUrl, player, loadSignedSource, startAt]);
 
-  // Lock landscape on focus, restore portrait on blur. useFocusEffect (not
-  // useEffect) so the restore fires before the previous screen re-renders,
-  // avoiding a portrait-flash on back navigation. AppState listener nested
-  // inside so it only fires while this screen is focused.
-  useFocusEffect(
-    useCallback(() => {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+  // Orientation is owned by the navigator now: this route is declared
+  // `orientation: 'landscape'` in app/_layout.tsx, so iOS presents it in landscape
+  // and restores portrait automatically on pop. No imperative ScreenOrientation
+  // locks, no AppState re-lock, no deferred restore — those were the two-authority
+  // race that caused the half-rotate / snap-back.
 
-      const sub = AppState.addEventListener('change', state => {
-        if (state === 'active') {
-          ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-        }
-      });
-
-      return () => {
-        sub.remove();
-        // iOS's OS rotation animation can preempt the in-flight navigation
-        // transition if we lock synchronously on blur, intermittently leaving
-        // the user stuck on this screen in portrait. Defer until after the
-        // current transition settles.
-        InteractionManager.runAfterInteractions(() => {
-          ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-        });
-      };
-    }, [])
-  );
-
-  // Exit handler for the Back button: rotate to portrait FIRST (awaited), THEN
-  // navigate. Doing the rotation before the nav transition — rather than firing
-  // nav immediately and letting the blur-cleanup rotate whenever — means there's
-  // no half-rotated / half-navigated moment for a physical phone-turn to catch,
-  // which is what jammed the screen (stuck, landscape overlay squished into a
-  // portrait column). lockAsync can reject if the screen's already tearing down;
-  // swallow it and navigate regardless so Back can never be a dead end.
-  async function handleBack() {
-    try {
-      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-    } catch {
-      /* orientation module unavailable / screen unmounting — navigate anyway */
-    }
+  // Back: just navigate. The navigator restores portrait on pop, correctly
+  // sequenced with the transition (no manual rotate-then-navigate needed).
+  function handleBack() {
     goBackOrHome();
   }
 
