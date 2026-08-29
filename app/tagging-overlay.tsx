@@ -86,6 +86,10 @@ export default function TaggingOverlayScreen() {
   // the physical size is known, so the root always fills the real screen. NOT
   // keyed → no player remount.
   const { width: winW, height: winH } = useWindowDimensions();
+  // iPad / tablet: the shorter screen side is big. Drives a roomier touch layout
+  // (bigger chips, playback bottom-left, groupings + Save above Start/End on the
+  // bottom-right). Phones keep the compact layout untouched.
+  const isTablet = Math.min(winW, winH) >= 700;
   const landW = Math.max(winW, winH);
   const landH = Math.min(winW, winH);
   const { activeTeam, userId } = useTeamContext();
@@ -734,7 +738,9 @@ export default function TaggingOverlayScreen() {
             <TouchableOpacity style={styles.backBtn} onPress={handleBack} hitSlop={8}>
               <Text style={styles.backBtnText}>←</Text>
             </TouchableOpacity>
-            {!isWatch && (
+            {/* Phone: Save clip lives top-right. On iPad it moves into the
+                bottom-right cluster (below), same shape as + Group. */}
+            {!isWatch && !isTablet && (
               <TouchableOpacity
                 style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
                 disabled={!canSave}
@@ -763,9 +769,25 @@ export default function TaggingOverlayScreen() {
             this width — same slot the old bundle strip used. */}
         {!isWatch && (
         <View
-          style={[styles.sideStrip, { top: insets.top + 60, bottom: insets.bottom + 76, right: insets.right + 8 }]}
+          style={[
+            styles.sideStrip,
+            isTablet
+              // iPad: a horizontal cluster in the bottom-right, just above the
+              // controls row (Start/End). Left→right: Save · + Group · Tag · ★ · !.
+              ? { flexDirection: 'row', alignItems: 'center', right: insets.right + 12, bottom: insets.bottom + 64, width: undefined }
+              : { top: insets.top + 60, bottom: insets.bottom + 76, right: insets.right + 8 },
+          ]}
           pointerEvents="box-none"
         >
+          {isTablet && (
+            <TouchableOpacity
+              style={[styles.iSaveBtn, !canSave && styles.saveBtnDisabled]}
+              disabled={!canSave}
+              onPress={saveClip}
+            >
+              <Text style={styles.iSaveText}>{saving ? 'Saving…' : groupCount > 0 ? `Save (${groupCount})` : 'Save clip'}</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={[styles.addGroupBtn, !canAddGroup && styles.disabledBtn]}
             onPress={addGroup}
@@ -851,11 +873,13 @@ export default function TaggingOverlayScreen() {
             tagMode === 'compact' ? styles.tagRegion : styles.fullscreenTagRegion,
             {
               // Same bottom in both modes — keeps the scrub bar + controls row visible.
-              bottom: insets.bottom + 56 + 8 + 24 + 8,
-              // In fullscreen the columns rise under the top bar, where the
-              // top-left period cluster lives — inset the left so Offense clears it.
-              left: insets.left + 12 + (tagMode === 'fullscreen' && sportPeriods.length > 0 ? 84 : 0),
-              right: insets.right + SIDE_STRIP_W + 16,
+              // iPad: lift higher to clear the bottom-right group cluster.
+              bottom: insets.bottom + 56 + 8 + 24 + 8 + (isTablet ? 46 : 0),
+              // In fullscreen (and always on iPad) the columns sit up near the top,
+              // where the top-left period cluster lives — inset the left so Offense clears it.
+              left: insets.left + 12 + ((tagMode === 'fullscreen' || isTablet) && sportPeriods.length > 0 ? 84 : 0),
+              // iPad frees the right edge (the strip moved to the bottom) → tags use more width.
+              right: insets.right + (isTablet ? 12 : SIDE_STRIP_W + 16),
             },
             tagMode === 'fullscreen' && { top: insets.top + 60 },
           ]}
@@ -863,7 +887,7 @@ export default function TaggingOverlayScreen() {
         >
           {CATEGORIES.map(cat => (
             <View key={cat.key} style={styles.tagColumn}>
-              <Text style={[styles.colHeader, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
+              <Text style={[styles.colHeader, isTablet && styles.colHeaderBig, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
               <ScrollView showsVerticalScrollIndicator={false}>
                 <View style={styles.chipsWrap}>
                   {tags[cat.key].map(tag => {
@@ -874,6 +898,7 @@ export default function TaggingOverlayScreen() {
                         onPress={() => toggleTag(tag.id)}
                         style={[
                           styles.tagChip,
+                          isTablet && styles.tagChipBig,
                           selected
                             ? { backgroundColor: cat.color, borderColor: 'rgba(255,255,255,0.4)' }
                             : { backgroundColor: 'rgba(255, 255, 255, 0.25)', borderColor: colorWithAlpha(cat.color, 0.6) },
@@ -882,6 +907,7 @@ export default function TaggingOverlayScreen() {
                         <Text
                           style={[
                             styles.tagChipText,
+                            isTablet && styles.tagChipTextBig,
                             selected ? { color: '#fff', fontWeight: '700' } : { color: cat.color },
                           ]}
                         >
@@ -1380,4 +1406,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center',
   },
   groupCountText: { color: '#7ee0bd', fontSize: 11, fontWeight: '800' },
+  // iPad-only overrides: roomier touch chips + the Save clip button that joins the
+  // bottom-right group cluster (same rounded shape as + Group, purple to distinguish).
+  colHeaderBig: { fontSize: 13 },
+  tagChipBig: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
+  tagChipTextBig: { fontSize: 14 },
+  iSaveBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9, backgroundColor: '#534AB7', justifyContent: 'center', alignItems: 'center' },
+  iSaveText: { color: '#fff', fontSize: 12, fontWeight: '800' },
 });
