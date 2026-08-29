@@ -19,17 +19,19 @@ export default function TeamSettingsScreen() {
   const [accent, setAccent] = useState<string | null>(null);
   const [snackGames, setSnackGames] = useState(true);
   const [snackPractices, setSnackPractices] = useState(false);
+  const [parentFilm, setParentFilm] = useState(true);
 
   const load = useCallback(async () => {
     if (!activeTeam) { setLoading(false); return; }
     setLoading(true);
     const { data, error } = await supabase.from('teams')
-      .select('accent_color, snacks_enabled_games, snacks_enabled_practices')
+      .select('accent_color, snacks_enabled_games, snacks_enabled_practices, parent_film_visible')
       .eq('id', activeTeam.id).maybeSingle();
     if (!error && data) {
       setAccent((data as any).accent_color ?? null);
       setSnackGames((data as any).snacks_enabled_games ?? true);
       setSnackPractices((data as any).snacks_enabled_practices ?? false);
+      setParentFilm((data as any).parent_film_visible ?? true);
     }
     setLoading(false);
   }, [activeTeam]);
@@ -50,6 +52,7 @@ export default function TeamSettingsScreen() {
   };
   const toggleGames = (v: boolean) => { setSnackGames(v); save({ snacks_enabled_games: v }, () => setSnackGames(!v)); };
   const togglePractices = (v: boolean) => { setSnackPractices(v); save({ snacks_enabled_practices: v }, () => setSnackPractices(!v)); };
+  const toggleParentFilm = (v: boolean) => { setParentFilm(v); save({ parent_film_visible: v }, () => setParentFilm(!v)); };
 
   const Frame = ({ children }: { children: React.ReactNode }) => (
     <View style={[styles.root, { paddingTop: insets.top + 12 }]}>
@@ -95,6 +98,16 @@ export default function TeamSettingsScreen() {
               trackColor={{ true: '#3ec46d', false: '#2a3a48' }} thumbColor="#fff" />
           </View>
           <Text style={styles.hint}>Turning a type off just hides the sign-up — it never deletes who already signed up.</Text>
+
+          {/* Family film — let parents see & make highlights of their own kid's tagged games */}
+          <Text style={styles.section}>Family film</Text>
+          <Text style={styles.hint}>Let parents see their own child&apos;s tagged games from your film — and make highlight reels of their positive plays. Parents only ever see their own kid, never other players.</Text>
+          <View style={[styles.toggleRow, styles.toggleRowLast]}>
+            <Text style={styles.toggleLabel}>Parents can use my film</Text>
+            <Switch value={parentFilm} onValueChange={toggleParentFilm}
+              trackColor={{ true: '#3ec46d', false: '#2a3a48' }} thumbColor="#fff" />
+          </View>
+          <Text style={styles.hint}>Off = parents don&apos;t get your team&apos;s film in their room. Their own uploads and anything you share directly are never affected.</Text>
         </ScrollView>
       )}
     </Frame>

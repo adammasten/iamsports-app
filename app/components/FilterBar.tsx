@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
 import Dropdown, { type DropdownOption } from './Dropdown';
 
@@ -39,6 +39,9 @@ type Props = {
   // dropdown when its options list has more than one entry (an 'all' entry + at
   // least one value); filtering matches item.extra[key] === selected value.
   extraFilters?: { key: string; label: string; options: DropdownOption[] }[];
+  // Optional caller-owned dropdown rendered right after the Team dropdown (e.g.
+  // Home's "Players" lens, whose membership filtering lives on the caller).
+  playerSlot?: ReactNode;
   searchPlaceholder?: string;
   onVisibleChange: (visible: FilterableItem[]) => void;
 };
@@ -58,6 +61,7 @@ const NO_EXTRA_FILTERS: NonNullable<Props['extraFilters']> = [];
 export default function FilterBar({
   items, tagsById, tagMeta, teamOptions, typeOptions, sortOptions,
   extraFilters = NO_EXTRA_FILTERS,
+  playerSlot,
   searchPlaceholder = 'Search', onVisibleChange,
 }: Props) {
   const [search, setSearch] = useState('');
@@ -162,6 +166,7 @@ export default function FilterBar({
         {teamOptions.length > 1 && (
           <Dropdown compact value={teamFilter} options={teamOptions} onSelect={setTeamFilter} placeholder="Team" />
         )}
+        {playerSlot}
         {typeOptions.length > 1 && (
           <Dropdown compact value={typeFilter} options={typeOptions} onSelect={setTypeFilter} placeholder="Type" />
         )}

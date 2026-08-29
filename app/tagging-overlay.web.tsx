@@ -7,6 +7,7 @@
 // See docs/WEB_TAGGING_STUDIO_PLAN.md + docs/tagging-studio-prototype.html.
 import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
+import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import { getCachedPathSync } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
@@ -83,6 +84,8 @@ export default function TaggingStudioWeb() {
   const [sport, setSport] = useState<string | null>(null);
   const [tags, setTags] = useState<Record<string, Tag[]>>({ players: [], offense: [], defense: [], plays: [] });
   const [special, setSpecial] = useState<{ highlight: string | null; poe: string | null }>({ highlight: null, poe: null });
+  const [periodTags, setPeriodTags] = useState<Tag[]>([]);
+  const [activePeriod, setActivePeriod] = useState<string | null>(null);
   const [clips, setClips] = useState<ClipRow[]>([]);
   const [building, setBuilding] = useState<Built[]>([]);
   const [isStar, setIsStar] = useState(false);
@@ -192,8 +195,10 @@ export default function TaggingStudioWeb() {
       if (cancelled) return;
       const grouped: Record<string, Tag[]> = { players: [], offense: [], defense: [], plays: [] };
       let highlight: string | null = null, poe: string | null = null;
+      const periods: Tag[] = [];
       (data || []).forEach((t: any) => {
         if (t.category === 'special') { if (t.name === '★ Highlight') highlight = t.id; else if (t.name === 'POE') poe = t.id; }
+        else if (t.category === 'period') periods.push({ id: t.id, name: t.name, category: t.category });
         else if (grouped[t.category] && !hidden.has(t.id)) grouped[t.category].push({ id: t.id, name: t.name, category: t.category });
       });
       // Names-hidden tagger (a non-member hired to tag): the raw query returns NO
@@ -210,6 +215,7 @@ export default function TaggingStudioWeb() {
       if (cancelled) return;
       setTags(grouped);
       setSpecial({ highlight, poe });
+      setPeriodTags(periods);
     })();
     return () => { cancelled = true; };
   }, [teamId, tagSport]);
@@ -338,6 +344,7 @@ export default function TaggingStudioWeb() {
       const rows: { clip_id: string; tag_id: string; bundle_number: number }[] = building.map(b => ({ clip_id: editingId, tag_id: b.id, bundle_number: 1 }));
       if (isStar && special.highlight) rows.push({ clip_id: editingId, tag_id: special.highlight, bundle_number: 0 });
       if (isPoe && special.poe) rows.push({ clip_id: editingId, tag_id: special.poe, bundle_number: 0 });
+      if (activePeriod) rows.push({ clip_id: editingId, tag_id: activePeriod, bundle_number: 0 });
       if (rows.length) await supabase.from('clip_tags').insert(rows);
       if (isFootball) {
         const { error: cfErr } = await supabase.from('clip_football').upsert({
@@ -376,6 +383,7 @@ export default function TaggingStudioWeb() {
     bundles.forEach((grp, i) => grp.forEach(b => rows.push({ clip_id: clip.id, tag_id: b.id, bundle_number: i + 1 })));
     if (isStar && special.highlight) rows.push({ clip_id: clip.id, tag_id: special.highlight, bundle_number: 0 });
     if (isPoe && special.poe) rows.push({ clip_id: clip.id, tag_id: special.poe, bundle_number: 0 });
+    if (activePeriod) rows.push({ clip_id: clip.id, tag_id: activePeriod, bundle_number: 0 });
     if (rows.length) await supabase.from('clip_tags').insert(rows);
     if (isFootball) {
       const { error: cfErr } = await supabase.from('clip_football').insert({
@@ -512,12 +520,36 @@ export default function TaggingStudioWeb() {
     );
   };
 
+  // Period selector: the sport's periods (basketball → Q1..Q4, 1H, 2H), mapped to
+  // the loaded global period tags. Only periods whose tag exists render, so a
+  // visible button always has a real tag_id. Sticky + mutually exclusive; the
+  // active period auto-stamps every saved clip (clip-level, bundle 0).
+  const sportPeriods = periodsForSport(tagSport)
+    .map(name => periodTags.find(p => p.name === name))
+    .filter(Boolean) as Tag[];
+
   return (
     <GestureHandlerRootView style={styles.app}>
       {/* top bar */}
       <View style={styles.topbar}>
         <Pressable onPress={goBackOrHome} hitSlop={10}><Text style={styles.back}>‹ Back</Text></Pressable>
         <Text style={styles.gameLabel} numberOfLines={1}>{label}</Text>
+        {sportPeriods.length > 0 && (
+          <View style={styles.periodRow}>
+            {sportPeriods.map(p => {
+              const on = activePeriod === p.id;
+              return (
+                <Pressable
+                  key={p.id}
+                  onPress={() => setActivePeriod(on ? null : p.id)}
+                  style={[styles.periodBtn, on && styles.periodBtnOn]}
+                >
+                  <Text style={[styles.periodTxt, on && styles.periodTxtOn]}>{p.name}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
         <View style={{ flex: 1 }} />
         <Pressable onPress={toggleFS} style={styles.modeBtn}><Text style={styles.modeTxt}>⛶ Full screen</Text></Pressable>
         <View style={styles.autosave}><View style={styles.saveDot} /><Text style={styles.autosaveTxt}>{saving ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Auto-saves each clip'}</Text></View>
@@ -757,6 +789,12 @@ const styles = StyleSheet.create({
   topbar: { height: 52, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 18, backgroundColor: C.panel, borderBottomWidth: 1, borderBottomColor: C.line },
   back: { color: C.accent, fontSize: 14, fontWeight: '700' },
   gameLabel: { color: C.text, fontSize: 14, fontWeight: '700' },
+  // Game-period selector in the top bar (Q1/Q2/… — sport-dependent, for stats).
+  periodRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8 },
+  periodBtn: { minWidth: 34, paddingHorizontal: 8, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)', backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' },
+  periodBtnOn: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
+  periodTxt: { color: C.dim, fontSize: 12, fontWeight: '800' },
+  periodTxtOn: { color: '#1a1a1a' },
   modeBtn: { borderWidth: 1, borderColor: C.line, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 5 },
   modeTxt: { color: C.dim, fontSize: 11, fontWeight: '700' },
   autosave: { flexDirection: 'row', alignItems: 'center', gap: 6 },

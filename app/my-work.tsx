@@ -111,6 +111,9 @@ type Game = {
   // Where this game is posted (team wall / kid wall / coaches / public), so the
   // card can show its visibility — same shape reels use.
   destinations: Destination[];
+  // True when this game is here because MY KID is in it (coach film I didn't
+  // upload), vs one of my own uploads. Drives the "your child's game" label.
+  myKidGame?: boolean;
 };
 
 // Aggregate the video-cache state across a game's ready videos into ONE
@@ -369,23 +372,45 @@ export default function MyWorkScreen() {
   //   • game_id set, games present → grouped by game_id into the games Map.
   async function loadGames() {
     if (!userId) { setGames([]); setLooseVideos([]); return; }
-    const { data, error } = await supabase
-      .from('videos')
-      .select('id, label, url, thumbnail_path, sort_order, game_id, created_at, tagging_complete, event_type, upload_status, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))')
-      .eq('uploaded_by_user_id', userId)
-      .is('deleted_at', null);
-    if (error) { webAlert('Error', error.message); return; }
+    const VIDEO_COLS = 'id, label, url, thumbnail_path, sort_order, game_id, created_at, tagging_complete, event_type, upload_status, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))';
+
+    // A) Footage I uploaded (my loose clips + my games).
+    const mineRes = await supabase.from('videos').select(VIDEO_COLS)
+      .eq('uploaded_by_user_id', userId).is('deleted_at', null);
+    if (mineRes.error) { webAlert('Error', mineRes.error.message); return; }
+
+    // B) My kids' games — coach film my child is tagged in. The coach's "Family
+    //    film" toggle gates this in RLS; we just resolve the game ids from the
+    //    kid's lineups, then fetch those games' videos.
+    let kidRows: any[] = [];
+    const kidPlayerIds = userKids.map(k => k.player_id);
+    if (kidPlayerIds.length > 0) {
+      const { data: lu } = await supabase.from('game_lineups').select('game_id').in('player_id', kidPlayerIds);
+      const kidGameIds = [...new Set((lu || []).map((r: any) => r.game_id))];
+      if (kidGameIds.length > 0) {
+        const kg = await supabase.from('videos').select(VIDEO_COLS).in('game_id', kidGameIds).is('deleted_at', null);
+        kidRows = kg.data || [];
+      }
+    }
+
+    // Merge + dedupe by video id. (A) rows are mine; a (B) row I don't already
+    // have is coach film → its game gets flagged as a family (my-kid) game.
+    const rowById = new Map<string, any>();
+    (mineRes.data || []).forEach((r: any) => rowById.set(r.id, { ...r, _mine: true }));
+    kidRows.forEach((r: any) => { if (!rowById.has(r.id)) rowById.set(r.id, { ...r, _mine: false }); });
 
     const byId = new Map<string, Game>();
     const loose: (GameVideo & { createdAt: string })[] = [];
-    (data || []).forEach((row: any) => {
-      // Loose footage: no game at all. Distinct bucket — never touches the map.
+    const gameHasMine = new Set<string>();
+    rowById.forEach((row: any) => {
+      // Loose footage: no game at all (only ever from my own uploads).
       if (row.game_id == null) {
         loose.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true, uploadStatus: row.upload_status, createdAt: row.created_at });
         return;
       }
       const g = row.games;
       if (!g) return; // game_id set but RLS-blocked → drop
+      if (row._mine) gameHasMine.add(row.game_id);
       let game = byId.get(row.game_id);
       if (!game) {
         game = {
@@ -413,6 +438,8 @@ export default function MyWorkScreen() {
       // leave it null; upload.tsx uploads set it).
       if (!game.eventType && row.event_type) game.eventType = row.event_type;
     });
+    // A game with no footage of mine is a family game (my kid's, from a coach).
+    for (const [gid, game] of byId) game.myKidGame = !gameHasMine.has(gid);
     for (const game of byId.values()) {
       game.videos.sort((a, b) => a.sortOrder - b.sortOrder);
     }
@@ -1360,6 +1387,10 @@ export default function MyWorkScreen() {
                 if (!game) return null;
                 const dateStr = formatGameDate(game.gameDate);
                 const videoCount = `${game.videos.length} video${game.videos.length === 1 ? '' : 's'}`;
+                // Family game = my kid is in it, but I didn't upload it (coach film).
+                // Parents get read-safe actions only — never rename/edit/delete/share.
+                const family = game.myKidGame === true;
+                const baseMeta = dateStr ? `${dateStr} · ${videoCount}` : videoCount;
                 return (
                     <View key={`game:${game.id}`} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
                     <ContentCard
@@ -1367,13 +1398,16 @@ export default function MyWorkScreen() {
                         id: game.id,
                         kind: 'game',
                         title: game.title,
-                        meta: dateStr ? `${dateStr} · ${videoCount}` : videoCount,
+                        meta: family ? `${baseMeta} · Your child's game` : baseMeta,
                         typeLabel: game.eventType ? game.eventType.charAt(0).toUpperCase() + game.eventType.slice(1) : 'Video',
                         tagStatus: game.videos.length > 0 && game.videos.every(v => v.taggingComplete) ? 'done' : game.clipCount > 0 ? 'started' : 'none',
                         thumbnailKey: game.videos.find(v => v.thumbnailPath)?.thumbnailPath ?? null,
                       }}
                       onOpen={() => router.push({ pathname: '/game-detail', params: { id: game.id, title: game.title } })}
-                      onLongPress={() => setOverflowSheet({ title: game.title, options: [
+                      onLongPress={() => setOverflowSheet({ title: game.title, options: family ? [
+                        { label: 'Download (all videos)', onPress: () => downloadGame(game) },
+                        { label: 'Combine into one file', onPress: () => stitchGame(game) },
+                      ] : [
                         { label: 'Rename', onPress: () => openRename('game', game.id, game.title) },
                         { label: 'Edit game details', onPress: () => router.push({ pathname: '/edit-game', params: { id: game.id } }) },
                         { label: 'Edit lineup (who played)', onPress: () => router.push({ pathname: '/edit-lineup', params: { gameId: game.id, gameTitle: game.title } }) },
@@ -1386,7 +1420,11 @@ export default function MyWorkScreen() {
                         // Same action set as a reel — share · download · edit ·
                         // delete — so every content type behaves identically.
                         const item: Postable = { contentType: 'game', contentId: game.id, title: game.title };
-                        const acts: CardAction[] = [
+                        // A family game (my kid's, coach-owned) gets Download only —
+                        // no share/rename/delete (not mine to change).
+                        const acts: CardAction[] = family ? [
+                          { icon: 'download-outline', label: 'Download', busy: downloadingId === game.id, onPress: () => downloadGame(game) },
+                        ] : [
                           {
                             icon: game.destinations.length ? 'share-social' : 'share-outline',
                             label: game.destinations.length ? 'Manage sharing' : 'Share',
@@ -1401,8 +1439,9 @@ export default function MyWorkScreen() {
                           { icon: 'create-outline', label: 'Rename', onPress: () => openRename('game', game.id, game.title) },
                           { icon: 'trash-outline', label: 'Delete', onPress: () => confirmDeleteGame(game) },
                         ];
-                        // Games can also be cached on-device for offline tagging — an extra beyond the shared four.
-                        const off = computeGameOffline(game, videoCacheStatus, videoCacheProgress);
+                        // Games can also be cached on-device for offline tagging — coaches
+                        // only (a parent can't tag), so skip it on a family game.
+                        const off = family ? null : computeGameOffline(game, videoCacheStatus, videoCacheProgress);
                         if (off) acts.push({
                           icon: off.action === 'remove' ? 'cloud-done' : off.action === 'retry' ? 'refresh' : 'cloud-download-outline',
                           label: off.label,

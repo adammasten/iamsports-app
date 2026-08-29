@@ -149,12 +149,18 @@ export default function SelectTeamScreen() {
   // kid narrows to content on THAT kid's wall (player-share) or attributed to
   // them (player_id). Multi-value, so it lives outside FilterBar's single-value row.
   const playerOptions = useMemo<DropdownOption[]>(
-    () => [{ value: 'all', label: 'All players' }, ...userKids.map(k => ({ value: k.player_id, label: k.name }))],
+    () => [{ value: 'all', label: 'Players' }, ...userKids.map(k => ({ value: k.player_id, label: k.name }))],
     [userKids],
   );
   const scopedItems = useMemo(
     () => selectedPlayer === 'all' ? items : items.filter(it => it.kidPlayerIds.includes(selectedPlayer)),
     [items, selectedPlayer],
+  );
+  // The kid currently chosen in the Players lens (empty when "Players"/all) — drives
+  // the smart label on the Make-a-highlight CTA.
+  const selectedKidName = useMemo(
+    () => userKids.find(k => k.player_id === selectedPlayer)?.name ?? '',
+    [userKids, selectedPlayer],
   );
 
   // Event / Season / Tournament dropdowns, built from what's present across the
@@ -482,13 +488,24 @@ export default function SelectTeamScreen() {
           </TouchableOpacity>
         </FadeRail>
 
-        {/* Player lens (multi-value) sits above the single-select FilterBar. */}
         <View style={styles.filterWrap}>
+          {/* Make-a-highlight CTA — the persistent Home prompt. Smart-labels off
+              the Players lens: a specific kid → "Make <Kid>'s highlights" straight
+              to their games; "Players" (all) → "Make a highlight" (pick a kid). */}
           {userKids.length > 0 && (
-            <View style={styles.playerRow}>
-              <Dropdown value={selectedPlayer} options={playerOptions} onSelect={setSelectedPlayer} placeholder="Player" />
-            </View>
+            <TouchableOpacity
+              style={styles.highlightCta}
+              activeOpacity={0.85}
+              onPress={() => router.push({ pathname: '/make-highlight' as any, params: selectedPlayer !== 'all' ? { playerId: selectedPlayer } : {} })}
+            >
+              <Text style={styles.highlightCtaIcon}>🎬</Text>
+              <Text style={styles.highlightCtaText} numberOfLines={1}>
+                {selectedPlayer !== 'all' ? `Make ${selectedKidName}'s highlights` : 'Make a highlight'}
+              </Text>
+              <Text style={styles.highlightCtaChev}>›</Text>
+            </TouchableOpacity>
           )}
+          {/* Players lens now lives inline in the FilterBar row (right of Team). */}
           <FilterBar
             items={filterItems}
             tagsById={EMPTY_TAG_IDS}
@@ -497,6 +514,9 @@ export default function SelectTeamScreen() {
             typeOptions={TYPE_OPTIONS}
             sortOptions={SORT_OPTIONS}
             extraFilters={extraFilters}
+            playerSlot={userKids.length > 0 ? (
+              <Dropdown compact value={selectedPlayer} options={playerOptions} onSelect={setSelectedPlayer} placeholder="Players" />
+            ) : undefined}
             searchPlaceholder="Search videos & reels"
             onVisibleChange={setVisible}
           />
@@ -604,7 +624,10 @@ const styles = StyleSheet.create({
   teamRole: { color: '#888', fontSize: 11, textAlign: 'center', textTransform: 'capitalize' },
 
   filterWrap: { marginTop: 14, marginBottom: 4 },
-  playerRow: { flexDirection: 'row', marginBottom: 8 },
+  highlightCta: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#2563eb', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 13, marginBottom: 10 },
+  highlightCtaIcon: { fontSize: 18 },
+  highlightCtaText: { flex: 1, color: '#fff', fontSize: 15.5, fontWeight: '700', letterSpacing: -0.2 },
+  highlightCtaChev: { color: 'rgba(255,255,255,0.7)', fontSize: 20, fontWeight: '600' },
   feedError: { color: '#ff8a80', fontSize: 13, marginTop: 12, marginHorizontal: 16, textAlign: 'center' },
 
   feedPlaceholder: { paddingVertical: 60, alignItems: 'center' },

@@ -5,6 +5,7 @@
 // bottom controls row. Toggle is in the bottom controls row (rightmost).
 import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
+import { periodsForSport } from '@/lib/core/periods';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
@@ -31,6 +32,8 @@ const CATEGORIES = [
 // Right-edge control strip (Tags/Video toggle + ★/POE) width; the tag region
 // reserves this so fullscreen tags never cover it.
 const SIDE_STRIP_W = 64;
+
+// Game-period options per sport live in @/lib/core/periods (shared with web).
 
 function formatTime(seconds: number) {
   // Render '–:–' for NaN / Infinity / negative — happens briefly during video
@@ -656,6 +659,13 @@ export default function TaggingOverlayScreen() {
     setSaving(false);
   }
 
+  // Period selector (top-left): the sport's period names, in fixed order, mapped
+  // to the loaded global period tags. Only periods whose tag exists render — so a
+  // visible button always has a real tag_id to stamp on save.
+  const sportPeriods = periodsForSport(tagSport)
+    .map(name => periodTags.find((p: any) => p.name === name))
+    .filter(Boolean) as any[];
+
   return (
     <GestureHandlerRootView style={[styles.container, { width: landW, height: landH }]}>
       <VideoView
@@ -743,28 +753,7 @@ export default function TaggingOverlayScreen() {
               </View>
             )}
 
-            {/* Sticky game-period strip — sits just right of Back, always
-                visible while tagging. One period lit at a time (mutually
-                exclusive); tap the lit one to clear. Orange = game context, so
-                it reads apart from the purple tag/save chrome. Only renders once
-                the period tags exist (migration run); empty = nothing shown. */}
-            {!isWatch && periodTags.length > 0 && (
-              <View style={[styles.periodStrip, { left: insets.left + 56 }]} pointerEvents="box-none">
-                {periodTags.map((p) => {
-                  const on = activePeriod === p.id;
-                  return (
-                    <TouchableOpacity
-                      key={p.id}
-                      style={[styles.periodPill, on ? styles.periodPillOn : styles.periodPillOff]}
-                      onPress={() => setActivePeriod(on ? null : p.id)}
-                      hitSlop={6}
-                    >
-                      <Text style={[styles.periodPillText, on && styles.periodPillTextOn]}>{p.name}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
+            {/* Game-period selector moved to the top-left cluster (below). */}
           </View>
         </LinearGradient>
 
@@ -784,17 +773,24 @@ export default function TaggingOverlayScreen() {
             hitSlop={6}
           >
             <Text style={styles.addGroupBtnText}>+ Group</Text>
+            {/* Group count lives on the button now (bottom-right), replacing the
+                old standalone "N staged" badge. Bumps up on every addGroup. */}
+            {groupCount > 0 && (
+              <View style={styles.groupCountBadge}>
+                <Text style={styles.groupCountText}>{groupCount}</Text>
+              </View>
+            )}
           </TouchableOpacity>
-          {groupCount > 0 && (
-            <View style={styles.stagedBadge}>
-              <Text style={styles.stagedBadgeText}>{groupCount} staged</Text>
-            </View>
-          )}
+          {/* Single Tag +/− toggle (same size as ★ / !): shows "Tag +" while
+              compact (tap → enlarge tags) and "Tag −" while fullscreen (tap →
+              shrink). One button, two states. */}
           <TouchableOpacity
-            style={styles.toggleBtn}
+            style={styles.tagSizeBtn}
             onPress={() => setTagMode(m => (m === 'compact' ? 'fullscreen' : 'compact'))}
+            hitSlop={6}
           >
-            <Text style={styles.toggleBtnText}>{tagMode === 'compact' ? 'Tags' : 'Video'}</Text>
+            <Text style={styles.tagSizeCap}>TAG</Text>
+            <Text style={styles.tagSizeSym}>{tagMode === 'compact' ? '+' : '−'}</Text>
           </TouchableOpacity>
           <Animated.View style={[!videoReady && styles.disabledBtn, highlightAnimatedStyle]}>
             <TouchableOpacity
@@ -819,6 +815,31 @@ export default function TaggingOverlayScreen() {
         </View>
         )}
 
+        {/* Game-period selector (top-left) — small circles, one per period for
+            the current sport (basketball → Q1..Q4, 1H, 2H). Sticky + mutually
+            exclusive; the active period auto-stamps every saved clip. Renders
+            only when the sport's period tags exist. */}
+        {!isWatch && sportPeriods.length > 0 && (
+          <View
+            style={[styles.periodCluster, { top: insets.top + 60, left: insets.left + 6 }]}
+            pointerEvents="box-none"
+          >
+            {sportPeriods.map((p) => {
+              const on = activePeriod === p.id;
+              return (
+                <TouchableOpacity
+                  key={p.id}
+                  style={[styles.periodDot, on ? styles.periodDotOn : styles.periodDotOff]}
+                  onPress={() => setActivePeriod(on ? null : p.id)}
+                  hitSlop={4}
+                >
+                  <Text style={[styles.periodDotText, on && styles.periodDotTextOn]}>{p.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
         {/* Tag region — 4 category columns. Compact: short strip above the
             controls row. Fullscreen: same left/right/bottom; top extends up
             under the top bar so the columns get much more vertical space.
@@ -831,7 +852,9 @@ export default function TaggingOverlayScreen() {
             {
               // Same bottom in both modes — keeps the scrub bar + controls row visible.
               bottom: insets.bottom + 56 + 8 + 24 + 8,
-              left: insets.left + 12,
+              // In fullscreen the columns rise under the top bar, where the
+              // top-left period cluster lives — inset the left so Offense clears it.
+              left: insets.left + 12 + (tagMode === 'fullscreen' && sportPeriods.length > 0 ? 84 : 0),
               right: insets.right + SIDE_STRIP_W + 16,
             },
             tagMode === 'fullscreen' && { top: insets.top + 60 },
@@ -1003,8 +1026,8 @@ export default function TaggingOverlayScreen() {
                 onPress={() => setStartTime(player.currentTime)}
                 disabled={!videoReady}
               >
-                <Text style={styles.markBtnText}>
-                  {startTime !== null ? `Start ${formatTime(startTime)}` : 'Mark Start'}
+                <Text style={styles.markBtnText} numberOfLines={1}>
+                  {startTime !== null ? `Start ${formatTime(startTime)}` : 'Start'}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1012,8 +1035,8 @@ export default function TaggingOverlayScreen() {
                 onPress={() => setEndTime(player.currentTime)}
                 disabled={!videoReady}
               >
-                <Text style={styles.markBtnText}>
-                  {endTime !== null ? `End ${formatTime(endTime)}` : 'Mark End'}
+                <Text style={styles.markBtnText} numberOfLines={1}>
+                  {endTime !== null ? `End ${formatTime(endTime)}` : 'End'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1184,12 +1207,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   markBtn: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 10,
     height: 36,
     borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    minWidth: 110,
+    // Fixed width so the button never resizes when the time appears/changes.
+    width: 96,
   },
   markStartBtn: { backgroundColor: '#1D9E75' },
   markEndBtn: { backgroundColor: '#D85A30' },
@@ -1252,20 +1276,21 @@ const styles = StyleSheet.create({
     position: 'absolute', left: 280, right: 132, top: 0, bottom: 0,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
   },
-  // Sticky game-period strip (top bar, just right of Back). Orange active pill
-  // so it reads as game context, distinct from the purple tag/save chrome.
-  periodStrip: {
-    position: 'absolute', top: 0, bottom: 0,
-    flexDirection: 'row', alignItems: 'center', gap: 6,
+  // Game-period selector — a small cluster of circles in the top-left (below the
+  // Back arrow). Wraps to 2 per row. Orange active dot = game context, distinct
+  // from the purple tag/save chrome. Same 36pt circle size as ★ / ! / Tag.
+  periodCluster: {
+    position: 'absolute', width: 78,
+    flexDirection: 'row', flexWrap: 'wrap', gap: 6,
   },
-  periodPill: {
-    minWidth: 34, height: 30, paddingHorizontal: 8, borderRadius: 15,
-    justifyContent: 'center', alignItems: 'center', borderWidth: 1.5,
+  periodDot: {
+    width: 36, height: 36, borderRadius: 18, borderWidth: 1.5,
+    justifyContent: 'center', alignItems: 'center',
   },
-  periodPillOff: { backgroundColor: 'rgba(0,0,0,0.35)', borderColor: 'rgba(255,255,255,0.35)' },
-  periodPillOn: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
-  periodPillText: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '700' },
-  periodPillTextOn: { color: '#1a1a1a' },
+  periodDotOff: { backgroundColor: 'rgba(0,0,0,0.35)', borderColor: 'rgba(255,255,255,0.35)' },
+  periodDotOn: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
+  periodDotText: { color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: '700' },
+  periodDotTextOn: { color: '#1a1a1a' },
   topReadoutDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#EF9F27' },
   topReadoutText: {
     color: '#fff', fontSize: 13, fontWeight: '700', flexShrink: 1,
@@ -1335,20 +1360,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
 
-  // F.4 toggle button — label flips "Tags" (compact) / "Video" (fullscreen).
-  // Rightmost slot in the bottom controls row in both modes.
-  toggleBtn: {
-    width: 40,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  // Tag + / Tag − — two small circles that grow / shrink the tag columns
+  // (replaces the old single "Tags/Video" toggle). Styled like the ★ / ! circles;
+  // both drive the same two tagMode states (fullscreen = bigger, compact = smaller).
+  tagSizeBtn: {
+    width: 36, height: 36, borderRadius: 18, borderWidth: 1.5,
+    borderColor: 'rgba(139,124,246,0.85)', backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center', alignItems: 'center',
   },
-  toggleBtnText: { color: '#fff', fontSize: 11, fontWeight: '600' },
-  // "+ Group" (stage a bundle) + the staged-count badge, top of the right strip.
+  tagSizeCap: { color: '#cfc7ff', fontSize: 8, fontWeight: '700', letterSpacing: 0.5, lineHeight: 9 },
+  tagSizeSym: { color: '#cfc7ff', fontSize: 17, fontWeight: '700', lineHeight: 18, marginTop: -1 },
+  // "+ Group" (stage a bundle) with the group-count badge on its bottom-right
+  // corner (replaces the old standalone "N staged" pill).
   addGroupBtn: { width: 58, paddingVertical: 8, borderRadius: 9, backgroundColor: '#1D9E75', justifyContent: 'center', alignItems: 'center' },
   addGroupBtnText: { color: '#fff', fontSize: 12, fontWeight: '800' },
-  stagedBadge: { borderRadius: 9, backgroundColor: 'rgba(29,158,117,0.22)', borderWidth: 1, borderColor: '#1D9E75', paddingHorizontal: 6, paddingVertical: 3, alignItems: 'center' },
-  stagedBadgeText: { color: '#7ee0bd', fontSize: 10, fontWeight: '800' },
+  groupCountBadge: {
+    position: 'absolute', bottom: -6, right: -6, minWidth: 20, height: 20, borderRadius: 10,
+    backgroundColor: '#12151b', borderWidth: 1.5, borderColor: '#1D9E75',
+    paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center',
+  },
+  groupCountText: { color: '#7ee0bd', fontSize: 11, fontWeight: '800' },
 });
