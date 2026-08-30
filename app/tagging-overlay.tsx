@@ -767,27 +767,14 @@ export default function TaggingOverlayScreen() {
             Lives here (not the crowded bottom row) so all three stay visible,
             and it stays tappable in fullscreen because the tag region reserves
             this width — same slot the old bundle strip used. */}
-        {!isWatch && (
+        {!isWatch && !isTablet && (
         <View
           style={[
             styles.sideStrip,
-            isTablet
-              // iPad: a horizontal cluster in the bottom-right, just above the
-              // controls row (Start/End). Left→right: Save · + Group · Tag · ★ · !.
-              ? { flexDirection: 'row', alignItems: 'center', right: insets.right + 12, bottom: insets.bottom + 64, width: undefined }
-              : { top: insets.top + 60, bottom: insets.bottom + 76, right: insets.right + 8 },
+            { top: insets.top + 60, bottom: insets.bottom + 76, right: insets.right + 8 },
           ]}
           pointerEvents="box-none"
         >
-          {isTablet && (
-            <TouchableOpacity
-              style={[styles.iSaveBtn, !canSave && styles.saveBtnDisabled]}
-              disabled={!canSave}
-              onPress={saveClip}
-            >
-              <Text style={styles.iSaveText}>{saving ? 'Saving…' : groupCount > 0 ? `Save (${groupCount})` : 'Save clip'}</Text>
-            </TouchableOpacity>
-          )}
           <TouchableOpacity
             style={[styles.addGroupBtn, !canAddGroup && styles.disabledBtn]}
             onPress={addGroup}
@@ -803,16 +790,16 @@ export default function TaggingOverlayScreen() {
               </View>
             )}
           </TouchableOpacity>
-          {/* Single Tag +/− toggle (same size as ★ / !): shows "Tag +" while
-              compact (tap → enlarge tags) and "Tag −" while fullscreen (tap →
-              shrink). One button, two states. */}
+          {/* Single Tag size toggle (same size as ★ / !): a chevron, not +/−.
+              Compact → ↑ (tap to bring the tags up / enlarge); fullscreen → ↓
+              (tap to push them back down / shrink). One button, two states. */}
           <TouchableOpacity
             style={styles.tagSizeBtn}
             onPress={() => setTagMode(m => (m === 'compact' ? 'fullscreen' : 'compact'))}
             hitSlop={6}
           >
             <Text style={styles.tagSizeCap}>TAG</Text>
-            <Text style={styles.tagSizeSym}>{tagMode === 'compact' ? '+' : '−'}</Text>
+            <Text style={styles.tagSizeSym}>{tagMode === 'compact' ? '↑' : '↓'}</Text>
           </TouchableOpacity>
           <Animated.View style={[!videoReady && styles.disabledBtn, highlightAnimatedStyle]}>
             <TouchableOpacity
@@ -872,14 +859,16 @@ export default function TaggingOverlayScreen() {
           style={[
             tagMode === 'compact' ? styles.tagRegion : styles.fullscreenTagRegion,
             {
-              // Same bottom in both modes — keeps the scrub bar + controls row visible.
-              // iPad: lift higher to clear the bottom-right group cluster.
-              bottom: insets.bottom + 56 + 8 + 24 + 8 + (isTablet ? 46 : 0),
-              // In fullscreen (and always on iPad) the columns sit up near the top,
-              // where the top-left period cluster lives — inset the left so Offense clears it.
-              left: insets.left + 12 + ((tagMode === 'fullscreen' || isTablet) && sportPeriods.length > 0 ? 84 : 0),
-              // iPad frees the right edge (the strip moved to the bottom) → tags use more width.
-              right: insets.right + (isTablet ? 12 : SIDE_STRIP_W + 16),
+              // Phone: keep the scrub bar + controls row visible below. iPad: the
+              // controls moved to left/right corner RAILS, so the center floor is
+              // free — tags drop lower (just above the scrub) and inset from the
+              // rails on both sides.
+              bottom: insets.bottom + (isTablet ? 40 : 56 + 8 + 24 + 8),
+              // Left inset clears the top-left period cluster (fullscreen/phone) OR,
+              // on iPad, the bottom-left playback rail.
+              left: insets.left + (isTablet ? 104 : 12 + (tagMode === 'fullscreen' && sportPeriods.length > 0 ? 84 : 0)),
+              // Right inset clears the phone side-strip OR the iPad bottom-right action rail.
+              right: insets.right + (isTablet ? 120 : SIDE_STRIP_W + 16),
             },
             tagMode === 'fullscreen' && { top: insets.top + 60 },
           ]}
@@ -934,7 +923,7 @@ export default function TaggingOverlayScreen() {
               thumb while dragging. Pan auto-pauses on drag start; stays paused
               on release per spec. */}
           <View
-            style={[styles.scrubBarWrapper, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
+            style={[styles.scrubBarWrapper, { paddingLeft: insets.left + (isTablet ? 112 : 12), paddingRight: insets.right + (isTablet ? 124 : 12) }]}
             pointerEvents="box-none"
           >
             <GestureDetector gesture={pan}>
@@ -983,6 +972,7 @@ export default function TaggingOverlayScreen() {
             )}
           </View>
 
+          {!isTablet && (
           <View
             style={[styles.controlsRow, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
             pointerEvents="box-none"
@@ -1068,7 +1058,132 @@ export default function TaggingOverlayScreen() {
             </View>
             )}
           </View>
+          )}
         </LinearGradient>
+
+        {/* ── iPad ONLY: bottom-corner edge rails ──────────────────────────────
+            Phone keeps the horizontal controls row above; iPad tucks everything
+            into two narrow vertical stacks in the bottom corners, leaving the
+            center floor clear. LEFT = playback (play/pause at the very bottom).
+            RIGHT = clip actions (Start at the very bottom). */}
+        {isTablet && (
+          <View
+            style={[styles.iLeftRail, { left: insets.left + 8, bottom: insets.bottom + 40 }]}
+            pointerEvents="box-none"
+          >
+            {!isWatch && existingClips.length > 0 && (
+              <View style={styles.iSkipRow}>
+                <TouchableOpacity style={styles.iTagNavBtn} onPress={() => jumpToTag(-1)} hitSlop={6}>
+                  <Text style={styles.tagNavBtnText}>◄ Tag</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.iTagNavBtn} onPress={() => jumpToTag(1)} hitSlop={6}>
+                  <Text style={styles.tagNavBtnText}>Tag ►</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            <Text style={styles.iTimeText}>{formatTime(currentTime)} / {formatTime(duration)}</Text>
+            <TouchableOpacity
+              style={[styles.iSpeedBtn, speed !== 1 && styles.speedBtnOn]}
+              onPress={cycleSpeed}
+              hitSlop={6}
+            >
+              <Text style={[styles.skipBtnText, speed !== 1 && styles.speedBtnOnText]}>{speedLabel(speed)}</Text>
+            </TouchableOpacity>
+            <View style={styles.iSkipRow}>
+              <TouchableOpacity style={styles.iSkipBtn} onPressIn={() => startSkipRepeat(-5)} onPressOut={stopSkipRepeat}>
+                <Text style={styles.skipBtnText}>-5s</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.iSkipBtn} onPressIn={() => startSkipRepeat(5)} onPressOut={stopSkipRepeat}>
+                <Text style={styles.skipBtnText}>+5s</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.iSkipRow}>
+              <TouchableOpacity style={styles.iSkipBtn} onPressIn={() => startSkipRepeat(-1)} onPressOut={stopSkipRepeat}>
+                <Text style={styles.skipBtnText}>-1s</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.iSkipBtn} onPressIn={() => startSkipRepeat(1)} onPressOut={stopSkipRepeat}>
+                <Text style={styles.skipBtnText}>+1s</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.iPlayBtn}
+              onPress={() => (isPlaying ? player.pause() : player.play())}
+              hitSlop={8}
+            >
+              <Text style={styles.iPlayText}>{isPlaying ? '❚❚' : '▶'}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {isTablet && !isWatch && (
+          <View
+            style={[styles.iRightRail, { right: insets.right + 8, bottom: insets.bottom + 40 }]}
+            pointerEvents="box-none"
+          >
+            <TouchableOpacity
+              style={styles.iTagSizeBtn}
+              onPress={() => setTagMode(m => (m === 'compact' ? 'fullscreen' : 'compact'))}
+              hitSlop={6}
+            >
+              <Text style={styles.iRowLabel}>TAG</Text>
+              <Text style={styles.iTagSym}>{tagMode === 'compact' ? '↑' : '↓'}</Text>
+            </TouchableOpacity>
+            <Animated.View style={[!videoReady && styles.disabledBtn, poeAnimatedStyle]}>
+              <TouchableOpacity
+                style={[styles.iPoeBtn, poeLit && styles.poeBtnActive]}
+                onPress={togglePOE}
+                disabled={!videoReady}
+                hitSlop={6}
+              >
+                <Text style={[styles.iPoeText, poeLit && styles.poeTextActive]}>! POE</Text>
+              </TouchableOpacity>
+            </Animated.View>
+            <Animated.View style={[!videoReady && styles.disabledBtn, highlightAnimatedStyle]}>
+              <TouchableOpacity
+                style={[styles.iStarBtn, highlightLit && styles.highlightBtnActive]}
+                onPress={toggleHighlight}
+                disabled={!videoReady}
+                hitSlop={6}
+              >
+                <Text style={[styles.iStarText, highlightLit && styles.highlightStarActive]}>{highlightLit ? '★' : '☆'} Highlight</Text>
+              </TouchableOpacity>
+            </Animated.View>
+            <TouchableOpacity
+              style={[styles.iGroupBtn, !canAddGroup && styles.disabledBtn]}
+              onPress={addGroup}
+              disabled={!canAddGroup}
+              hitSlop={6}
+            >
+              <Text style={styles.iGroupText}>+ Group</Text>
+              {groupCount > 0 && (
+                <View style={styles.groupCountBadge}>
+                  <Text style={styles.groupCountText}>{groupCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iSaveBtn2, !canSave && styles.saveBtnDisabled]}
+              disabled={!canSave}
+              onPress={saveClip}
+            >
+              <Text style={styles.iSaveText2}>{saving ? 'Saving…' : groupCount > 0 ? `Save (${groupCount})` : 'Save clip'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iEndBtn, !videoReady && styles.disabledBtn]}
+              onPress={() => setEndTime(player.currentTime)}
+              disabled={!videoReady}
+            >
+              <Text style={styles.iMarkText} numberOfLines={1}>{endTime !== null ? `End ${formatTime(endTime)}` : 'End'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.iStartBtn, !videoReady && styles.disabledBtn]}
+              onPress={() => setStartTime(player.currentTime)}
+              disabled={!videoReady}
+            >
+              <Text style={styles.iMarkText} numberOfLines={1}>{startTime !== null ? `Start ${formatTime(startTime)}` : 'Start'}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </Animated.View>
     </GestureHandlerRootView>
   );
@@ -1413,4 +1528,29 @@ const styles = StyleSheet.create({
   tagChipTextBig: { fontSize: 14 },
   iSaveBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 9, backgroundColor: '#534AB7', justifyContent: 'center', alignItems: 'center' },
   iSaveText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+
+  // ── iPad edge rails (bottom-corner vertical stacks) ──────────────────────
+  iLeftRail: { position: 'absolute', alignItems: 'center', gap: 8 },
+  iRightRail: { position: 'absolute', width: 108, alignItems: 'stretch', gap: 8 },
+  iSkipRow: { flexDirection: 'row', gap: 8 },
+  iSkipBtn: { width: 46, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.16)', justifyContent: 'center', alignItems: 'center' },
+  iSpeedBtn: { paddingHorizontal: 16, height: 34, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.16)', justifyContent: 'center', alignItems: 'center' },
+  iTimeText: { color: '#fff', fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'], textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  iPlayBtn: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.3)', justifyContent: 'center', alignItems: 'center', marginTop: 2 },
+  iPlayText: { color: '#fff', fontSize: 24, fontWeight: '700' },
+  iTagNavBtn: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, backgroundColor: 'rgba(139,124,246,0.28)', borderWidth: 1, borderColor: 'rgba(139,124,246,0.7)' },
+  iTagSizeBtn: { paddingVertical: 8, borderRadius: 12, borderWidth: 1.5, borderColor: 'rgba(139,124,246,0.85)', backgroundColor: 'rgba(0,0,0,0.34)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  iRowLabel: { color: '#cfc7ff', fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
+  iTagSym: { color: '#cfc7ff', fontSize: 18, fontWeight: '700' },
+  iPoeBtn: { paddingVertical: 11, borderRadius: 12, borderWidth: 1.5, borderColor: '#DC3545', backgroundColor: 'rgba(0,0,0,0.34)', alignItems: 'center', justifyContent: 'center' },
+  iPoeText: { color: '#DC3545', fontSize: 14, fontWeight: '800' },
+  iStarBtn: { paddingVertical: 11, borderRadius: 12, borderWidth: 1.5, borderColor: '#f5c518', backgroundColor: 'rgba(0,0,0,0.34)', alignItems: 'center', justifyContent: 'center' },
+  iStarText: { color: '#f5c518', fontSize: 14, fontWeight: '800' },
+  iGroupBtn: { paddingVertical: 12, borderRadius: 12, backgroundColor: '#1D9E75', alignItems: 'center', justifyContent: 'center' },
+  iGroupText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  iSaveBtn2: { paddingVertical: 12, borderRadius: 12, backgroundColor: '#534AB7', alignItems: 'center', justifyContent: 'center' },
+  iSaveText2: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  iEndBtn: { paddingVertical: 14, borderRadius: 12, backgroundColor: '#D85A30', alignItems: 'center', justifyContent: 'center' },
+  iStartBtn: { paddingVertical: 14, borderRadius: 12, backgroundColor: '#1D9E75', alignItems: 'center', justifyContent: 'center' },
+  iMarkText: { color: '#fff', fontSize: 15, fontWeight: '800' },
 });
