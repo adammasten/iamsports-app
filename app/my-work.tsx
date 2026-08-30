@@ -479,8 +479,19 @@ export default function MyWorkScreen() {
     setLooseVideos(loose.map(({ createdAt, ...v }) => v));
   }
 
-  // Manual per-video "done tagging" toggle. Coach decides — not derived from
-  // clip count. Flipping the last incomplete video to done turns the game green.
+  // Manual "mark tagged" — the coach decides a game is done tagging (not derived
+  // from clip count). Flips every video's tagging_complete; the Film Room card
+  // turns green once all of a game's videos are done. Tap again to un-mark.
+  // (Previously only the paid-tagger finalize RPC could set this flag.)
+  async function toggleGameTagged(game: Game) {
+    const ids = game.videos.map(v => v.id);
+    if (ids.length === 0) { webAlert('No footage', 'Add a video to this game before marking it tagged.'); return; }
+    const done = !(game.videos.length > 0 && game.videos.every(v => v.taggingComplete));
+    const { error } = await supabase.from('videos').update({ tagging_complete: done }).in('id', ids);
+    if (error) { webAlert('Error', error.message); return; }
+    loadGames();
+  }
+
   // Delete a game. videos.game_id and clips.video_id both CASCADE, so one delete
   // removes the game, its videos, and their clips — warn about that.
   async function confirmDeleteGame(game: Game) {
@@ -1413,6 +1424,7 @@ export default function MyWorkScreen() {
                         { label: 'Edit lineup (who played)', onPress: () => router.push({ pathname: '/edit-lineup', params: { gameId: game.id, gameTitle: game.title } }) },
                         { label: 'Download (all videos)', onPress: () => downloadGame(game) },
                         { label: 'Combine into one file', onPress: () => stitchGame(game) },
+                        { label: game.videos.length > 0 && game.videos.every(v => v.taggingComplete) ? 'Mark not tagged' : 'Mark tagged ✓', onPress: () => toggleGameTagged(game) },
                         { label: 'Delete game', destructive: true, onPress: () => confirmDeleteGame(game) },
                       ] })}
                       shareStatus={deriveShareStatus(game.destinations)}

@@ -10,6 +10,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import SignedThumb from '@/components/content-card/SignedThumb';
 import { goBackOrHome } from '@/lib/nav';
+import { webAlert } from '@/lib/webAlert';
 import { supabase } from '@/supabase';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -107,10 +108,22 @@ export default function GameDetailScreen() {
     ]);
   }
 
+  // Manual "done tagging" toggle — flips this video's tagging_complete. The Film
+  // Room game card turns green once every video in the game is marked. Optimistic;
+  // reverts on error. (Previously only the paid-tagger finalize path set this.)
+  async function toggleTagged(v: Vid) {
+    setSheetVid(null);
+    const next = !v.taggingComplete;
+    setVideos(prev => prev.map(x => x.id === v.id ? { ...x, taggingComplete: next } : x));
+    const { error } = await supabase.from('videos').update({ tagging_complete: next }).eq('id', v.id);
+    if (error) { webAlert('Error', error.message); load(); }
+  }
+
   const sheetActions = (v: Vid) => [
     { icon: 'play', label: 'Watch', onPress: () => { setSheetVid(null); openPlayer(v); } },
     { icon: 'pricetag-outline', label: 'Tag video', onPress: () => { setSheetVid(null); openTagger(v); } },
     { icon: 'sparkles-outline', label: 'View clips', onPress: () => { setSheetVid(null); viewClips(v); } },
+    { icon: v.taggingComplete ? 'close-circle-outline' : 'checkmark-circle-outline', label: v.taggingComplete ? 'Mark not tagged' : 'Mark tagged', onPress: () => toggleTagged(v) },
     { icon: 'create-outline', label: 'Rename', onPress: () => { setSheetVid(null); renameVideo(v); } },
     { icon: 'remove-circle-outline', label: 'Remove from game', danger: true, onPress: () => removeFromGame(v) },
   ];
