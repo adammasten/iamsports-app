@@ -734,6 +734,13 @@ export default function ExportScreen() {
     const categories = ['offense', 'defense', 'plays', 'players'];
     const highlightSelected = !!highlightTagId && currentGroup.includes(highlightTagId);
     const poeSelected = !!poeTagId && currentGroup.includes(poeTagId);
+    // Over-stacked = a group that can't realistically land on one play: 3+ action
+    // tags, or 2+ actions with no player (e.g. Made 2 + Made 3). A normal group is
+    // one action + a player, or a scoring play + assist (2 actions WITH players).
+    const groupCats = currentGroup.map(id => gameTagMeta.get(id)?.category);
+    const groupActionCount = groupCats.filter(c => c === 'offense' || c === 'defense' || c === 'plays').length;
+    const groupPlayerCount = groupCats.filter(c => c === 'players').length;
+    const groupOverStacked = groupActionCount >= 3 || (groupActionCount >= 2 && groupPlayerCount === 0);
     return (
       <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
         <TouchableOpacity onPress={() => setStep('games')} style={styles.back}>
@@ -741,7 +748,7 @@ export default function ExportScreen() {
         </TouchableOpacity>
         <Text style={styles.title}>Export Highlights</Text>
         <Text style={styles.subtitle}>Step 2 of 3 — Build tag groups</Text>
-        <Text style={styles.hint}>Tap tags to build a group. Tap "Add Group" to save it and start another.</Text>
+        <Text style={styles.hint}>Each group = one play. Pick an action + a player — like Made 3 + Conrad — then tap + Add Group. Repeat for each play; groups combine, so you get clips matching any of them.</Text>
 
         {tagGroups.length > 0 && (
           <View style={styles.groupsContainer}>
@@ -760,11 +767,20 @@ export default function ExportScreen() {
         )}
 
         {currentGroup.length > 0 && (
-          <View style={styles.currentGroup}>
+          <View style={[styles.currentGroup, groupOverStacked && styles.currentGroupWarn]}>
             <Text style={styles.currentGroupLabel}>Current group:</Text>
             <Text style={styles.currentGroupTags}>
               {currentGroup.map(id => getTagName(id)).join(' + ')}
             </Text>
+            {groupOverStacked ? (
+              <Text style={styles.groupWarn}>⚠️ These all have to happen on ONE play to match — that&apos;s rare. If they&apos;re separate highlights, tap + Add Group between each.</Text>
+            ) : (
+              <Text style={styles.groupMeaning}>
+                {currentGroup.length === 1
+                  ? 'Matches clips with this tag.'
+                  : 'Matches clips where all of these happened together on the same play.'}
+              </Text>
+            )}
           </View>
         )}
 
@@ -871,6 +887,18 @@ export default function ExportScreen() {
             <View style={[styles.progressInner, { width: `${exportProgress}%` as any }]} />
           </View>
           <Text style={styles.progressLabel}>{exportProgress}%</Text>
+        </View>
+      )}
+
+      {clips.length === 0 && !exporting && (
+        <View style={styles.reviewEmpty}>
+          <Text style={styles.reviewEmptyTitle}>No clips matched your groups</Text>
+          <Text style={styles.reviewEmptyBody}>
+            Each group only matches a clip where every tag in it happened on the SAME play. If you stacked several plays into one group (like Made 2 + Made 3 + Block), nothing can match. Go back and split them — one play per group.
+          </Text>
+          <TouchableOpacity style={styles.reviewEmptyBtn} onPress={() => setStep('tags')}>
+            <Text style={styles.reviewEmptyBtnText}>← Back to fix groups</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1010,6 +1038,14 @@ const styles = StyleSheet.create({
   currentGroup: { backgroundColor: colors.surface, borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: colors.amber },
   currentGroupLabel: { fontSize: 12, fontWeight: '700', color: colors.amber, marginBottom: 4 },
   currentGroupTags: { fontSize: 14, color: colors.amber, fontWeight: '600' },
+  currentGroupWarn: { borderColor: colors.danger },
+  groupWarn: { fontSize: 12, color: colors.danger, fontWeight: '600', marginTop: 8, lineHeight: 16 },
+  groupMeaning: { fontSize: 12, color: colors.textMuted, marginTop: 8, lineHeight: 16 },
+  reviewEmpty: { backgroundColor: colors.surface, borderRadius: 12, padding: 18, marginTop: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.danger },
+  reviewEmptyTitle: { fontSize: 16, fontWeight: '800', color: colors.text, marginBottom: 8 },
+  reviewEmptyBody: { fontSize: 14, color: colors.textMuted, lineHeight: 20, marginBottom: 14 },
+  reviewEmptyBtn: { backgroundColor: colors.brand, borderRadius: 10, padding: 12, alignItems: 'center' },
+  reviewEmptyBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   section: { marginBottom: 16 },
   sectionTitle: { fontSize: 12, fontWeight: '700', color: colors.textMuted, marginBottom: 8, letterSpacing: 0.5 },
   tagGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
