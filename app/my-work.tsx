@@ -486,9 +486,9 @@ export default function MyWorkScreen() {
   async function confirmDeleteGame(game: Game) {
     const n = game.videos.length;
     const ok = await confirm({
-      title: 'Delete game',
-      message: `Delete “${game.title}”? It (and its ${n} video${n === 1 ? '' : 's'}) moves to Recently Deleted — a team admin can restore it for 30 days.`,
-      confirmText: 'Delete',
+      title: 'Delete everywhere?',
+      message: `Delete “${game.title}” everywhere — its ${n} video${n === 1 ? '' : 's'}, all their clips, and its entry on the schedule/calendar? It all moves to Recently Deleted; a team admin can restore it for 30 days.`,
+      confirmText: 'Delete everywhere',
       destructive: true,
     });
     if (!ok) return;

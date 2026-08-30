@@ -87,6 +87,7 @@ export async function loadEvents(teamIds: string | string[]): Promise<ScheduleEv
     .from('events')
     .select('id, team_id, event_type, title, local_date, starts_at, ends_at, arrival_at, event_timezone, time_status, home_away, venue_name, venue_address, status, uniform, notes, tournament_id, season_id, series_id, snacks_enabled, version, teams(accent_color, sport, snacks_enabled_games, snacks_enabled_practices), games(id, opponent, team_score, opponent_score, deleted_at)')
     .in('team_id', ids)
+    .is('deleted_at', null) // hide soft-deleted events (e.g. deleted along with their game)
     .order('local_date', { ascending: true });
   if (error) throw error;
   return (data ?? []).map((r: any) => {

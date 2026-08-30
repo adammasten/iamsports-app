@@ -237,6 +237,26 @@ why — don't ship the gap quietly.
 4. **Anything creatable is deletable by its owner.**
 5. **Never fail silently.** If an action doesn't do what the UI implies, say so
    at that moment. A swallowed error or silently-skipped step is a bug, always.
+6. **Delete means gone everywhere — or ask.** Deleting a thing must remove it
+   from EVERY surface it appears on, not just the card in front of the user. A
+   game is the worst offender: it's linked 1:1 to a schedule `events` row
+   (`games.event_id`), yet `delete_game` today soft-deletes only the game + its
+   videos and leaves the calendar/schedule event behind. The rule: a game delete
+   either cascades to everything associated (its videos, clips, **and** its
+   schedule event) or **prompts "Delete everywhere?"** and lets the owner choose
+   the scope — never leave an orphan on another screen. **Status: DONE for
+   games** (2026-08-29). `events` gained a reversible `deleted_at`
+   (`migration_events_add_deleted_at_soft_delete.sql`); `delete_game` now also
+   soft-deletes the linked event and `restore_game` un-deletes it (mirror pair,
+   `migration_delete_game_cascades_to_linked_event.sql` /
+   `migration_restore_game_also_restores_linked_event.sql`); `loadEvents`
+   (lib/core/schedule.ts) filters `deleted_at`; the Film Room delete prompt now
+   says "Delete everywhere?" and names the schedule entry. Cascade is ALWAYS —
+   there is no film-only-vs-everywhere scope *choice* yet (add an RPC param if a
+   user wants to keep the calendar entry). **Still open:** deleting a single
+   *video* or detaching the last one still leaves an empty parent game, and
+   `game-detail` "Remove from game"/rename use raw `Alert.alert` (a no-op on
+   web) — separate orphan/swallow bugs from the pre-launch audit.
 
 ## Media transfer speed is a product requirement
 

@@ -320,6 +320,7 @@ export default function ExportScreen() {
     const { data, error } = await supabase
       .from('games')
       .select('*, seasons (name), tournaments (name), videos (id, event_type)')
+      .is('deleted_at', null) // don't surface soft-deleted games — every other screen filters this; export was the lone gap
       .order('created_at', { ascending: false });
     if (error) { webAlert('Couldn’t load games', error.message); return; }
     setGames(data || []);
@@ -408,8 +409,12 @@ export default function ExportScreen() {
     return s;
   }, [clipTagSets, selectedGames, currentGroup, gameTagMeta]);
 
-  // Clip-tags per game (game → videos → clips → clip_tags), keyed by game id —
-  // same batched pattern as the Film Room, so Player/Offense/Defense/Plays work.
+  // Which tag IDs are actually applied to each game's clips, keyed by game id.
+  // Reads clips with their clip_tags NESTED in one query — the exact pattern the
+  // working "Make a highlight" screen (make-highlight.tsx) uses. The prior version
+  // did a separate `from('clip_tags').in('clip_id', [...])` walk that came back
+  // empty at runtime and silently showed "no tags"; nesting + surfacing the error
+  // fixes that. Powers used-tags scoping (slice 1) and co-occurrence dimming (2).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -419,24 +424,25 @@ export default function ExportScreen() {
       const byId = new Map<string, Set<string>>();
       const perClipMap = new Map<string, { gameId: string; tags: Set<string> }>();
       if (videoIds.length > 0) {
-        const { data: clipRows } = await supabase.from('clips').select('id, video_id').in('video_id', videoIds);
-        const clipToGame = new Map<string, string>();
-        (clipRows || []).forEach((c: any) => { const gid = videoToGame.get(c.video_id); if (gid) clipToGame.set(c.id, gid); });
-        const clipIds = [...clipToGame.keys()];
-        if (clipIds.length > 0) {
-          const { data: ctRows } = await supabase.from('clip_tags').select('clip_id, tag_id').in('clip_id', clipIds);
-          (ctRows || []).forEach((ct: any) => {
-            const gid = clipToGame.get(ct.clip_id);
-            if (!gid) return;
-            const s = byId.get(gid) ?? new Set<string>();
-            s.add(ct.tag_id);
-            byId.set(gid, s);
-            // per-clip set (powers player co-occurrence dimming)
-            const pc = perClipMap.get(ct.clip_id) ?? { gameId: gid, tags: new Set<string>() };
-            pc.tags.add(ct.tag_id);
-            perClipMap.set(ct.clip_id, pc);
+        const { data: clipRows, error } = await supabase
+          .from('clips')
+          .select('id, video_id, clip_tags ( tag_id )')
+          .in('video_id', videoIds);
+        // Never fail silently: if the read errors, say so instead of showing "no tags".
+        if (error && !cancelled) webAlert('Couldn’t load tags for these games', error.message);
+        (clipRows || []).forEach((c: any) => {
+          const gid = videoToGame.get(c.video_id);
+          if (!gid) return;
+          const s = byId.get(gid) ?? new Set<string>();
+          const pc = perClipMap.get(c.id) ?? { gameId: gid, tags: new Set<string>() };
+          (c.clip_tags || []).forEach((ct: any) => {
+            if (!ct?.tag_id) return;
+            s.add(ct.tag_id);       // game → used tag ids
+            pc.tags.add(ct.tag_id); // per-clip set
           });
-        }
+          byId.set(gid, s);
+          perClipMap.set(c.id, pc);
+        });
       }
       if (!cancelled) { setGameTagsById(byId); setClipTagSets([...perClipMap.values()]); }
     })();
@@ -491,7 +497,8 @@ export default function ExportScreen() {
     const { data: videos, error: videosErr } = await supabase
       .from('videos')
       .select('id, url, label, game_id, upload_status')
-      .in('game_id', selectedGames);
+      .in('game_id', selectedGames)
+      .is('deleted_at', null); // skip soft-deleted videos too
     if (videosErr) { webAlert('Couldn’t load videos', videosErr.message); setLoading(false); return; }
     const videoMap: Record<string, any> = {};
     // Only finalized videos can be exported — skip 'uploading'/'failed' (no complete
@@ -505,22 +512,21 @@ export default function ExportScreen() {
       return;
     }
 
+    // Load clips WITH their tags nested in one query — the pattern that works
+    // for this account (a per-clip direct clip_tags read came back empty at
+    // runtime, so every clip looked tagless and nothing matched). Also turns
+    // ~80 round-trips into one.
     const { data: clipData, error: clipErr } = await supabase
       .from('clips')
-      .select('*')
+      .select('*, clip_tags ( tag_id, bundle_number )')
       .in('video_id', videoIds);
     if (clipErr) { webAlert('Couldn’t load clips', clipErr.message); setLoading(false); return; }
 
-    const clipsWithTags = await Promise.all((clipData || []).map(async (clip: any) => {
-      const { data: tagData } = await supabase
-        .from('clip_tags')
-        .select('tag_id, bundle_number')
-        .eq('clip_id', clip.id);
-
-      // Organize tags by bundle
+    const clipsWithTags = (clipData || []).map((clip: any) => {
+      // Organize this clip's tags by bundle (0 = clip-level, 1+ = bundle groups).
       const clipLevelTagIds: string[] = [];
       const bundleMap: Record<number, string[]> = {};
-      (tagData || []).forEach((t: any) => {
+      (clip.clip_tags || []).forEach((t: any) => {
         const bn = t.bundle_number ?? 0;
         if (bn === 0) {
           clipLevelTagIds.push(t.tag_id);
@@ -530,7 +536,7 @@ export default function ExportScreen() {
         }
       });
       const bundles = Object.values(bundleMap);
-      const tagIds = (tagData || []).map((t: any) => t.tag_id);
+      const tagIds = (clip.clip_tags || []).map((t: any) => t.tag_id);
 
       const video = videoMap[clip.video_id];
       const game = games.find(g => g.id === video?.game_id);
@@ -543,7 +549,7 @@ export default function ExportScreen() {
         videoLabel: video?.label,
         gameTitle: game?.title,
       };
-    }));
+    });
 
     // Match clips to groups using bundle-aware AND logic
     const matchedClips: any[] = [];
