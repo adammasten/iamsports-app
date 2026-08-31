@@ -49,17 +49,26 @@ public class BackgroundUploadModule: Module {
   }
 }
 
-// Per-multipart-upload state.
+// Per-multipart-upload state (rolling slice window — never all parts on disk at once).
 final class MultipartJob {
   let uploadId: String
+  let filePath: String
   let fileSize: Int64
+  let partSize: Int64
   let totalParts: Int
-  var etags: [Int: String] = [:]      // partNumber -> ETag
-  var bytesSent: [Int: Int64] = [:]   // partNumber -> bytes sent (progress)
-  var tempFiles: [URL] = []
-  var failed = false
-  init(uploadId: String, fileSize: Int64, totalParts: Int) {
-    self.uploadId = uploadId; self.fileSize = fileSize; self.totalParts = totalParts
+  let urls: [Int: String]              // partNumber -> presigned UploadPart URL
+  let windowSize: Int                  // how many parts staged on disk at once
+  var etags: [Int: String] = [:]       // partNumber -> ETag (success)
+  var bytesSent: [Int: Int64] = [:]    // partNumber -> bytes sent (progress)
+  var tempFiles: [Int: URL] = [:]      // partNumber -> staged temp file (deleted on completion)
+  var inflight: Set<Int> = []          // parts currently enqueued/uploading
+  var nextToSlice: Int = 1             // next partNumber not yet staged
+  var failedParts: Set<Int> = []       // parts that errored (JS re-signs + retries on foreground)
+  var finished = false                 // set once, under lock, so we emit the final event exactly once
+  init(uploadId: String, filePath: String, fileSize: Int64, partSize: Int64,
+       totalParts: Int, urls: [Int: String], windowSize: Int) {
+    self.uploadId = uploadId; self.filePath = filePath; self.fileSize = fileSize
+    self.partSize = partSize; self.totalParts = totalParts; self.urls = urls; self.windowSize = windowSize
   }
   var totalSent: Int64 { bytesSent.values.reduce(0, +) }
 }
@@ -82,6 +91,9 @@ final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTask
     config.isDiscretionary = false
     config.sessionSendsLaunchEvents = true
     config.waitsForConnectivity = true
+    // Gym wifi throttles per-connection; 2 concurrent saturates the pipe better than 1
+    // without the timeouts that 5–6 cause. (Locked decision: 128 MiB parts, 2 concurrent.)
+    config.httpMaximumConnectionsPerHost = 2
     session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
   }
 
@@ -117,48 +129,72 @@ final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTask
     guard FileManager.default.fileExists(atPath: path) else {
       emit?("onError", ["uploadId": uploadId, "error": "File not found: \(path)"]); return
     }
-    let fileURL = URL(fileURLWithPath: path)
     let attrs = try? FileManager.default.attributesOfItem(atPath: path)
     let fileSize = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
-    guard fileSize > 0, partSize > 0 else {
-      emit?("onError", ["uploadId": uploadId, "error": "Empty file or bad part size"]); return
+    guard fileSize > 0, partSize > 0, !parts.isEmpty else {
+      emit?("onError", ["uploadId": uploadId, "error": "Empty file / bad part size / no parts"]); return
     }
 
-    let job = MultipartJob(uploadId: uploadId, fileSize: fileSize, totalParts: parts.count)
+    var urlMap: [Int: String] = [:]
+    for p in parts { urlMap[p.partNumber] = p.url }
+
+    let job = MultipartJob(
+      uploadId: uploadId, filePath: path, fileSize: fileSize, partSize: Int64(partSize),
+      totalParts: parts.count, urls: urlMap, windowSize: min(3, parts.count)
+    )
     lock.lock(); jobs[uploadId] = job; lock.unlock()
 
-    guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
-      emit?("onError", ["uploadId": uploadId, "error": "Could not open file"]); return
+    // Rolling slice window: stage ONLY the first `windowSize` parts. A 50 GB file sliced
+    // up front would need +50 GB of disk; instead each completion stages the next part.
+    for _ in 0..<job.windowSize { sliceNext(job) }
+  }
+
+  // Stage + enqueue the next not-yet-started part. Reads a byte range from the original
+  // file into a temp file (a background URLSession body must be a file); the temp file is
+  // deleted once that part completes (see didCompleteWithError).
+  private func sliceNext(_ job: MultipartJob) {
+    lock.lock()
+    while job.nextToSlice <= job.totalParts &&
+          (job.etags[job.nextToSlice] != nil || job.inflight.contains(job.nextToSlice)) {
+      job.nextToSlice += 1
     }
-    defer { try? handle.close() }
+    let partNumber = job.nextToSlice
+    guard partNumber <= job.totalParts, let urlStr = job.urls[partNumber], let url = URL(string: urlStr) else {
+      lock.unlock(); return
+    }
+    job.nextToSlice += 1
+    job.inflight.insert(partNumber)
+    lock.unlock()
 
-    for part in parts.sorted(by: { $0.partNumber < $1.partNumber }) {
-      let offset = Int64(part.partNumber - 1) * Int64(partSize)
-      let length = min(Int64(partSize), fileSize - offset)
-      if length <= 0 { continue }
-      guard let url = URL(string: part.url) else { continue }
-      do {
-        try handle.seek(toOffset: UInt64(offset))
-        let data = handle.readData(ofLength: Int(length))
-        let tempURL = FileManager.default.temporaryDirectory
-          .appendingPathComponent("mpu-\(uploadId)-p\(part.partNumber).tmp")
-        try data.write(to: tempURL)
-        lock.lock(); job.tempFiles.append(tempURL); lock.unlock()
+    let offset = Int64(partNumber - 1) * job.partSize
+    let length = min(job.partSize, job.fileSize - offset)
+    guard length > 0 else {
+      lock.lock(); job.inflight.remove(partNumber); lock.unlock(); return
+    }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "PUT"
-        let task = session.uploadTask(with: request, fromFile: tempURL)
-        lock.lock(); taskCtx[task.taskIdentifier] = (uploadId, part.partNumber); lock.unlock()
-        task.resume()
-      } catch {
-        lock.lock(); job.failed = true; lock.unlock()
-        emit?("onError", ["uploadId": uploadId, "error": "part \(part.partNumber): \(error.localizedDescription)"])
-      }
+    do {
+      let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: job.filePath))
+      defer { try? handle.close() }
+      try handle.seek(toOffset: UInt64(offset))
+      let data = handle.readData(ofLength: Int(length))
+      let tempURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("mpu-\(job.uploadId)-p\(partNumber).tmp")
+      try data.write(to: tempURL)
+      lock.lock(); job.tempFiles[partNumber] = tempURL; lock.unlock()
+
+      var request = URLRequest(url: url)
+      request.httpMethod = "PUT"
+      let task = session.uploadTask(with: request, fromFile: tempURL)
+      lock.lock(); taskCtx[task.taskIdentifier] = (job.uploadId, partNumber); lock.unlock()
+      task.resume()
+    } catch {
+      lock.lock(); job.inflight.remove(partNumber); job.failedParts.insert(partNumber); lock.unlock()
+      emit?("onError", ["uploadId": job.uploadId, "part": partNumber, "error": "slice: \(error.localizedDescription)"])
     }
   }
 
   private func cleanup(_ job: MultipartJob) {
-    for f in job.tempFiles { try? FileManager.default.removeItem(at: f) }
+    for (_, f) in job.tempFiles { try? FileManager.default.removeItem(at: f) }
   }
 
   // MARK: - URLSession delegate
@@ -209,30 +245,48 @@ final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTask
       return
     }
 
-    // Multipart part
+    // Multipart part (rolling window)
     lock.lock(); let job = jobs[ctx.uploadId]; lock.unlock()
     guard let job = job else { return }
 
-    if let error = error {
-      lock.lock(); job.failed = true; lock.unlock()
-      emit?("onError", ["uploadId": ctx.uploadId, "part": partNumber, "error": error.localizedDescription])
-      return
-    }
-    if (200...299).contains(status), let etag = etag {
-      lock.lock()
-      job.etags[partNumber] = etag
-      let done = job.etags.count == job.totalParts && !job.failed
-      var payload: [[String: Any]] = []
-      if done {
-        payload = job.etags.sorted { $0.key < $1.key }.map { ["partNumber": $0.key, "etag": $0.value] }
-        cleanup(job)
-        jobs[ctx.uploadId] = nil
-      }
-      lock.unlock()
-      if done { emit?("onComplete", ["uploadId": ctx.uploadId, "parts": payload]) }
+    // Free this part's staged temp file + inflight slot regardless of outcome.
+    lock.lock()
+    if let tmp = job.tempFiles[partNumber] { try? FileManager.default.removeItem(at: tmp); job.tempFiles[partNumber] = nil }
+    job.inflight.remove(partNumber)
+    lock.unlock()
+
+    if error == nil, (200...299).contains(status), let etag = etag {
+      lock.lock(); job.etags[partNumber] = etag; job.failedParts.remove(partNumber); lock.unlock()
     } else {
-      lock.lock(); job.failed = true; lock.unlock()
-      emit?("onError", ["uploadId": ctx.uploadId, "part": partNumber, "status": status, "body": bodyText ?? ""])
+      lock.lock(); job.failedParts.insert(partNumber); lock.unlock()
+      // Non-fatal: report the part; JS re-signs (403 = expired URL) + retries on foreground.
+      emit?("onError", ["uploadId": ctx.uploadId, "part": partNumber,
+                        "status": status, "error": error?.localizedDescription ?? "", "body": bodyText ?? ""])
     }
+
+    // Advance the rolling window — stage the next part (keeps ~windowSize on disk).
+    sliceNext(job)
+
+    // Finalize exactly once, when nothing is in flight and nothing is left to stage.
+    lock.lock()
+    let drained = job.inflight.isEmpty && job.nextToSlice > job.totalParts
+    var emitDone = false, emitFail = false
+    var payload: [[String: Any]] = []
+    var failedList: [Int] = []
+    if drained && !job.finished {
+      job.finished = true
+      if job.etags.count == job.totalParts && job.failedParts.isEmpty {
+        emitDone = true
+        payload = job.etags.sorted { $0.key < $1.key }.map { ["partNumber": $0.key, "etag": $0.value] }
+        cleanup(job); jobs[ctx.uploadId] = nil
+      } else {
+        emitFail = true
+        failedList = job.failedParts.sorted()   // keep the job so JS can retry these parts
+      }
+    }
+    lock.unlock()
+
+    if emitDone { emit?("onComplete", ["uploadId": ctx.uploadId, "parts": payload]) }
+    else if emitFail { emit?("onError", ["uploadId": ctx.uploadId, "error": "incomplete", "failedParts": failedList]) }
   }
 }

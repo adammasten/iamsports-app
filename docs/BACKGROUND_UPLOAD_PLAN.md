@@ -10,6 +10,57 @@ against Supabase docs and adopted.
 
 ---
 
+## ✅ Locked decisions (2026-08-30 — after a 2nd 4-AI review: ChatGPT, Gemini, Perplexity, Claude)
+
+All four independently confirmed the architecture below with **no pivot**. Raw responses live in
+`docs/background-upload-ai-responses/`. This section is authoritative and **supersedes the
+2–5 GB sizing** referenced further down.
+
+- **Scale.** Target is now **up to ~50 GB per file** (XbotGo Falcon 4K masters run ~15 GB;
+  Adam routinely pushes larger). Lifecycle testing must use a real **≥15 GB** file, not a synthetic 3 GB one.
+- **Full master, from the phone (Option A).** The phone uploads the full 4K master (the archive). If the
+  24 h multipart window is ever at risk, the accepted answer is **"use better internet,"** not more
+  engineering — gym wifi is a possibility, not a design driver. Do not over-build for it.
+- **Rolling slice window (MANDATORY at this scale).** Never slice the whole file up front — at 50 GB that's
+  50 GB of extra part files = instant out-of-storage. Stage only **~2–3 parts** (a few hundred MB); on each
+  part's completion, delete its temp file and slice/enqueue the next. Big (128 MiB) parts take *minutes* to
+  upload, so waking to schedule the next stays under iOS's throttle limit (this is exactly why 6 MB TUS
+  chunks throttle and big parts don't). **Unanimous.**
+- **Part size / concurrency:** **128 MiB, 2 concurrent** (`httpMaximumConnectionsPerHost = 2`). 3 of 4 AIs;
+  A/B down to 64 MiB only if real wifi proves hostile.
+- **Two clocks for expiry:** the 24 h multipart lifetime vs the shorter presigned-URL life. On a **403**
+  (URL expired), the native module requests a **fresh presigned URL for that one part** from the Edge
+  Function — it does **not** restart the upload. Only an expired/aborted **multipart** is a terminal
+  "expired — restart" state.
+- **Completion:** `ListParts` is authoritative; native ETags are a hint; verify the final object via
+  `HeadObject` size == source size. Treat an ambiguous completion (timeout / lost callback) as
+  **"unknown → reconcile,"** never blind-restart.
+- **Honest UX contract:** continues on app-switch / lock / iOS-suspend; a user **force-quit** (swipe away)
+  cancels the transfer and iOS won't relaunch → resume/reconcile on next manual open. (Adam's actual use
+  case — start upload, go to email — IS the "continues" case.)
+- **Extra catches to build in (Claude/Perplexity):** captive-portal wifi returns a fake `200` → verify an
+  **ETag** came back, not just a 2xx; **sign only the `host` header** (extra headers → 403); default
+  **cellular OFF** with an explicit per-upload toggle; `CompleteMultipartUpload` on a huge object can exceed
+  the Edge Function wall-clock → make it **async + poll**; **raise Supabase's global + bucket file-size
+  limits well above 50 GB** (verify with a real large Complete); the Railway transcode of a 4K/50 GB master
+  is a long, disk-heavy, **resumable** job.
+- **Keep the native module.** No off-the-shelf RN library does this; Expo's background upload can't
+  orchestrate multipart. Keep the module **thin** (session / slice / enqueue / persist / bridge); all policy
+  (part size, concurrency, cellular) lives in JS/Edge.
+
+### Playback & export quality (product decisions)
+- **In-app playback stays light/fast** (current streaming copy) — we do **not** globally bump it.
+- **Export/download gets a two-tier quality picker**, labeled by *purpose*:
+  - **Standard** — faster, smaller; for quick shares + in-app / informational viewing. **Default.**
+  - **Maximum** — best resolution, slower; for showcase reels + big screens. **Renders from the retained
+    4K master.**
+  - Show the time/size tradeoff; remember each user's last pick (so quality-first users land on Maximum).
+- ⚠️ **Build-time verify:** does today's upload pipeline **keep the 4K master**, or repoint `videos.url` to
+  the 720p copy and drop the master? "Maximum" export needs the master. New Option-A uploads keep it; older
+  videos may already be 720p-only.
+
+---
+
 ## The transport pivot (why NOT TUS)
 
 Earlier drafts said "native module wrapping TUSKit." That's wrong for the background

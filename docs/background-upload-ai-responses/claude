@@ -1,0 +1,158 @@
+# IamSports Background Upload — Architecture Review (Claude AI)
+
+**Reviewer:** Claude (Anthropic)
+**Date:** August 30, 2026
+**Scope:** Pressure-test of the presigned-S3-multipart-over-background-URLSession design in the brief, updated for the new reality that the normal upload is now a ~15 GB camera master file, not 2–5 GB.
+
+---
+
+## 1. Verdict
+
+**Yes — presigned S3 multipart parts uploaded by an iOS background `URLSession` is the right architecture.** It is the only design on iOS in which the OS, not your JS runtime, owns the transfer, and it removes the two things that make TUS-in-background unworkable (a sequential state machine and a mutable auth header). Your reasons for rejecting TUS are correct. Phase 0a proving the transport with server-only credentials is the right first milestone.
+
+**But the 15 GB file changes what the hard problem is.** At 2–5 GB the hard problem was "keep the transfer alive." At 15 GB the hard problems become:
+
+1. **Disk.** File-backed parts means a second copy of the file. If the source came out of Photos via a picker, that's a *third* copy. 15 GB × 2–3 on a phone is the failure mode most likely to bite real users, and nothing in the brief addresses it.
+2. **Time.** On tournament-gym wifi (realistically 5–25 Mbps up), a 15 GB upload is **1.5–7 hours**. That makes relaunch/reconcile the *main path*, not the edge case, and makes the 24-hour multipart window a real risk, not a theoretical one.
+3. **Ingest.** Getting 15 GB out of Photos and into part files is itself a multi-minute, disk-heavy, foreground-only step that the brief treats as free.
+
+Everything below is organized around those three, then the specific questions you asked.
+
+---
+
+## 2. What changes at 15 GB (the failure modes you're missing)
+
+### 2.1 Disk footprint — the #1 gap
+
+Background sessions only support `uploadTask(with:fromFile:)`. There is no offset/length variant and streamed-body uploads are not allowed in background sessions. So part files are unavoidable on iOS. The consequences:
+
+| Copy | Size | When it exists |
+|---|---|---|
+| Source (Photos asset or Files document) | 15 GB | Always |
+| Picker temp copy (expo-image-picker / PHPicker `loadFileRepresentation`) | 15 GB | If you use a picker that copies |
+| Part files | up to 15 GB | While enqueued |
+
+Worst case ~45 GB of transient disk. Recommendations:
+
+- **Don't let the picker copy the file.** For Photos, use `PHAssetResourceManager.requestData(for:options:dataReceivedHandler:)` to stream bytes straight into part files — no intermediate copy. For Files/iCloud Drive, use a security-scoped bookmark to the original document (`UIDocumentPicker` with `asCopy: false`) and read ranges with `FileHandle`. Persist the `PHAsset` localIdentifier / bookmark, not a path to a temp copy.
+- **"Keep the original until verified" should mean keep the *reference*, not a copy.** Re-derive missing parts from the asset/bookmark on resume. Never hold a private 15 GB duplicate for 24 hours.
+- **Size the enqueue window by free disk.** Check `volumeAvailableCapacityForImportantUsage`. If free space ≥ ~1.25× file size, slice and enqueue every part up front (best case — iOS owns the whole plan). If not, use a rolling window (e.g. 8–12 parts on disk), delete each part file in `didCompleteWithError` on success, and refill. See §4.2 for why the refill path is second-best.
+- **Delete part files aggressively** — on success, on final failure, and on abort/expiry. Add a startup sweep that removes orphan part files not referenced by an active plan in SQLite.
+
+### 2.2 Wall-clock time and the 24-hour window
+
+Rough upload times for 15 GB:
+
+| Uplink | Time |
+|---|---|
+| 5 Mbps | ~6.7 h |
+| 10 Mbps | ~3.3 h |
+| 25 Mbps | ~1.3 h |
+| 50 Mbps | ~40 min |
+| 100 Mbps | ~20 min |
+
+Implications:
+
+- **The tournament-gym story is probably "starts at the gym, finishes at the hotel/home."** Plan the UX around that: a persistent "Uploading — 4.2 of 15 GB" state, a local notification on completion, and a plain "Keep your phone on wifi; this may take a few hours" message. Don't promise it finishes at the gym.
+- **24 h can actually lapse.** Start at 4 pm on bad wifi, phone dies overnight, wifi doesn't come back until the next afternoon → gone. Since parts can't move between uploadIds, expiry means re-uploading everything. Mitigations, in order of value: (a) surface the deadline in the UI ("must finish by Sun 4:12 PM"); (b) confirm with Supabase whether the 24 h is from creation or last activity — it matters; (c) *if* Supabase's S3 layer supports `UploadPartCopy` (verify), you have an escape hatch: near expiry, `Complete` a partial object from the parts that landed, start a new multipart, and `UploadPartCopy` byte ranges from the partial object as the first parts of the new upload. Only worth building if you see expiries in the field.
+- **Cellular is now a data-plan question.** A 15 GB upload on cellular is not something to default silently. Default `allowsCellularAccess = false`, offer an explicit "Allow cellular for this upload" toggle, and set `allowsExpensiveNetworkAccess` / `allowsConstrainedNetworkAccess` accordingly (Low Data Mode users will otherwise see the upload silently stall).
+
+### 2.3 Downstream: Edge Function and transcode at 15 GB
+
+- **`CompleteMultipartUpload` on a 15 GB object can take tens of seconds** while the backing store assembles parts. Make sure that fits inside the Edge Function's wall-clock limit, or move Complete to an async worker (a DB row with status `completing` + a scheduled retry) and have the client poll. The Complete call must already be idempotent — good — so a retry after a timeout is safe.
+- **Supabase file-size caps.** Both the project-wide global file size limit (Storage settings) and any bucket-level `file_size_limit` must be raised above your largest expected master, with headroom (say 30 GB). The default is far below 15 GB. Verify this against a real 15 GB Complete, not a 4-part test.
+- **Railway transcode.** Pulling 15 GB (likely 4K) to Railway and producing the 720p faststart copy is a long, disk-heavy job. Stream the download, size ephemeral disk for 15 GB + output, expect 30–90+ minutes of FFmpeg, and make the job resumable/retryable. Not part of this module, but it's now on the critical path to "coach can watch the game."
+
+---
+
+## 3. Supabase S3-compat specifics
+
+### 3.1 Presign expiry vs the 24 h window
+- SigV4 query-string presigns can run up to 7 days, so a 24 h expiry that matches the multipart window is fine and removes an entire class of "URL expired mid-part" failures. Set `timeoutIntervalForResource` on the session **≤ the presign expiry** so tasks don't outlive their URLs.
+- Blast radius of a leaked presigned part URL is one write to one part of one uploadId. Acceptable.
+- **Sign only `host`.** If native adds any header that the signature included in `SignedHeaders` (`Content-Type`, `Content-MD5`, `x-amz-*`), the PUT gets a 403. Keep the request bare: method, URL, body, `Content-Length`. Never add `Authorization`.
+
+### 3.2 ETags
+- Treat ETags as **opaque strings**. Pass them back to Complete exactly as received (quotes included). A completed multipart's ETag is `<md5-of-md5s>-<N>`, not an MD5 of the content — don't use it for integrity.
+- Since `ListParts` is authoritative at Complete time, client-side ETag capture is just a hint. That's the right design. Verification of the final object should be `HeadObject` → `Content-Length == source size` (you already do this in 0a).
+
+### 3.3 ListParts reconciliation edge cases
+- **Same part number uploaded twice** overwrites (last write wins). Retries are safe.
+- **Part sizes are not required to be uniform** — only ≥ 5 MiB for all but the last. This lets you shrink part size mid-upload if failure rates are high (§3.4). The client owns the byte-range → part-number map; persist it in native SQLite and reconcile `ListParts` *sizes* against it, not just part numbers.
+- **Paginate `ListParts`** (`IsTruncated` / `PartNumberMarker`) even though 235 parts fits in one page. Cheap insurance.
+- **`NoSuchUpload` on `ListParts` or `UploadPart`** = the window lapsed or the upload was aborted → surface your explicit "expired" state.
+- **Captive portals.** Gym wifi often returns `200` HTML (or a `302`) for any request before the user taps "Accept." To `URLSession` that's a successful task. Your delegate must check `HTTPURLResponse.statusCode` *and* the presence of an `ETag` header; a 2xx with no ETag is a failure to retry. Same for `403` (expired/bad signature → fresh presign), `5xx` (retry with backoff), `400 InvalidPart` (regenerate that part).
+- **Never trust a client-supplied `uploadId`/`objectKey` at Complete.** Record the plan server-side (a `video_uploads` row: coach, team, object key, uploadId, status, created_at) when you create it; Complete takes only your row id and authorizes against it. This is also what lets a cron job abort orphaned uploads and reconcile disk.
+
+### 3.4 Part size on flaky wifi
+Per-part overhead on S3 is negligible above ~16 MiB, so the cost of larger parts is entirely on the failure side: a part that dies at 90% restarts from zero, and a wifi↔cellular switch kills every in-flight part. With 15 GB files the total part count is not a constraint (10,000 max; 64 MiB → ~235 parts).
+
+Recommendation: **64 MiB default, 3 concurrent** (`HTTPMaximumConnectionsPerHost = 3`; the system may use fewer), and make the size adaptive: if more than ~20% of recent parts fail, drop remaining parts to 32 MiB. Keep 128 MiB in the A/B, but expect it to lose on deliberately bad wifi. Expect 256 MiB to lose clearly.
+
+---
+
+## 4. Background URLSession pitfalls
+
+### 4.1 Things you have right
+- `background(withIdentifier:)`, `isDiscretionary = false`, `sessionSendsLaunchEvents = true`.
+- Recreating the session on native launch *before* RN starts, forwarding `handleEventsForBackgroundURLSession`.
+- Native SQLite as system of record; reconcile local ∩ `getAllTasks()` ∩ `ListParts` on relaunch.
+- Enqueue while foregrounded.
+
+### 4.2 Things to add or watch
+- **Tasks created while the app is in the background may be treated as discretionary** regardless of `isDiscretionary`. Discretionary tasks wait for favorable conditions (wifi, battery). This is the hidden cost of the rolling-window refill: refills triggered from a background wake can be deferred. So: enqueue the full plan up front whenever disk permits (§2.1); when it doesn't, refill preferentially on foreground returns and treat background refills as best-effort. Tell the user when the upload is waiting on the app being opened.
+- **The rate-limit trap is about wakes, not task count.** Enqueuing 100–250 tasks is fine (Photos does far more). The system launches the app roughly once when the enqueued tasks have all completed or need attention, so a rolling window of 12 parts on a 235-part plan is ~20 wakes over several hours — acceptable. What triggers throttling: taking too long in the wake, or **failing to call the stored `completionHandler`** in `urlSessionDidFinishEvents(forBackgroundURLSession:)` on the main thread. Do the minimum in the wake (record results, delete part files, enqueue next batch, call the handler).
+- **One session per identifier, ever.** Creating a second `URLSession` with the same identifier is undefined. Make the native session a singleton; this bites hard with Expo dev reloads/Fast Refresh.
+- **Handle the cancel reasons.** On force-quit, tasks come back on next launch with `NSURLErrorCancelled` and `NSURLErrorBackgroundTaskCancelledReasonKey` = `userForceQuit` (also `backgroundUpdatesDisabled`, `insufficientSystemResources`). Force-quit also means iOS will **not** relaunch you for session events — the user must open the app. Show "Upload paused because the app was closed — open to resume" rather than a generic failure.
+- **Progress while suspended is invisible.** On foreground, rebuild progress from `getAllTasks()` → `countOfBytesSent` per task plus completed parts in SQLite. Progress on a task resets when the system retries it; smooth this in UI.
+- **Expo wiring.** `handleEventsForBackgroundURLSession` needs an `ExpoAppDelegateSubscriber` (or config plugin) — it won't work in Expo Go, and background session behavior in the Simulator is not representative. Real device only, which you already know.
+- **Extend the device test matrix** beyond foreground→background→lock→wifi↔cellular→force-quit→relaunch with: Low Power Mode on; Low Data Mode on; Background App Refresh off; captive-portal wifi; phone reboot mid-upload (tasks survive reboot? verify); disk-almost-full; and the "start at gym, resume at home 6 h later" run. **Run the full matrix with a real 15 GB file.** 2–5 GB tests will not surface the disk and time failures.
+
+---
+
+## 5. Is there a simpler path?
+
+Short answer: no simpler path that actually survives being killed, and you've already built the thin native module, so keep it. For completeness:
+
+- **`expo-file-system` legacy `createUploadTask` with `sessionType: BACKGROUND`** (SDK 54: `expo-file-system/legacy`). This *does* use a background `URLSession`, and combined with `ListParts`-as-authority it gets surprisingly far: parts keep uploading when suspended, and on the next foreground you reconcile against the server. What it lacks is exactly the relaunch path — no session recreation before RN, no `handleEventsForBackgroundURLSession`, no native persistence, results lost if the app is killed. At 2 GB that's an edge case; at 15 GB over 4 hours it's the main path. Worth knowing about as a fallback, not as the plan.
+- **`react-native-background-upload`** (Vydia). Wraps background `URLSession` but is lightly maintained, has New Architecture friction, and does none of the multipart orchestration. You'd write the same orchestration on top of a less-controlled transport.
+- **Supabase TUS in the background.** Correctly rejected. The 6 MB lock plus sequential offsets makes it structurally wrong for `nsurlsessiond`.
+- **A different Supabase primitive.** There isn't one. Standard uploads are single-request, TUS is sequential, S3 multipart is the only parallel, presignable, header-free path.
+
+Keep the native module **thin**: session lifecycle, part slicing, task enqueue/observe, SQLite persistence, event bridge. All policy — part size, concurrency, cellular rules, plan shape — should live in JS/Edge so you can tune without native rebuilds.
+
+### 5.1 A product-level question worth deciding explicitly (not a recommendation)
+The server already produces the 720p streaming copy, and the master exists only as an archive. For a 15 GB, likely-4K file on gym wifi, the honest product question is whether the phone should be the thing that uploads the master at all, versus: (a) upload the master from a laptop via the existing tus web path, or (b) an *opt-in* "send a device-side 1080p copy now, master later on home wifi." Option (b) is a quality trade and therefore needs your explicit sign-off per your own rule — I'm flagging it as a decision, not proposing it. The upload architecture is correct either way.
+
+---
+
+## 6. Android sanity check (later)
+
+No objection to the shape, with three notes:
+
+- **Android 14+ User-Initiated Data Transfer jobs** are the right primitive (`setUserInitiated(true)`, `RUN_USER_INITIATED_JOBS`, must be started while the app is visible or from a notification, must show a notification, should call `setEstimatedNetworkBytes`). They're exempt from the limit below.
+- **Android 14 caps `dataSync` foreground services at ~6 hours per 24 h.** A 15 GB upload on 5 Mbps exceeds that. So the "WorkManager + foreground service" fallback is only safe on Android 12–13; on 14+ it must be UIDT.
+- **Android doesn't need part files.** OkHttp can send a byte range of a file as a `RequestBody`, so the disk problem in §2.1 disappears there. Same Edge Function protocol, same reconcile logic. Expect OEM battery managers (Samsung, Xiaomi) to kill long jobs; a UIDT notification helps but plan for reconcile-on-open as the norm.
+
+---
+
+## 7. Non-negotiables — confirmed preserved
+
+- **Storage read leak stays closed.** Presigned URLs are write-only `UploadPart` URLs for one uploadId. S3 keys never leave the Edge Function. Reads still go exclusively through `sign-media`. One addition: because the S3 layer writes with service credentials, `storage.objects.owner` will not be the coach — make sure nothing (RLS, cleanup jobs) relies on it.
+- **No silent quality trade.** The master is uploaded byte-for-byte. §5.1 is flagged for a human decision.
+- **Web stays on tus-js-client.** Untouched.
+
+---
+
+## 8. Prioritized punch list
+
+1. Re-run the Phase 0b device lifecycle with a **real 15 GB file**, including disk-tight and 6-hour-gap scenarios.
+2. Replace picker-copy ingest with `PHAssetResourceManager` streaming / security-scoped bookmarks; persist references, not copies.
+3. Free-disk check → full-enqueue vs rolling-window decision; orphan part-file sweep on launch.
+4. Delegate: check status code **and** ETag presence; handle 403/5xx/captive-portal/`NoSuchUpload`; handle cancel reasons.
+5. Server-side `video_uploads` row; Complete authorizes against it; async Complete if it exceeds Edge Function limits; cron abort of orphans.
+6. Raise Supabase global + bucket size limits with headroom; verify with a real 15 GB Complete.
+7. Cellular consent default-off; Low Data Mode handling; 24 h deadline in UI; completion notification.
+8. Part size 64 MiB / 3 concurrent default, adaptive shrink; A/B 32/64/128.
+9. Size Railway transcode for 15 GB / 4K inputs.
+10. Decide §5.1 explicitly.
