@@ -9,6 +9,7 @@
 // should have kept climbing.
 import BackgroundUpload from '@/modules/background-upload';
 import { supabase } from '@/supabase';
+import { startBackgroundMultipart, completeMultipart, retryParts, type StartedUpload } from '@/lib/native/background-upload';
 import { pickVideo, pendingFileSize } from '@/lib/native/video-upload';
 import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useRef, useState } from 'react';
@@ -21,8 +22,8 @@ export default function BgUploadTest() {
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
   const startedAt = useRef<number>(0);
-  // Pending multipart finalize info (key + S3 uploadId), read by the onComplete handler.
-  const mpu = useRef<{ key: string; uploadId: string } | null>(null);
+  // Pending multipart upload (plan + fileUri), read by onComplete/onError.
+  const mpu = useRef<{ started: StartedUpload; retried: boolean } | null>(null);
 
   const add = (line: string) =>
     setLog(prev => [`${new Date().toLocaleTimeString()}  ${line}`, ...prev].slice(0, 60));
@@ -34,25 +35,41 @@ export default function BgUploadTest() {
       BackgroundUpload.addListener('onComplete', async (e) => {
         const secs = ((Date.now() - startedAt.current) / 1000).toFixed(0);
         setProgress(1);
-        if (e.parts && mpu.current) {
-          // Multipart: all parts uploaded — finalize server-side.
-          add(`All ${e.parts.length} parts uploaded (${secs}s). Finalizing…`);
-          const { key, uploadId } = mpu.current;
-          const { data, error } = await supabase.functions.invoke('multipart-upload', {
-            body: { action: 'complete', key, uploadId, parts: e.parts },
-          });
+        if (mpu.current) {
+          // Multipart: parts uploaded — finalize from ListParts (server truth), not client ETags.
+          const { started } = mpu.current;
+          add(`Parts uploaded (${secs}s). Finalizing from ListParts…`);
+          try {
+            const data = await completeMultipart(started.key, started.uploadId, started.numParts);
+            add(`✅ MULTIPART COMPLETE — object assembled (ETag ${data?.etag ?? '?'})`);
+          } catch (err: any) {
+            add(`❌ Finalize FAILED — ${err?.message ?? err}`);
+          }
           setBusy(false);
           mpu.current = null;
-          if (error || data?.error) add(`❌ Finalize FAILED — ${error?.message ?? data?.error}`);
-          else add(`✅ MULTIPART COMPLETE — object assembled (ETag ${data?.etag ?? '?'})`);
         } else {
           setBusy(false);
           add(`✅ COMPLETE — HTTP ${e.status}, ETag ${e.etag ?? '(none)'}, ${secs}s`);
         }
       }),
-      BackgroundUpload.addListener('onError', (e) => {
+      BackgroundUpload.addListener('onError', async (e: any) => {
+        // Final "incomplete" event (rolling window drained with failures) carries failedParts.
+        if (Array.isArray(e.failedParts)) {
+          if (mpu.current && !mpu.current.retried) {
+            mpu.current.retried = true;
+            add(`⚠️ ${e.failedParts.length} part(s) failed: [${e.failedParts.join(', ')}]. Re-signing + retrying…`);
+            try { await retryParts(mpu.current.started, e.failedParts); add('🔁 Retry enqueued for failed parts.'); }
+            catch (err: any) { setBusy(false); add(`❌ Retry FAILED — ${err?.message ?? err}`); }
+          } else {
+            setBusy(false);
+            add(`❌ INCOMPLETE — parts still failing: [${e.failedParts.join(', ')}]`);
+          }
+          return;
+        }
+        // Per-part errors are non-fatal — the rolling window keeps going; just log.
+        if (e.part) { add(`⚠️ part ${e.part} err${e.status ? ` (HTTP ${e.status})` : ''} — will reconcile`); return; }
         setBusy(false);
-        add(`❌ ERROR — ${e.error ?? ''}${e.part ? ` [part ${e.part}]` : ''}${e.status ? ` (HTTP ${e.status})` : ''}${e.body ? `\n${String(e.body).slice(0, 300)}` : ''}`);
+        add(`❌ ERROR — ${e.error ?? ''}${e.body ? `\n${String(e.body).slice(0, 300)}` : ''}`);
       }),
     ];
     return () => subs.forEach(s => s.remove());
@@ -95,17 +112,12 @@ export default function BgUploadTest() {
       add(`[multipart] Picked ${(bytes / 1048576).toFixed(0)} MB`);
 
       const key = `spike/0b-mpu-${Date.now()}.mp4`;
-      add('Asking Edge Function to create multipart + presign parts…');
-      const { data, error } = await supabase.functions.invoke('multipart-upload', {
-        body: { action: 'create', key, fileSize: bytes, partSizeMB: 64 },
-      });
-      if (error || data?.error || !data?.parts) { setBusy(false); add(`Create FAILED — ${error?.message ?? data?.error}`); return; }
-      add(`Got ${data.parts.length} presigned parts (${(data.partSize / 1048576).toFixed(0)} MB each).`);
-
-      mpu.current = { key, uploadId: data.uploadId };
+      add('Creating multipart + signing parts (rolling-window protocol)…');
+      const started = await startBackgroundMultipart({ key, fileUri: pending.uri, fileSize: bytes, partSizeMB: 128 });
+      add(`Enqueued ${started.numParts} parts (${(started.partSize / 1048576).toFixed(0)} MB each); native stages ~3 at a time.`);
+      mpu.current = { started, retried: false };
       startedAt.current = Date.now();
-      await BackgroundUpload.startMultipartUpload(key, pending.uri, data.partSize, data.parts);
-      add('🚀 [multipart] All parts enqueued. NOW LOCK THE PHONE / SWITCH APPS, then come back.');
+      add('🚀 [multipart] Uploading. NOW LOCK THE PHONE / SWITCH APPS, then come back.');
     } catch (e: any) { setBusy(false); add(`start FAILED — ${e?.message ?? e}`); }
   }
 
