@@ -8,7 +8,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
-const MODEL = Deno.env.get("EXTRACT_MODEL") ?? "claude-3-5-sonnet-latest";
+// claude-3-5-sonnet was retired by Anthropic (2025-10-28) → requests 404'd and the
+// schedule importer silently broke. Sonnet 5 is API-compatible for this vision call.
+const MODEL = Deno.env.get("EXTRACT_MODEL") ?? "claude-sonnet-5";
 const SUPA_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const DAILY_LIMIT = 10;
@@ -54,6 +56,16 @@ Deno.serve(async (req) => {
   const mediaType = (body?.mediaType as string) || "image/jpeg";
   if (!image) return json({ error: "No image was received." }, 400);
 
+  // Optional free-text context from the user (e.g. "We're the Bengals") — helps the
+  // model pick which team is "us" (home/away) and avoid listing our own team as opponent.
+  const userContext = (body?.context as string | undefined)?.trim();
+  const promptText = userContext
+    ? PROMPT + `
+
+Context the user gave about this schedule: ${userContext.slice(0, 500)}
+Use it to tell which team is ours (for home/away) and to avoid listing our own team as the opponent.`
+    : PROMPT;
+
   let aRes: Response;
   try {
     aRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -63,7 +75,7 @@ Deno.serve(async (req) => {
         model: MODEL, max_tokens: 2000,
         messages: [{ role: "user", content: [
           { type: "image", source: { type: "base64", media_type: mediaType, data: image } },
-          { type: "text", text: PROMPT },
+          { type: "text", text: promptText },
         ] }],
       }),
     });
