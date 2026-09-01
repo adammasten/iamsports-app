@@ -294,6 +294,27 @@ export default function MyWorkScreen() {
   // Reruns all three loaders; used by the error-state Retry button.
   function reloadFilmRoom() { loadReels(); loadGames(); loadSaved(); }
 
+  // Recently Deleted (restore soft-deleted games/videos/reels). It's per-team +
+  // admin-gated, so route to the right coached team — pick one if you coach several.
+  function openRecentlyDeleted() {
+    if (coachedTeams.length === 0) {
+      webAlert('Recently Deleted', 'Only a team admin can restore deleted items.');
+      return;
+    }
+    if (coachedTeams.length === 1) {
+      const t = coachedTeams[0];
+      router.push({ pathname: '/recently-deleted', params: { teamId: t.team_id, teamName: t.name } });
+      return;
+    }
+    setOverflowSheet({
+      title: 'Recently Deleted — which team?',
+      options: coachedTeams.map(t => ({
+        label: t.name,
+        onPress: () => router.push({ pathname: '/recently-deleted', params: { teamId: t.team_id, teamName: t.name } }),
+      })),
+    });
+  }
+
   async function loadReels() {
     if (!userId) { setReels([]); setLoadError(null); setLoading(false); return; }
     setLoading(true);
@@ -1243,6 +1264,12 @@ export default function MyWorkScreen() {
         </>
       )}
 
+      {coachedTeams.length > 0 && (
+        <TouchableOpacity onPress={openRecentlyDeleted} style={styles.recentlyDeletedLink} hitSlop={8}>
+          <Text style={styles.recentlyDeletedText}>🗑  Recently deleted</Text>
+        </TouchableOpacity>
+      )}
+
       <FilterBar
         items={items}
         tagsById={tagsById}
@@ -1754,6 +1781,8 @@ const styles = StyleSheet.create({
   makeReelText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   title: { color: '#fff', fontSize: 26, fontWeight: '700', marginTop: 8, marginBottom: 4 },
   subtitle: { color: '#888', fontSize: 13, lineHeight: 18, marginBottom: 16 },
+  recentlyDeletedLink: { alignSelf: 'flex-start', paddingVertical: 6, marginTop: -8, marginBottom: 8 },
+  recentlyDeletedText: { color: '#a99cf0', fontSize: 13, fontWeight: '600' },
 
   content: { flex: 1, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   // Web: reels + game cards fill the column as a responsive grid (like Home).
