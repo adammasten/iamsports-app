@@ -500,7 +500,7 @@ export default function ExportScreen() {
 
     const { data: videos, error: videosErr } = await supabase
       .from('videos')
-      .select('id, url, original_url, label, game_id, upload_status')
+      .select('id, url, original_url, label, game_id, upload_status, sport, team_id')
       .in('game_id', selectedGames)
       .is('deleted_at', null); // skip soft-deleted videos too
     if (videosErr) { webAlert('Couldn’t load videos', videosErr.message); setLoading(false); return; }
@@ -551,6 +551,8 @@ export default function ExportScreen() {
         bundles,
         videoUrl: video?.url,
         videoOriginalUrl: video?.original_url ?? null,
+        videoSport: (video?.sport ?? null) as string | null,
+        videoTeamId: (video?.team_id ?? null) as string | null,
         videoLabel: video?.label,
         gameTitle: game?.title,
       };
@@ -882,7 +884,18 @@ export default function ExportScreen() {
   });
   const totalIncluded = clips.filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`)).length;
   // Whether any included clip has a 4K master to render Maximum from.
-  const anyMaster = clips.filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`)).some(c => c.videoOriginalUrl);
+  const includedForScope = clips.filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`));
+  const anyMaster = includedForScope.some(c => c.videoOriginalUrl);
+  // Scope the "describe the reel" tags to the exported clips' team(s) + sport(s) — so a
+  // football reel never shows basketball tags, and you never see another team's kids.
+  const exportTeamIds = new Set(includedForScope.map(c => c.videoTeamId).filter(Boolean));
+  const exportSports = new Set(includedForScope.map(c => (c.videoSport || '').trim().toLowerCase()).filter(Boolean));
+  const reelTagRelevant = (t: any) => {
+    if (t.category === 'players') return !!t.team_id && exportTeamIds.has(t.team_id);
+    if (t.team_id) return exportTeamIds.has(t.team_id);          // team-specific play
+    if (t.sport) return exportSports.has(String(t.sport).trim().toLowerCase()); // sport-scoped global
+    return true;                                                 // universal global (no sport)
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
@@ -892,6 +905,21 @@ export default function ExportScreen() {
       <Text style={styles.title}>Export Highlights</Text>
       <Text style={styles.subtitle}>Step 3 of 3 — Review ({totalIncluded} clips selected)</Text>
       <Text style={styles.hint}>✕ to exclude • ▶ to preview</Text>
+
+      {totalIncluded > 0 && !exporting ? (
+        <View style={styles.reviewHead}>
+          <Text style={styles.fieldLabel}>Reel name</Text>
+          <TextInput
+            style={styles.nameInput}
+            value={reelName}
+            onChangeText={setReelName}
+            placeholder="Reel name"
+            placeholderTextColor="#666"
+          />
+          <Text style={[styles.fieldLabel, { marginTop: 12 }]}>Team</Text>
+          <Dropdown value={reelTeamId} options={reelTeamOptions} onSelect={setReelTeamId} placeholder="None" />
+        </View>
+      ) : null}
 
       {exporting && (
         <View style={styles.exportingContainer}>
@@ -970,22 +998,10 @@ export default function ExportScreen() {
 
       {totalIncluded > 0 && !exporting && (
         <View style={styles.footer}>
-          <Text style={styles.fieldLabel}>Reel name</Text>
-          <TextInput
-            style={styles.nameInput}
-            value={reelName}
-            onChangeText={setReelName}
-            placeholder="Reel name"
-            placeholderTextColor="#666"
-          />
-
-          <Text style={styles.fieldLabel}>Team</Text>
-          <Dropdown value={reelTeamId} options={reelTeamOptions} onSelect={setReelTeamId} placeholder="None" />
-
-          <Text style={[styles.fieldLabel, { marginTop: 14 }]}>Tags</Text>
+          <Text style={styles.fieldLabel}>Tags</Text>
           <Text style={styles.reelTagHint}>Describe the reel so you can sort it later — e.g. Defense, Press break. On top of the clips’ own tags.</Text>
           {REEL_TAG_CATEGORIES.map(cat => {
-            const catTags = tags.filter((t: any) => t.category === cat.key);
+            const catTags = tags.filter((t: any) => t.category === cat.key && reelTagRelevant(t));
             if (catTags.length === 0) return null;
             return (
               <View key={cat.key} style={styles.reelCatBlock}>
@@ -1145,6 +1161,7 @@ const styles = StyleSheet.create({
   qualityTitleOn: { color: colors.brand },
   qualitySub: { color: colors.textMuted, fontSize: 11.5, lineHeight: 15 },
   qualityWarn: { color: colors.amber, fontSize: 12, marginTop: 8, lineHeight: 16 },
+  reviewHead: { marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   nameInput: { backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.border, color: colors.text, fontSize: 15, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 14 },
   reelTagHint: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginTop: 4, marginBottom: 4 },
   reelCatBlock: { marginTop: 12 },
