@@ -30,14 +30,19 @@ Deno.serve(async (req) => {
 
   const cutoff = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-  const { data: vids }  = await supa.from("videos").select("id, url").not("deleted_at", "is", null).lt("deleted_at", cutoff);
+  const { data: vids }  = await supa.from("videos").select("id, url, original_url, thumbnail_path").not("deleted_at", "is", null).lt("deleted_at", cutoff);
   const { data: reels } = await supa.from("highlight_reels").select("id, storage_path").not("deleted_at", "is", null).lt("deleted_at", cutoff);
   const { data: games } = await supa.from("games").select("id").not("deleted_at", "is", null).lt("deleted_at", cutoff);
 
   const vidIds  = (vids  ?? []).map((v: any) => v.id);
   const reelIds = (reels ?? []).map((r: any) => r.id);
   const gameIds = (games ?? []).map((g: any) => g.id);
-  const keys = [...(vids ?? []).map((v: any) => v.url), ...(reels ?? []).map((r: any) => r.storage_path)].filter(Boolean) as string[];
+  // Include the 4K master (original_url) + thumbnail, not just the 720p copy (url) —
+  // otherwise the biggest file (a 15–50 GB master) is orphaned in storage forever.
+  const keys = [
+    ...(vids ?? []).flatMap((v: any) => [v.url, v.original_url, v.thumbnail_path]),
+    ...(reels ?? []).map((r: any) => r.storage_path),
+  ].filter(Boolean) as string[];
 
   let storageError: string | null = null;
   if (keys.length) {
