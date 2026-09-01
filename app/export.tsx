@@ -897,167 +897,191 @@ export default function ExportScreen() {
     return true;                                                 // universal global (no sport)
   };
 
+  const showFinalize = totalIncluded > 0 && !exporting;
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
-      <TouchableOpacity onPress={() => setStep('tags')} style={styles.back}>
-        <Text style={styles.backText}>← Back</Text>
-      </TouchableOpacity>
-      <Text style={styles.title}>Export Highlights</Text>
-      <Text style={styles.subtitle}>Step 3 of 3 — Review ({totalIncluded} clips selected)</Text>
-      <Text style={styles.hint}>✕ to exclude • ▶ to preview</Text>
-
-      {totalIncluded > 0 && !exporting ? (
-        <View style={styles.reviewHead}>
-          <Text style={styles.fieldLabel}>Reel name</Text>
-          <TextInput
-            style={styles.nameInput}
-            value={reelName}
-            onChangeText={setReelName}
-            placeholder="Reel name"
-            placeholderTextColor="#666"
-          />
-          <Text style={[styles.fieldLabel, { marginTop: 12 }]}>Team</Text>
-          <Dropdown value={reelTeamId} options={reelTeamOptions} onSelect={setReelTeamId} placeholder="None" />
-        </View>
-      ) : null}
-
-      {exporting && (
-        <View style={styles.exportingContainer}>
-          <Text style={styles.exportingText}>{exportStatus}</Text>
-          <View style={styles.progressOuter}>
-            <View style={[styles.progressInner, { width: `${exportProgress}%` as any }]} />
+    <View style={styles.reviewWrap}>
+      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: showFinalize ? 96 : 40 }}>
+        <TouchableOpacity onPress={() => setStep('tags')} style={styles.back}>
+          <Text style={styles.backText}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.title}>Export Highlights</Text>
+        <View style={styles.stepRow}>
+          <View style={styles.stepDots}>
+            <View style={[styles.stepDot, styles.stepDotOn]} />
+            <View style={[styles.stepDot, styles.stepDotOn]} />
+            <View style={[styles.stepDot, styles.stepDotOn]} />
           </View>
-          <Text style={styles.progressLabel}>{exportProgress}%</Text>
+          <Text style={styles.stepText}>Step 3 of 3 · Review</Text>
         </View>
-      )}
 
-      {clips.length === 0 && !exporting && (
-        <View style={styles.reviewEmpty}>
-          <Text style={styles.reviewEmptyTitle}>No clips matched your groups</Text>
-          <Text style={styles.reviewEmptyBody}>
-            Each group only matches a clip where every tag in it happened on the SAME play. If you stacked several plays into one group (like Made 2 + Made 3 + Block), nothing can match. Go back and split them — one play per group.
-          </Text>
-          <TouchableOpacity style={styles.reviewEmptyBtn} onPress={() => setStep('tags')}>
-            <Text style={styles.reviewEmptyBtnText}>← Back to fix groups</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        {showFinalize ? (
+          <View style={styles.card}>
+            <Text style={styles.fieldLabel}>Reel name</Text>
+            <TextInput
+              style={styles.nameInput}
+              value={reelName}
+              onChangeText={setReelName}
+              placeholder="Reel name"
+              placeholderTextColor={colors.textFaint}
+            />
+            <Text style={[styles.fieldLabel, { marginTop: 12 }]}>Team</Text>
+            <Dropdown value={reelTeamId} options={reelTeamOptions} onSelect={setReelTeamId} placeholder="None" />
+          </View>
+        ) : null}
 
-      {Object.keys(groupedClips).map(groupIndexStr => {
-        const groupIndex = parseInt(groupIndexStr);
-        const groupClips = groupedClips[groupIndex];
-        const groupTags = tagGroups[groupIndex] || [];
-        const groupLabel = groupTags.map(id => getTagName(id)).join(' + ');
-
-        return (
-          <View key={groupIndex} style={styles.group}>
-            <View style={styles.groupHeader}>
-              <Text style={styles.groupTitle}>{groupLabel}</Text>
-              <Text style={styles.groupCount}>
-                {groupClips.filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`)).length}/{groupClips.length}
-              </Text>
+        {exporting && (
+          <View style={styles.exportingContainer}>
+            <Text style={styles.exportingText}>{exportStatus}</Text>
+            <View style={styles.progressOuter}>
+              <View style={[styles.progressInner, { width: `${exportProgress}%` as any }]} />
             </View>
-            {groupClips.map((clip: any) => {
-              const clipKey = `${clip.id}-${clip.groupIndex}`;
-              const excluded = excludedClips.includes(clipKey);
-              return (
-                <View key={clipKey} style={[styles.clipCard, excluded && styles.excludedCard]}>
-                  <TouchableOpacity
-                    style={[styles.checkBtn, excluded && styles.checkBtnExcluded]}
-                    onPress={() => toggleExclude(clipKey)}
-                  >
-                    <Text style={styles.checkBtnText}>{excluded ? '✕' : '✓'}</Text>
-                  </TouchableOpacity>
-                  <View style={styles.clipInfo}>
-                    <View style={styles.clipTop}>
-                      <Text style={[styles.clipTime, excluded && styles.excludedText]}>
-                        {formatTime(clip.start_time)} → {formatTime(clip.end_time)}
-                      </Text>
-                      <Text style={styles.clipDuration}>{getDuration(clip.start_time, clip.end_time)}</Text>
-                      {!!highlightTagId && clip.tagIds?.includes(highlightTagId) && <Text style={styles.star}>★</Text>}
-                    </View>
-                    <Text style={[styles.clipMeta, excluded && styles.excludedText]}>
-                      {clip.gameTitle} • {clip.videoLabel}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.previewBtn}
-                    onPress={() => router.push({
-                      pathname: '/tagging-overlay',
-                      params: { videoId: clip.video_id, url: clip.videoUrl, label: clip.videoLabel, startAt: clip.start_time }
-                    })}
-                  >
-                    <Text style={styles.previewBtnText}>▶</Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
+            <Text style={styles.progressLabel}>{exportProgress}%</Text>
           </View>
-        );
-      })}
+        )}
 
-      {totalIncluded > 0 && !exporting && (
-        <View style={styles.footer}>
-          <Text style={styles.fieldLabel}>Tags</Text>
-          <Text style={styles.reelTagHint}>Describe the reel so you can sort it later — e.g. Defense, Press break. On top of the clips’ own tags.</Text>
-          {REEL_TAG_CATEGORIES.map(cat => {
-            const catTags = tags.filter((t: any) => t.category === cat.key && reelTagRelevant(t));
-            if (catTags.length === 0) return null;
-            return (
-              <View key={cat.key} style={styles.reelCatBlock}>
-                <Text style={[styles.reelCatHeader, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
-                <View style={styles.reelChipsWrap}>
-                  {catTags.map((t: any) => {
-                    const on = reelDescTags.has(t.id);
-                    return (
-                      <TouchableOpacity
-                        key={t.id}
-                        onPress={() => toggleReelDescTag(t.id)}
-                        style={[styles.reelChip, on ? { backgroundColor: cat.color, borderColor: cat.color } : { backgroundColor: 'transparent', borderColor: cat.color }]}
-                      >
-                        <Text style={[styles.reelChipText, { color: on ? '#fff' : cat.color }]}>{t.name}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+        {clips.length === 0 && !exporting && (
+          <View style={styles.reviewEmpty}>
+            <Text style={styles.reviewEmptyTitle}>No clips matched your groups</Text>
+            <Text style={styles.reviewEmptyBody}>
+              Each group only matches a clip where every tag in it happened on the SAME play. If you stacked several plays into one group (like Made 2 + Made 3 + Block), nothing can match. Go back and split them — one play per group.
+            </Text>
+            <TouchableOpacity style={styles.reviewEmptyBtn} onPress={() => setStep('tags')}>
+              <Text style={styles.reviewEmptyBtnText}>← Back to fix groups</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {showFinalize && (
+          <View style={styles.clipsHeadRow}>
+            <Text style={styles.clipsHeadN}>{totalIncluded} CLIP{totalIncluded === 1 ? '' : 'S'}</Text>
+            <Text style={styles.clipsHeadSub}>✕ to drop · ▶ to preview</Text>
+          </View>
+        )}
+
+        {Object.keys(groupedClips).map(groupIndexStr => {
+          const groupIndex = parseInt(groupIndexStr);
+          const groupClips = groupedClips[groupIndex];
+          const groupTags = tagGroups[groupIndex] || [];
+          const groupLabel = groupTags.map(id => getTagName(id)).join(' + ');
+          const kept = groupClips.filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`)).length;
+
+          return (
+            <View key={groupIndex} style={styles.group}>
+              <View style={styles.groupHeader}>
+                <Text style={styles.groupTitle} numberOfLines={1}>{groupLabel}</Text>
+                <View style={styles.groupBadge}>
+                  <Text style={styles.groupBadgeText}>{kept}/{groupClips.length}</Text>
                 </View>
               </View>
-            );
-          })}
+              {groupClips.map((clip: any) => {
+                const clipKey = `${clip.id}-${clip.groupIndex}`;
+                const excluded = excludedClips.includes(clipKey);
+                const starred = !!highlightTagId && clip.tagIds?.includes(highlightTagId);
+                return (
+                  <View key={clipKey} style={[styles.clipCard, excluded && styles.excludedCard]}>
+                    <View style={styles.clipThumb}><Text style={styles.clipThumbIcon}>▶</Text></View>
+                    <View style={styles.clipInfo}>
+                      <Text style={[styles.clipTime, excluded && styles.excludedText]} numberOfLines={1}>
+                        {formatTime(clip.start_time)} → {formatTime(clip.end_time)}{starred ? '  ★' : ''}
+                      </Text>
+                      <Text style={[styles.clipMeta, excluded && styles.excludedText]} numberOfLines={1}>
+                        {clip.gameTitle} · {clip.videoLabel} · {getDuration(clip.start_time, clip.end_time)}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.rowBtn}
+                      onPress={() => router.push({
+                        pathname: '/tagging-overlay',
+                        params: { videoId: clip.video_id, url: clip.videoUrl, label: clip.videoLabel, startAt: clip.start_time },
+                      })}
+                    >
+                      <Text style={styles.rowBtnText}>▶</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.rowBtn, styles.rowBtnX, excluded && styles.rowBtnXon]}
+                      onPress={() => toggleExclude(clipKey)}
+                    >
+                      <Text style={[styles.rowBtnXText, excluded && styles.rowBtnXonText]}>{excluded ? '↩' : '✕'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          );
+        })}
 
-          <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Download quality</Text>
-          <View style={styles.qualityRow}>
-            <TouchableOpacity
-              style={[styles.qualityCard, quality === 'standard' && styles.qualityCardOn]}
-              onPress={() => setQuality('standard')}
-              activeOpacity={0.85}
-            >
-              <Text style={[styles.qualityTitle, quality === 'standard' && styles.qualityTitleOn]}>Standard</Text>
-              <Text style={styles.qualitySub}>720p · faster, smaller.{'\n'}Great for quick shares.</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.qualityCard, quality === 'maximum' && styles.qualityCardOn]}
-              onPress={() => setQuality('maximum')}
-              activeOpacity={0.85}
-            >
-              <Text style={[styles.qualityTitle, quality === 'maximum' && styles.qualityTitleOn]}>Maximum</Text>
-              <Text style={styles.qualitySub}>Full 4K master · slower, bigger.{'\n'}Best for big screens + zoom.</Text>
-            </TouchableOpacity>
-          </View>
-          {quality === 'maximum' && !anyMaster ? (
-            <Text style={styles.qualityWarn}>These videos don’t have a 4K master saved — this reel will render at 720p.</Text>
-          ) : null}
+        {showFinalize && (
+          <>
+            <View style={styles.card}>
+              <Text style={styles.fieldLabel}>Tag this reel</Text>
+              <Text style={styles.reelTagHint}>For sorting later — e.g. Defense, Press break. On top of the clips’ own tags.</Text>
+              {REEL_TAG_CATEGORIES.map(cat => {
+                const catTags = tags.filter((t: any) => t.category === cat.key && reelTagRelevant(t));
+                if (catTags.length === 0) return null;
+                return (
+                  <View key={cat.key} style={styles.reelCatBlock}>
+                    <Text style={[styles.reelCatHeader, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
+                    <View style={styles.reelChipsWrap}>
+                      {catTags.map((t: any) => {
+                        const on = reelDescTags.has(t.id);
+                        return (
+                          <TouchableOpacity
+                            key={t.id}
+                            onPress={() => toggleReelDescTag(t.id)}
+                            style={[styles.reelChip, on ? { backgroundColor: cat.color, borderColor: cat.color } : { backgroundColor: 'transparent', borderColor: cat.color }]}
+                          >
+                            <Text style={[styles.reelChipText, { color: on ? '#fff' : cat.color }]}>{t.name}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                );
+              })}
+              <Text style={styles.scopeNote}>Only this team’s players + this sport — no other teams or sports.</Text>
+            </View>
 
-          <View style={[styles.toggleRow, { marginTop: 16 }]}>
-            <Text style={styles.toggleLabel}>Also save to camera roll</Text>
-            <Switch value={saveToCameraRoll} onValueChange={setSaveToCameraRoll} />
-          </View>
-          <Text style={styles.footerHelper}>Always saved to Film Room</Text>
+            <View style={styles.card}>
+              <Text style={styles.fieldLabel}>Download quality</Text>
+              <View style={styles.qualityRow}>
+                <TouchableOpacity
+                  style={[styles.qualityCard, quality === 'standard' && styles.qualityCardOn]}
+                  onPress={() => setQuality('standard')}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.qualityTitle, quality === 'standard' && styles.qualityTitleOn]}>Standard</Text>
+                  <Text style={styles.qualitySub}>720p · faster, smaller.{'\n'}Great for quick shares.</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.qualityCard, quality === 'maximum' && styles.qualityCardOn]}
+                  onPress={() => setQuality('maximum')}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.qualityTitle, quality === 'maximum' && styles.qualityTitleOn]}>Maximum</Text>
+                  <Text style={styles.qualitySub}>Full 4K master · slower, bigger.{'\n'}Best for big screens + zoom.</Text>
+                </TouchableOpacity>
+              </View>
+              {quality === 'maximum' && !anyMaster ? (
+                <Text style={styles.qualityWarn}>These videos don’t have a 4K master saved — this reel will render at 720p.</Text>
+              ) : null}
+              <View style={[styles.toggleRow, { marginTop: 16 }]}>
+                <Text style={styles.toggleLabel}>Also save to camera roll</Text>
+                <Switch value={saveToCameraRoll} onValueChange={setSaveToCameraRoll} />
+              </View>
+              <Text style={styles.footerHelper}>Always saved to Film Room</Text>
+            </View>
+          </>
+        )}
+      </ScrollView>
+
+      {showFinalize && (
+        <View style={styles.stickyCta}>
           <TouchableOpacity style={styles.exportBtn} onPress={handleExport}>
             <Text style={styles.exportBtnText}>🎬 Export {totalIncluded} clip{totalIncluded === 1 ? '' : 's'} · {quality === 'maximum' ? '4K' : '720p'}</Text>
           </TouchableOpacity>
         </View>
       )}
-    </ScrollView>
+    </View>
   );
 }
 
@@ -1153,6 +1177,28 @@ const styles = StyleSheet.create({
   exportBtn: { backgroundColor: colors.success, borderRadius: 12, padding: 18, alignItems: 'center', marginTop: 8 },
   exportBtnText: { color: '#fff', fontSize: 18, fontWeight: '700' },
   footer: { marginTop: 8 },
+  reviewWrap: { flex: 1, backgroundColor: colors.bg },
+  stepRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 2 },
+  stepDots: { flexDirection: 'row', gap: 4 },
+  stepDot: { width: 16, height: 4, borderRadius: 2, backgroundColor: colors.border },
+  stepDotOn: { backgroundColor: colors.brand },
+  stepText: { color: colors.textMuted, fontSize: 12.5, fontWeight: '600' },
+  card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 14, marginTop: 16 },
+  clipsHeadRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 20, marginBottom: 10 },
+  clipsHeadN: { color: colors.text, fontSize: 13, fontWeight: '800', letterSpacing: 0.3 },
+  clipsHeadSub: { color: colors.textMuted, fontSize: 12 },
+  groupBadge: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  groupBadgeText: { color: colors.textMuted, fontSize: 11, fontWeight: '700' },
+  clipThumb: { width: 52, height: 36, borderRadius: 7, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
+  clipThumbIcon: { color: '#fff', opacity: 0.85, fontSize: 13 },
+  rowBtn: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
+  rowBtnText: { color: '#cfe0f5', fontSize: 13 },
+  rowBtnX: {},
+  rowBtnXText: { color: '#ff8b8b', fontSize: 13, fontWeight: '700' },
+  rowBtnXon: { backgroundColor: colors.brandTint, borderColor: colors.brand },
+  rowBtnXonText: { color: colors.brandLight },
+  scopeNote: { color: colors.textFaint, fontSize: 11, marginTop: 8, lineHeight: 15 },
+  stickyCta: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20, backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border },
   fieldLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
   qualityRow: { flexDirection: 'row', gap: 10 },
   qualityCard: { flex: 1, borderWidth: 1.5, borderColor: colors.border, borderRadius: 12, padding: 12, backgroundColor: colors.surface },
