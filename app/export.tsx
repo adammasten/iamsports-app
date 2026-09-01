@@ -106,6 +106,10 @@ export default function ExportScreen() {
   // and whether to ALSO save to the camera roll. The reel always saves to My Work.
   const [reelName, setReelName] = useState('');
   const [saveToCameraRoll, setSaveToCameraRoll] = useState(true);
+  // Download quality: 'standard' renders from the 720p copy (fast, small); 'maximum'
+  // renders each clip from the 4K master (videos.original_url) where it exists — for
+  // showcase reels + zooming in. Falls back to 720p per-clip when no master is kept.
+  const [quality, setQuality] = useState<'standard' | 'maximum'>('standard');
   // Reel team + descriptive tags chosen at creation. Team defaults from the
   // source games (below); tags are on top of the auto-copied clip tags.
   const [reelTeamId, setReelTeamId] = useState('');
@@ -496,7 +500,7 @@ export default function ExportScreen() {
 
     const { data: videos, error: videosErr } = await supabase
       .from('videos')
-      .select('id, url, label, game_id, upload_status')
+      .select('id, url, original_url, label, game_id, upload_status')
       .in('game_id', selectedGames)
       .is('deleted_at', null); // skip soft-deleted videos too
     if (videosErr) { webAlert('Couldn’t load videos', videosErr.message); setLoading(false); return; }
@@ -546,6 +550,7 @@ export default function ExportScreen() {
         clipLevelTagIds,
         bundles,
         videoUrl: video?.url,
+        videoOriginalUrl: video?.original_url ?? null,
         videoLabel: video?.label,
         gameTitle: game?.title,
       };
@@ -611,8 +616,14 @@ export default function ExportScreen() {
 
     const includedClipObjects = clips
       .filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`));
+    // Maximum → the 4K master (original_url) when it exists, else the 720p copy for
+    // that clip (graceful per-clip). Standard → always the 720p copy.
     const includedClips = includedClipObjects
-      .map(c => ({ url: c.videoUrl, start_time: c.start_time, end_time: c.end_time }));
+      .map(c => ({
+        url: quality === 'maximum' && c.videoOriginalUrl ? c.videoOriginalUrl : c.videoUrl,
+        start_time: c.start_time,
+        end_time: c.end_time,
+      }));
     console.log('[export] includedClips count:', includedClips.length, 'first clip:', includedClips[0]);
 
     try {
@@ -870,6 +881,8 @@ export default function ExportScreen() {
     groupedClips[clip.groupIndex].push(clip);
   });
   const totalIncluded = clips.filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`)).length;
+  // Whether any included clip has a 4K master to render Maximum from.
+  const anyMaster = clips.filter(c => !excludedClips.includes(`${c.id}-${c.groupIndex}`)).some(c => c.videoOriginalUrl);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
@@ -995,13 +1008,36 @@ export default function ExportScreen() {
             );
           })}
 
+          <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Download quality</Text>
+          <View style={styles.qualityRow}>
+            <TouchableOpacity
+              style={[styles.qualityCard, quality === 'standard' && styles.qualityCardOn]}
+              onPress={() => setQuality('standard')}
+              activeOpacity={0.85}
+            >
+              <Text style={[styles.qualityTitle, quality === 'standard' && styles.qualityTitleOn]}>Standard</Text>
+              <Text style={styles.qualitySub}>720p · faster, smaller.{'\n'}Great for quick shares.</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.qualityCard, quality === 'maximum' && styles.qualityCardOn]}
+              onPress={() => setQuality('maximum')}
+              activeOpacity={0.85}
+            >
+              <Text style={[styles.qualityTitle, quality === 'maximum' && styles.qualityTitleOn]}>Maximum</Text>
+              <Text style={styles.qualitySub}>Full 4K master · slower, bigger.{'\n'}Best for big screens + zoom.</Text>
+            </TouchableOpacity>
+          </View>
+          {quality === 'maximum' && !anyMaster ? (
+            <Text style={styles.qualityWarn}>These videos don’t have a 4K master saved — this reel will render at 720p.</Text>
+          ) : null}
+
           <View style={[styles.toggleRow, { marginTop: 16 }]}>
             <Text style={styles.toggleLabel}>Also save to camera roll</Text>
             <Switch value={saveToCameraRoll} onValueChange={setSaveToCameraRoll} />
           </View>
           <Text style={styles.footerHelper}>Always saved to Film Room</Text>
           <TouchableOpacity style={styles.exportBtn} onPress={handleExport}>
-            <Text style={styles.exportBtnText}>🎬 Export {totalIncluded} Clips</Text>
+            <Text style={styles.exportBtnText}>🎬 Export {totalIncluded} clip{totalIncluded === 1 ? '' : 's'} · {quality === 'maximum' ? '4K' : '720p'}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -1102,6 +1138,13 @@ const styles = StyleSheet.create({
   exportBtnText: { color: '#fff', fontSize: 18, fontWeight: '700' },
   footer: { marginTop: 8 },
   fieldLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  qualityRow: { flexDirection: 'row', gap: 10 },
+  qualityCard: { flex: 1, borderWidth: 1.5, borderColor: colors.border, borderRadius: 12, padding: 12, backgroundColor: colors.surface },
+  qualityCardOn: { borderColor: colors.brand, backgroundColor: colors.brandTint },
+  qualityTitle: { color: colors.text, fontSize: 15, fontWeight: '800', marginBottom: 3 },
+  qualityTitleOn: { color: colors.brand },
+  qualitySub: { color: colors.textMuted, fontSize: 11.5, lineHeight: 15 },
+  qualityWarn: { color: colors.amber, fontSize: 12, marginTop: 8, lineHeight: 16 },
   nameInput: { backgroundColor: colors.surface, borderRadius: 10, borderWidth: 1, borderColor: colors.border, color: colors.text, fontSize: 15, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 14 },
   reelTagHint: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginTop: 4, marginBottom: 4 },
   reelCatBlock: { marginTop: 12 },
