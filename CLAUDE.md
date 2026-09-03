@@ -408,6 +408,13 @@ migrations. When you supersede something:
   `shares` audiences are team/coaches/player only; the storage read-leak is
   closed (owner-scoped SELECT + `sign-media`). Don't reintroduce a public
   audience or a broad storage SELECT.
+- **Kid-login doors are CLOSED (2026-09-02, `migration_close_kid_login_doors.sql`).**
+  Kids are never app users — guardians act for them. `players.user_id` was DROPPED
+  (there's no column to attach a kid to an auth account), and the three RLS branches
+  that granted access via a kid's own account (`att_write`, `players_read`,
+  `install_receipts_read`) were removed (coach/guardian/team/own branches kept). The
+  `player` membership role stays in the enum but is **reserved/unused — never grant
+  access through it**. Don't re-add `players.user_id` or a kid-account access path.
 - **Web uploads use `tus-js-client`; mobile uses the hand-rolled chunked PATCH
   loop.** The split is intentional — don't unify. (But see the speed rule: the
   sequential loop + base64 decode are fair game to optimize *without* a quality
