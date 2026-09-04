@@ -790,7 +790,7 @@ const styles = StyleSheet.create({
   back: { color: C.accent, fontSize: 14, fontWeight: '700' },
   gameLabel: { color: C.text, fontSize: 14, fontWeight: '700' },
   // Game-period selector in the top bar (Q1/Q2/… — sport-dependent, for stats).
-  periodRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8 },
+  periodRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 8, flexWrap: 'wrap', maxWidth: 460 },
   periodBtn: { minWidth: 34, paddingHorizontal: 8, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)', backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' },
   periodBtnOn: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
   periodTxt: { color: C.dim, fontSize: 12, fontWeight: '800' },

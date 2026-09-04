@@ -1421,7 +1421,7 @@ const styles = StyleSheet.create({
   // Back arrow). Wraps to 2 per row. Orange active dot = game context, distinct
   // from the purple tag/save chrome. Same 36pt circle size as ★ / ! / Tag.
   periodCluster: {
-    position: 'absolute', width: 78,
+    position: 'absolute', width: 120,
     flexDirection: 'row', flexWrap: 'wrap', gap: 6,
   },
   periodDot: {

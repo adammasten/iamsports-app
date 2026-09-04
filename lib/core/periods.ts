@@ -12,9 +12,15 @@
 export const PERIODS_BY_SPORT: Record<string, string[]> = {
   basketball: ['Q1', 'Q2', 'Q3', 'Q4', '1H', '2H'],
   football: ['Q1', 'Q2', 'Q3', 'Q4', '1H', '2H'],
+  '7-on-7': ['Q1', 'Q2', 'Q3', 'Q4', '1H', '2H'],
   'flag football': ['Q1', 'Q2', 'Q3', 'Q4', '1H', '2H'],
   soccer: ['1H', '2H'],
   lacrosse: ['Q1', 'Q2', 'Q3', 'Q4'],
+  // Baseball/softball run on innings (+ extra). Volleyball on sets (best-of-5).
+  // Compact labels fit the round period dots; the sport context makes them clear.
+  baseball: ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'EX'],
+  softball: ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'EX'],
+  volleyball: ['S1', 'S2', 'S3', 'S4', 'S5'],
 };
 
 // Resolve a (possibly mis-cased / null) sport to its ordered period names.
