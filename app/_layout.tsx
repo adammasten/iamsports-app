@@ -109,6 +109,7 @@ function AuthGate() {
 function NameCaptureGate() {
   const { sessionResolved, userId } = useTeamContext();
   const [needsName, setNeedsName] = useState(false);
+  const [prefill, setPrefill] = useState<{ first: string; last: string }>({ first: '', last: '' });
   const [submitting, setSubmitting] = useState(false);
   // Which user we've already run the name check for — avoids re-prompting on
   // token-refresh auth events or re-renders.
@@ -124,7 +125,7 @@ function NameCaptureGate() {
     (async () => {
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('display_name, deactivated_at')
+        .select('display_name, first_name, last_name, adult_confirmed_at, deactivated_at')
         .eq('user_id', userId)
         .maybeSingle();
       if (cancelled) return;
@@ -132,22 +133,32 @@ function NameCaptureGate() {
       if (error) { setNeedsName(false); return; }
       // Logging back in reactivates a deactivated account — "come back anytime".
       if (data?.deactivated_at) supabase.rpc('reactivate_my_account').then(() => {});
-      const name = data?.display_name;
-      setNeedsName(!name || name.trim() === '');
+      // Prompt until we have a first name AND an 18+ confirmation on file. Existing
+      // users (who only have an old single display_name) are prompted once; pre-fill
+      // the fields by splitting that name so it's one tap.
+      const hasProfile = !!data?.first_name && !!data?.adult_confirmed_at;
+      if (!hasProfile) {
+        const parts = (data?.display_name ?? '').trim().split(/\s+/).filter(Boolean);
+        setPrefill({
+          first: data?.first_name ?? parts[0] ?? '',
+          last: data?.last_name ?? (parts.length > 1 ? parts.slice(1).join(' ') : ''),
+        });
+      }
+      setNeedsName(!hasProfile);
     })();
     return () => { cancelled = true; };
   }, [sessionResolved, userId]);
 
-  async function handleSubmit(name: string) {
+  async function handleSubmit(first: string, last: string) {
     setSubmitting(true);
-    const { error } = await supabase.rpc('set_my_display_name', { p_name: name.trim() });
+    const { error } = await supabase.rpc('set_my_profile', { p_first: first, p_last: last, p_adult: true });
     setSubmitting(false);
     if (error) { webAlert('Error', error.message); return; }
     setNeedsName(false);
   }
 
   if (!needsName) return null;
-  return <NameCaptureSheet onSubmit={handleSubmit} submitting={submitting} />;
+  return <NameCaptureSheet onSubmit={handleSubmit} submitting={submitting} initialFirst={prefill.first} initialLast={prefill.last} />;
 }
 
 // First-login Terms/EULA gate (App Store Guideline 1.2 — affirmative agreement
