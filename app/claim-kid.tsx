@@ -9,7 +9,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // A co-guardian (co-parent / grandparent) enters a kid's code to be added as a
 // guardian of that kid. Enter code → confirm which kid → claim_or_link_guardian.
-type Preview = { player_id: string; first_name: string; guardian_count: number; already_mine: boolean; full: boolean };
+// `full` = the 4 free guardian slots are gone. A viewer holding a purchased seat
+// is full-but-not-blocked, which is why has_seat is separate from full.
+type Preview = {
+  player_id: string; first_name: string; guardian_count: number;
+  already_mine: boolean; full: boolean; has_seat: boolean; can_buy_seat: boolean;
+};
 
 export default function ClaimKidScreen() {
   const insets = useSafeAreaInsets();
@@ -42,7 +47,11 @@ export default function ClaimKidScreen() {
   async function confirmAttach() {
     if (!preview) return;
     if (preview.already_mine) { alertThenGo('Already added', `You’re already ${preview.first_name}’s guardian.`, goBackOrHome); return; }
-    if (preview.full) { webAlert('Full', `${preview.first_name}’s guardian list is full (4).`); return; }
+    // Blocked only when the free 4 are gone AND this viewer has no purchased seat.
+    if (preview.full && !preview.has_seat) {
+      webAlert('Guardian list is full', `${preview.first_name} already has 4 guardians. An extra guardian seat isn’t available to buy yet — for now, ask ${preview.first_name}’s parent to remove a guardian first.`);
+      return;
+    }
     setBusy(true);
     const { error } = await supabase.rpc('claim_or_link_guardian', { p_code: cleanCode() });
     setBusy(false);
@@ -82,11 +91,13 @@ export default function ClaimKidScreen() {
           <Text style={styles.sub}>
             {preview.already_mine
               ? `You’re already ${preview.first_name}’s guardian.`
-              : preview.full
-                ? `${preview.first_name}’s guardian list is full (4).`
-                : `Add yourself as ${preview.first_name}’s guardian? You’ll see their film and stats.`}
+              : preview.has_seat
+                ? `You have a guardian seat for ${preview.first_name}. Add yourself now — you’ll see their film and stats.`
+                : preview.can_buy_seat
+                  ? `${preview.first_name} already has 4 guardians. Extra guardian seats are $5 each, but purchasing isn’t available yet — for now, ask ${preview.first_name}’s parent to remove a guardian first.`
+                  : `Add yourself as ${preview.first_name}’s guardian? You’ll see their film and stats.`}
           </Text>
-          <TouchableOpacity style={styles.primaryBtn} onPress={confirmAttach} disabled={busy || preview.full || preview.already_mine}>
+          <TouchableOpacity style={styles.primaryBtn} onPress={confirmAttach} disabled={busy || (preview.full && !preview.has_seat) || preview.already_mine}>
             <Text style={styles.primaryBtnText}>{busy ? 'Adding…' : `Yes, add me as ${preview.first_name}’s guardian`}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryBtn} onPress={() => setPreview(null)}>
