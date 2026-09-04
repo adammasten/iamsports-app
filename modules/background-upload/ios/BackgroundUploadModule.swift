@@ -63,7 +63,8 @@ final class MultipartJob {
   var tempFiles: [Int: URL] = [:]      // partNumber -> staged temp file (deleted on completion)
   var inflight: Set<Int> = []          // parts currently enqueued/uploading
   var nextToSlice: Int = 1             // next partNumber not yet staged
-  var failedParts: Set<Int> = []       // parts that errored (JS re-signs + retries on foreground)
+  var failedParts: Set<Int> = []       // parts that errored terminally (after native retries exhausted)
+  var retries: [Int: Int] = [:]        // partNumber -> transient-retry attempts so far
   var finished = false                 // set once, under lock, so we emit the final event exactly once
   init(uploadId: String, filePath: String, fileSize: Int64, partSize: Int64,
        totalParts: Int, urls: [Int: String], windowSize: Int) {
@@ -75,6 +76,12 @@ final class MultipartJob {
 
 final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate {
   static let shared = BackgroundUploader()
+  // A transiently-failed part (network drop, 5xx, -997 "lost connection to background
+  // transfer service") is re-enqueued up to this many times with backoff before it's
+  // reported failed. Because a background session waits for connectivity, a re-enqueued
+  // part resumes when the network returns — wifi OR cellular — which is what keeps an
+  // hour-long upload alive when the coach walks out of wifi range.
+  static let maxPartRetries = 5
 
   var emit: ((String, [String: Any]) -> Void)?
 
@@ -94,6 +101,9 @@ final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTask
     // Gym wifi throttles per-connection; 2 concurrent saturates the pipe better than 1
     // without the timeouts that 5–6 cause. (Locked decision: 128 MiB parts, 2 concurrent.)
     config.httpMaximumConnectionsPerHost = 2
+    // A full game can take an hour+ and pass through dead zones; give the whole resource
+    // a generous 48h deadline so a long no-signal stretch doesn't make iOS give up.
+    config.timeoutIntervalForResource = 48 * 60 * 60
     session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
   }
 
@@ -159,13 +169,20 @@ final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTask
       job.nextToSlice += 1
     }
     let partNumber = job.nextToSlice
-    guard partNumber <= job.totalParts, let urlStr = job.urls[partNumber], let url = URL(string: urlStr) else {
-      lock.unlock(); return
-    }
+    guard partNumber <= job.totalParts else { lock.unlock(); return }
     job.nextToSlice += 1
     job.inflight.insert(partNumber)
     lock.unlock()
+    enqueuePart(job, partNumber)
+  }
 
+  // Stage a byte range from the original file into a temp file and enqueue a PUT for
+  // exactly `partNumber`. Used to advance the window (sliceNext) AND to retry a part
+  // that failed transiently. The caller must have already marked the part inflight.
+  private func enqueuePart(_ job: MultipartJob, _ partNumber: Int) {
+    guard let urlStr = job.urls[partNumber], let url = URL(string: urlStr) else {
+      lock.lock(); job.inflight.remove(partNumber); job.failedParts.insert(partNumber); lock.unlock(); return
+    }
     let offset = Int64(partNumber - 1) * job.partSize
     let length = min(job.partSize, job.fileSize - offset)
     guard length > 0 else {
@@ -191,6 +208,16 @@ final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTask
       lock.lock(); job.inflight.remove(partNumber); job.failedParts.insert(partNumber); lock.unlock()
       emit?("onError", ["uploadId": job.uploadId, "part": partNumber, "error": "slice: \(error.localizedDescription)"])
     }
+  }
+
+  // A part is worth retrying on the same presigned URL when the failure is transient:
+  // any network-layer error (connection lost, offline, -997) or a 5xx. A 403 (expired
+  // URL) or other 4xx is NOT retryable here — those need JS to re-sign, handled on resume.
+  private func isRetryable(error: Error?, status: Int) -> Bool {
+    if status >= 400 && status < 500 { return false }
+    if error != nil { return true }
+    if status >= 500 || status < 0 { return true }
+    return false
   }
 
   private func cleanup(_ job: MultipartJob) {
@@ -249,17 +276,34 @@ final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTask
     lock.lock(); let job = jobs[ctx.uploadId]; lock.unlock()
     guard let job = job else { return }
 
-    // Free this part's staged temp file + inflight slot regardless of outcome.
+    // Free this part's staged temp file regardless of outcome (enqueuePart re-creates it
+    // on retry). Inflight is cleared only when the part is truly done (success or terminal
+    // failure) — a part being retried stays inflight so the job isn't finalized early.
     lock.lock()
     if let tmp = job.tempFiles[partNumber] { try? FileManager.default.removeItem(at: tmp); job.tempFiles[partNumber] = nil }
-    job.inflight.remove(partNumber)
     lock.unlock()
 
     if error == nil, (200...299).contains(status), let etag = etag {
-      lock.lock(); job.etags[partNumber] = etag; job.failedParts.remove(partNumber); lock.unlock()
+      lock.lock(); job.etags[partNumber] = etag; job.failedParts.remove(partNumber)
+      job.retries[partNumber] = nil; job.inflight.remove(partNumber); lock.unlock()
+    } else if isRetryable(error: error, status: status) {
+      lock.lock(); let attempts = job.retries[partNumber, default: 0]; lock.unlock()
+      if attempts < Self.maxPartRetries {
+        // Keep the part inflight, back off, then re-enqueue the SAME part. The background
+        // session waits for connectivity, so this resumes when the network returns.
+        lock.lock(); job.retries[partNumber] = attempts + 1; lock.unlock()
+        let delay = min(60.0, pow(2.0, Double(attempts)))
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+          self?.enqueuePart(job, partNumber)
+        }
+        return   // still active (retrying) — do NOT advance the window or finalize
+      }
+      lock.lock(); job.failedParts.insert(partNumber); job.inflight.remove(partNumber); lock.unlock()
+      emit?("onError", ["uploadId": ctx.uploadId, "part": partNumber, "status": status,
+                        "error": error?.localizedDescription ?? "retries exhausted", "body": bodyText ?? ""])
     } else {
-      lock.lock(); job.failedParts.insert(partNumber); lock.unlock()
-      // Non-fatal: report the part; JS re-signs (403 = expired URL) + retries on foreground.
+      // Terminal for native (e.g. 403 expired URL) — resume re-signs these parts.
+      lock.lock(); job.failedParts.insert(partNumber); job.inflight.remove(partNumber); lock.unlock()
       emit?("onError", ["uploadId": ctx.uploadId, "part": partNumber,
                         "status": status, "error": error?.localizedDescription ?? "", "body": bodyText ?? ""])
     }
