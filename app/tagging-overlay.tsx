@@ -6,6 +6,12 @@
 import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
+import { isFootballSport } from '@/lib/core/upload-meta';
+import {
+  type Odk, type FbCtx, type FbSel, ODK_SHORT, isFlagFootball,
+  FB_PLAY_TYPES, FB_FORMATIONS, FB_FRONTS, FB_COVERAGES, FB_RESULT_OFF, FB_RESULT_DEF, FB_ST_UNITS, FB_RESULT_ST,
+  FLAG_FORMATIONS, FLAG_DEFENSES, FLAG_RESULT_OFF, FLAG_RESULT_DEF,
+} from '@/lib/core/football';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
@@ -124,6 +130,14 @@ export default function TaggingOverlayScreen() {
   // never in the tag columns.
   const [periodTags, setPeriodTags] = useState<any[]>([]);
   const [activePeriod, setActivePeriod] = useState<string | null>(null);
+
+  // Football/flag structured tagging (mirrors the web tagger + shared lib/core/football).
+  // fbCtx = sticky possession/situation (carries across clips like the period). fbSel =
+  // this clip's single-select picks. Possession: the ODK toggle stamps clip_football.odk;
+  // formation = the OFFENSE's formation, play = what the OFFENSE ran, defense = the
+  // DEFENSE's call (all objective — odk records which side was us). Only used when football.
+  const [fbCtx, setFbCtx] = useState<FbCtx>({ odk: 'offense', down: 1, distance: 10, drive: 1 });
+  const [fbSel, setFbSel] = useState<FbSel>({ formation: null, play: null, defense: null, result: null });
 
   // Chrome visibility — pointerEvents flips synchronously via React state; the
   // opacity transition is driven by Reanimated over 200ms. Both must move
@@ -253,6 +267,15 @@ export default function TaggingOverlayScreen() {
   // Sport that scopes the tag palette: this video's sport, else the video team's
   // (or active team's) sport. null = unknown → show all global tags (safe default).
   const tagSport = videoSport ?? activeTeam?.sport ?? null;
+  const isFootball = isFootballSport(tagSport);
+  const isFlag = isFlagFootball(tagSport);
+  // Flip possession → new drive; clear this clip's picks. Sticky across clips otherwise.
+  const setOdk = (odk: Odk) => {
+    setFbCtx(c => (c.odk === odk ? c : { ...c, odk, drive: c.drive + 1 }));
+    setFbSel({ formation: null, play: null, defense: null, result: null });
+  };
+  const fbPick = (field: keyof FbSel, val: string) =>
+    setFbSel(s => ({ ...s, [field]: s[field] === val ? null : val }));
 
   // F.4 tag mode. 'compact' (default) = tag region above bottom controls.
   // 'fullscreen' = tag region also covers the video area between top bar and
@@ -631,7 +654,8 @@ export default function TaggingOverlayScreen() {
     if (!hasWindow) { Alert.alert('Mark the clip', 'Tap Mark Start and Mark End to set the clip window first.'); return; }
     // Every group for this clip: what's staged, plus the current group if it has tags.
     const bundles = [...stagedBundles, ...(building.length > 0 ? [building] : [])];
-    if (bundles.length === 0) { Alert.alert('Add a tag', 'Pick at least one tag before saving.'); return; }
+    // A football clip can be just the structured breakdown (no player tags), like web.
+    if (bundles.length === 0 && !isFootball) { Alert.alert('Add a tag', 'Pick at least one tag before saving.'); return; }
     setSaving(true);
 
     const { data: clip, error: clipError } = await supabase
@@ -651,14 +675,30 @@ export default function TaggingOverlayScreen() {
       if (tagError) { Alert.alert('Error saving tags', tagError.message); setSaving(false); return; }
     }
 
+    // Football: store the structured breakdown. Flag stores formation/play/defense
+    // unconditionally (offense's formation, offense's play, defense's call — odk marks
+    // which side was us). Tackle keeps its front/coverage-per-side model. Mirrors web.
+    if (isFootball) {
+      const { error: cfErr } = await supabase.from('clip_football').insert({
+        clip_id: clip.id,
+        odk: fbCtx.odk, down: fbCtx.down, distance: fbCtx.distance,
+        play_type: fbSel.play,
+        off_formation: isFlag ? fbSel.formation : (fbCtx.odk === 'offense' ? fbSel.formation : null),
+        def_front: isFlag ? fbSel.defense : (fbCtx.odk === 'defense' ? fbSel.formation : null),
+        result: fbSel.result, drive_id: fbCtx.drive,
+      });
+      if (cfErr) { Alert.alert('Error saving football breakdown', cfErr.message); setSaving(false); return; }
+    }
+
     // Committed → reset the whole clip (window + groups + ★/POE) for the next one.
-    // The sticky period stays (it carries across clips within a quarter).
+    // The sticky period + sticky football possession (fbCtx) stay across clips.
     setStartTime(null);
     setEndTime(null);
     setBuilding([]);
     setStagedBundles([]);
     setIsStar(false);
     setIsPoe(false);
+    setFbSel({ formation: null, play: null, defense: null, result: null });
     loadExistingClips(); // refresh the marker strip with the just-saved clip
     setSaving(false);
   }
@@ -669,6 +709,21 @@ export default function TaggingOverlayScreen() {
   const sportPeriods = periodsForSport(tagSport)
     .map(name => periodTags.find((p: any) => p.name === name))
     .filter(Boolean) as any[];
+
+  // Football single-select columns (mirrors the web tagger). Labels relabel by the
+  // possession toggle for flag so ownership is unmistakable; tackle keeps front/coverage.
+  const FB_COL_COLORS = { formation: '#1a6fd4', play: '#1e8449', defense: '#c0392b', result: '#6c5ce7' };
+  const fbColumns: { field: keyof FbSel; label: string; options: string[]; color: string }[] = !isFootball ? [] :
+    isFlag ? [
+      { field: 'formation', label: fbCtx.odk === 'defense' ? 'Their Formation' : 'Our Formation', options: FLAG_FORMATIONS, color: FB_COL_COLORS.formation },
+      { field: 'play', label: fbCtx.odk === 'defense' ? 'Their Play' : 'Our Play', options: FB_PLAY_TYPES, color: FB_COL_COLORS.play },
+      { field: 'defense', label: fbCtx.odk === 'defense' ? 'Our Defense' : 'Their Defense', options: FLAG_DEFENSES, color: FB_COL_COLORS.defense },
+      { field: 'result', label: 'Result', options: fbCtx.odk === 'offense' ? FLAG_RESULT_OFF : FLAG_RESULT_DEF, color: FB_COL_COLORS.result },
+    ] : [
+      { field: 'formation', label: fbCtx.odk === 'defense' ? 'Front' : fbCtx.odk === 'kicking' ? 'Unit' : 'Formation', options: fbCtx.odk === 'defense' ? FB_FRONTS : fbCtx.odk === 'kicking' ? FB_ST_UNITS : FB_FORMATIONS, color: FB_COL_COLORS.formation },
+      { field: 'play', label: fbCtx.odk === 'defense' ? 'Coverage' : 'Play', options: fbCtx.odk === 'defense' ? FB_COVERAGES : FB_PLAY_TYPES, color: FB_COL_COLORS.play },
+      { field: 'result', label: 'Result', options: fbCtx.odk === 'offense' ? FB_RESULT_OFF : fbCtx.odk === 'defense' ? FB_RESULT_DEF : FB_RESULT_ST, color: FB_COL_COLORS.result },
+    ];
 
   return (
     <GestureHandlerRootView style={[styles.container, { width: landW, height: landH }]}>
@@ -874,7 +929,78 @@ export default function TaggingOverlayScreen() {
           ]}
           pointerEvents="box-none"
         >
-          {CATEGORIES.map(cat => (
+          {isFootball ? (
+            // Football/flag board — possession toggle (O/D/K) + single-select structured
+            // columns, laid out as one column child so the toggle sits above the columns.
+            // Reuses the proven column/chip styles. Players stay multi-select tags.
+            <View style={styles.fbBoard}>
+              <View style={styles.odkRow}>
+                {(['offense', 'defense', 'kicking'] as Odk[]).map(o => (
+                  <TouchableOpacity
+                    key={o}
+                    onPress={() => setOdk(o)}
+                    style={[styles.odkBtn, isTablet && styles.odkBtnBig, fbCtx.odk === o && styles.odkBtnOn]}
+                  >
+                    <Text style={[styles.odkTxt, isTablet && styles.odkTxtBig, fbCtx.odk === o && styles.odkTxtOn]}>{ODK_SHORT[o]}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.fbCols}>
+                {fbColumns.map(col => (
+                  <View key={col.field} style={styles.tagColumn}>
+                    <Text style={[styles.colHeader, isTablet && styles.colHeaderBig, { color: col.color }]} numberOfLines={1}>{col.label.toUpperCase()}</Text>
+                    <ScrollView showsVerticalScrollIndicator={false}>
+                      <View style={styles.chipsWrap}>
+                        {col.options.map(opt => {
+                          const on = fbSel[col.field] === opt;
+                          return (
+                            <TouchableOpacity
+                              key={opt}
+                              onPress={() => fbPick(col.field, opt)}
+                              style={[
+                                styles.tagChip,
+                                isTablet && styles.tagChipBig,
+                                on
+                                  ? { backgroundColor: col.color, borderColor: 'rgba(255,255,255,0.4)' }
+                                  : { backgroundColor: 'rgba(255, 255, 255, 0.25)', borderColor: colorWithAlpha(col.color, 0.6) },
+                              ]}
+                            >
+                              <Text style={[styles.tagChipText, isTablet && styles.tagChipTextBig, on ? { color: '#fff', fontWeight: '700' } : { color: col.color }]}>{opt}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
+                  </View>
+                ))}
+                <View style={styles.tagColumn}>
+                  <Text style={[styles.colHeader, isTablet && styles.colHeaderBig, { color: '#7d3c98' }]}>PLAYERS</Text>
+                  <ScrollView showsVerticalScrollIndicator={false}>
+                    <View style={styles.chipsWrap}>
+                      {tags.players.map(tag => {
+                        const selected = building.includes(tag.id);
+                        return (
+                          <TouchableOpacity
+                            key={tag.id}
+                            onPress={() => toggleTag(tag.id)}
+                            style={[
+                              styles.tagChip,
+                              isTablet && styles.tagChipBig,
+                              selected
+                                ? { backgroundColor: '#7d3c98', borderColor: 'rgba(255,255,255,0.4)' }
+                                : { backgroundColor: 'rgba(255, 255, 255, 0.25)', borderColor: colorWithAlpha('#7d3c98', 0.6) },
+                            ]}
+                          >
+                            <Text style={[styles.tagChipText, isTablet && styles.tagChipTextBig, selected ? { color: '#fff', fontWeight: '700' } : { color: '#7d3c98' }]}>{tag.name}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                </View>
+              </View>
+            </View>
+          ) : CATEGORIES.map(cat => (
             <View key={cat.key} style={styles.tagColumn}>
               <Text style={[styles.colHeader, isTablet && styles.colHeaderBig, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
               <ScrollView showsVerticalScrollIndicator={false}>
@@ -1255,6 +1381,20 @@ const styles = StyleSheet.create({
   tagColumn: {
     flex: 1,
   },
+  // Football board: one column-direction child (toggle on top, columns below).
+  fbBoard: { flex: 1, flexDirection: 'column' },
+  odkRow: { flexDirection: 'row', gap: 6, marginBottom: 6 },
+  fbCols: { flex: 1, flexDirection: 'row' },
+  odkBtn: {
+    minWidth: 44, paddingHorizontal: 12, height: 30, borderRadius: 15, borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.35)', backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  odkBtnBig: { minWidth: 56, height: 36 },
+  odkBtnOn: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
+  odkTxt: { color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: '800' },
+  odkTxtBig: { fontSize: 15 },
+  odkTxtOn: { color: '#1a1a1a' },
   colHeader: {
     fontSize: 10,
     fontWeight: '700',
