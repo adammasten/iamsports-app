@@ -9,6 +9,10 @@ import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
+import {
+  type Odk, type FbCtx, type FbSel, ODK_SHORT,
+  FB_FORMATIONS, FB_PLAY_TYPES, FB_RESULT_OFF, FB_FRONTS, FB_COVERAGES, FB_RESULT_DEF, FB_ST_UNITS, FB_RESULT_ST,
+} from '@/lib/core/football';
 import { getCachedPathSync } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
@@ -57,21 +61,9 @@ function orderTags<T extends { category: string }>(tags: T[]): T[] {
 }
 
 // ── Football tagger vocab ──────────────────────────────────────────────
-// Single-select chips that fill the structured clip_football fields. Same look
-// as the basketball tag board; different content + one-per-column behaviour.
-const FB_FORMATIONS = ['Shotgun', 'Under Center', 'Pistol', 'Empty', 'I-Form', 'Trips', 'Bunch'];
-const FB_PLAY_TYPES = ['Run Inside', 'Run Outside', 'Pass', 'Play Action', 'Screen', 'RPO', 'QB Run'];
-const FB_RESULT_OFF = ['1st Down', 'TD', 'Complete', 'Incomplete', 'Rush', 'Sack', 'Fumble', 'INT', 'Penalty', 'No Gain'];
-const FB_FRONTS = ['4-3', '3-4', '4-2-5', 'Nickel', 'Bear', '3-3 Stack'];
-const FB_COVERAGES = ['Cover 0', 'Cover 1', 'Cover 2', 'Cover 3', 'Cover 4', 'Man', 'Zone'];
-const FB_RESULT_DEF = ['Stop', 'TFL', 'Sack', 'INT', 'PBU', 'Forced Fumble', '1st Down Allowed', 'TD Allowed', 'Penalty'];
-const FB_ST_UNITS = ['Kickoff', 'Punt', 'FG', 'PAT', 'Return', 'Onside'];
-const FB_RESULT_ST = ['Good', 'Miss', 'Return TD', 'Block', 'Muff', 'Downed'];
-
-type Odk = 'offense' | 'defense' | 'kicking';
-type FbCtx = { odk: Odk; down: number | null; distance: number | null; drive: number };
-type FbSel = { formation: string | null; play: string | null; result: string | null };
-const ODK_SHORT: Record<Odk, string> = { offense: 'OFF', defense: 'DEF', kicking: 'K' };
+// Football tagging vocabulary + types now live in @/lib/core/football (shared with
+// the native tagger so the two never drift). FB_FORMATIONS, FB_PLAY_TYPES,
+// FB_RESULT_*, FB_FRONTS, FB_COVERAGES, FB_ST_UNITS, Odk, FbCtx, FbSel, ODK_SHORT.
 
 export default function TaggingStudioWeb() {
   const { userId, activeTeam } = useTeamContext();
