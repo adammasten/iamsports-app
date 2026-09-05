@@ -188,6 +188,37 @@ Tags across two bundles do NOT combine. Preserve this if you touch tag
 save/filter — it's how "Player A made a shot" avoids matching "A defended, B
 scored." All rows for a clip are inserted in one batch on save.
 
+#### Per-sport possession + structured clips — INVARIANT (don't drift)
+
+**Every new sport must consciously address (a) how a coach marks OUR-team
+possession (offense vs defense) and (b) how any structured play data is READ back
+downstream (export/breakdown) — or explicitly decide it needs neither.** Adding a
+sport's tags without this is the drift to avoid: it leaves "our defense" vs "the
+opponent's defense we tagged while on offense" indistinguishable at export, and it
+buries captured data nothing reads.
+
+**Current state (audited 2026-09-04 — this IS the drift, not the target):**
+- **Football only** (`Football` / `7-on-7` / `Flag Football`, `isFootballSport`)
+  has a real model: a sticky **ODK toggle** (offense/defense/kicking) that stamps
+  `clip_football.odk` (+ down/distance, `off_formation`, `def_front`, `play_type`,
+  `result`, `drive_id`). It is **WEB-ONLY** (`tagging-overlay.web.tsx`); the native
+  tagger has no football mode (port planned). Football vocab is shared in
+  `lib/core/football.ts` so web + the native port never diverge.
+- **Every other sport** (Basketball, Soccer, Lacrosse, Baseball, Softball,
+  Volleyball) has **NO possession stamp** — their offense/defense are only tag
+  *categories* (groupings of `clip_tags` chips), plus `clips.period`. There is no
+  `clip_<sport>` table for them (only `clip_football` exists).
+- **`clip_football` is write-only:** nothing downstream reads it — `export.tsx` is
+  football-blind (filters `clip_tags` groups only), and there's no stats/breakdown
+  view. So football's rich structured tagging currently can't be exported at all.
+
+**Two open builds this implies:** (1) a football-aware export/filter that reads
+`clip_football` (filter by ODK + play type + formation + result) — this is what
+makes football tagging usable, arguably higher-value than the native port; (2) a
+possession indicator for the non-football sports if their offense/defense needs to
+be disambiguated the way football's is. Don't add another sport without deciding
+where it lands on this.
+
 ### Media pipeline (upload / download) — SPEED MATTERS (see rule below)
 
 `lib/native/video-upload.ts` is the shared upload module
