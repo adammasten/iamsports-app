@@ -236,6 +236,10 @@ export default function MyWorkScreen() {
   // then kept live via video-cache subscribers.
   const [videoCacheStatus, setVideoCacheStatus] = useState<Record<string, CacheStatus>>({});
   const [videoCacheProgress, setVideoCacheProgress] = useState<Record<string, CacheProgress>>({});
+  // Optimistic "you just tapped download" set — shows a Starting… spinner on the offline
+  // button INSTANTLY, before the video-cache status has flipped to downloading (that lag
+  // made the tap feel dead). Cleared per game once real status arrives (effect below).
+  const [startingOffline, setStartingOffline] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -254,6 +258,20 @@ export default function MyWorkScreen() {
     );
     return () => { cancelled = true; unsubStatus(); unsubProgress(); };
   }, []);
+  // Once a game's videos actually start moving (or finish/error), drop the optimistic
+  // "Starting…" flag — the real status/progress button takes over from here.
+  useEffect(() => {
+    if (startingOffline.size === 0) return;
+    setStartingOffline(prev => {
+      const next = new Set(prev);
+      for (const gid of prev) {
+        const g = games.find(x => x.id === gid);
+        const moving = !g || g.videos.some(v => ['downloading', 'queued', 'cached', 'error'].includes(videoCacheStatus[v.id] ?? 'idle'));
+        if (moving) next.delete(gid);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [videoCacheStatus, games, startingOffline]);
   // Inline video-label rename (per-video, e.g. Q1 → Q3): which video + draft.
   const [renamingVideoId, setRenamingVideoId] = useState<string | null>(null);
   const [videoDraft, setVideoDraft] = useState('');
@@ -1072,7 +1090,8 @@ export default function MyWorkScreen() {
 
     // 'download' or 'retry' — kick off missing/errored videos. prefetch is
     // dedup'd inside video-cache (in-flight promise + serial queue), so mass
-    // calling here is safe.
+    // calling here is safe. Flag it optimistically so the button spins instantly.
+    setStartingOffline(s => new Set(s).add(game.id));
     for (const v of ready) {
       const s = videoCacheStatus[v.id] ?? 'idle';
       if (s === 'cached' || s === 'downloading' || s === 'queued') continue;
@@ -1487,7 +1506,12 @@ export default function MyWorkScreen() {
                         ];
                         // Games can also be cached on-device for offline tagging — coaches
                         // only (a parent can't tag), so skip it on a family game.
-                        const off = family ? null : computeGameOffline(game, videoCacheStatus, videoCacheProgress);
+                        let off = family ? null : computeGameOffline(game, videoCacheStatus, videoCacheProgress);
+                        // Instant feedback: if you just tapped download and the real status
+                        // hasn't flipped yet, show a spinning "Starting…" so the tap never feels dead.
+                        if (off && off.action === 'download' && startingOffline.has(game.id)) {
+                          off = { label: 'Starting…', bg: '#534AB7', fg: '#fff', action: 'inflight' };
+                        }
                         if (off) acts.push({
                           icon: off.action === 'remove' ? 'cloud-done' : off.action === 'retry' ? 'refresh' : 'cloud-download-outline',
                           label: off.label,
