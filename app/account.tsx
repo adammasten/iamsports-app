@@ -8,6 +8,7 @@ import { goBackOrHome } from '@/lib/nav';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { webAlert } from '@/lib/webAlert';
+import { isWebPushInstallGated, requestWebPushPermission, webPushStatus } from '@/lib/native/push';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // 🧪 Phase 0b spike toggle — shows the background-upload test card even in a
@@ -24,6 +25,28 @@ export default function AccountScreen() {
   const insets = useSafeAreaInsets();
   const { userId } = useTeamContext();
   const [busy, setBusy] = useState(false);
+
+  // Push notifications. 'install-required' is the iOS-Safari-without-Home-Screen
+  // case, which is a real state rather than a failure — the card explains it
+  // instead of showing a button that could never work.
+  const [pushState, setPushState] =
+    useState<'granted' | 'denied' | 'default' | 'unsupported' | 'install-required'>('default');
+  const [pushBusy, setPushBusy] = useState(false);
+
+  useEffect(() => {
+    setPushState(isWebPushInstallGated() ? 'install-required' : webPushStatus());
+  }, []);
+
+  async function enablePush() {
+    if (!userId) return;
+    setPushBusy(true);
+    const result = await requestWebPushPermission(userId);
+    setPushBusy(false);
+    setPushState(result === 'unsupported' ? 'unsupported' : result);
+    if (result === 'denied') {
+      webAlert('Notifications blocked', 'Turn notifications back on for IamSports in your browser or system settings, then try again.');
+    }
+  }
 
   // Display name — what teams/families see on your shares and coach comments.
   // Reuses the same set_my_display_name RPC the first-run name gate uses.
@@ -111,6 +134,31 @@ export default function AccountScreen() {
                 <Text style={styles.btnPrimaryText}>{nameSaving ? 'Saving…' : 'Save name'}</Text>
               </TouchableOpacity>
             </>
+          )}
+        </View>
+
+        {/* Push notifications. One card for all three platforms: the app uses
+            expo-notifications, the web app and mobile browser use Web Push.
+            Both register into device_push_tokens, so this reads the same either
+            way. Permission is only ever requested from this button — never on
+            page load, which is the fastest way to get permanently blocked. */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🔔 Push notifications</Text>
+          <Text style={styles.cardBody}>
+            {pushState === 'granted'
+              ? 'On for this device. You’ll get a heads-up when new film lands, someone shares with your kid, or a game changes.'
+              : pushState === 'denied'
+                ? 'Blocked for this device. Turn notifications back on for IamSports in your browser or system settings, then come back.'
+                : pushState === 'install-required'
+                  ? 'On iPhone, Safari only allows notifications once IamSports is on your Home Screen. Tap Share → “Add to Home Screen”, open it from there, then turn this on.'
+                  : 'Get a heads-up when new film lands, someone shares with your kid, or a game changes.'}
+          </Text>
+          {pushState !== 'granted' && pushState !== 'denied' && (
+            <TouchableOpacity style={styles.btnPrimary} onPress={enablePush} disabled={pushBusy}>
+              <Text style={styles.btnPrimaryText}>
+                {pushBusy ? 'Turning on…' : 'Turn on notifications'}
+              </Text>
+            </TouchableOpacity>
           )}
         </View>
 

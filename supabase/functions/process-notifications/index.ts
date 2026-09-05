@@ -4,10 +4,17 @@
 // and message announcements. DISPATCH sends due queued push rows via Expo.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import webpush from "npm:web-push@3.6.7";
 
 const SUPA_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const EXPO_PUSH = "https://exp.host/--/api/v2/push/send";
+// Web Push (browser channel). Absent secrets => channel simply not offered.
+const VAPID_PUBLIC = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
+const VAPID_PRIVATE = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
+const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:support@iamsports.com";
+const VAPID_CONFIGURED = Boolean(VAPID_PUBLIC && VAPID_PRIVATE);
+if (VAPID_CONFIGURED) webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
 const DEFAULT_TZ = "America/Chicago";
 const URGENT_WINDOW_HOURS = 6;
 const QUIET_START = 22, QUIET_END = 7;
@@ -151,6 +158,17 @@ async function expand(): Promise<number> {
   return due.length;
 }
 
+// Deliver due queued push rows. Fans out to BOTH channels a user may have:
+// Expo tokens (the native app) and Web Push subscriptions (the web app and the
+// mobile browser). Splitting by `platform` is mandatory, not cosmetic — before
+// web rows existed this posted every token to Expo, so a web subscription's JSON
+// would have been sent to Expo as if it were a token, failed its ticket, and the
+// recipient's notification would have been marked sent-then-failed and never
+// delivered. A user with ONLY a browser would have received nothing, silently.
+//
+// A row counts as delivered if ANY of that user's devices accepted it, and is
+// only marked failed when every attempt failed — otherwise a stale token on one
+// old phone would mask a successful delivery to their laptop.
 async function dispatchPush(): Promise<number> {
   const now = new Date().toISOString();
   const { data: candidates } = await svc.from("schedule_notifications").select("id, recipient_user_id, title, body, data").eq("status", "queued").eq("channel", "push").lte("send_after", now).limit(500);
@@ -158,24 +176,64 @@ async function dispatchPush(): Promise<number> {
   const ids = candidates.map((c) => c.id);
   const { data: claimed } = await svc.from("schedule_notifications").update({ status: "sent", sent_at: now, status_updated_at: now }).in("id", ids).eq("status", "queued").select("id, recipient_user_id, title, body, data");
   if (!claimed || claimed.length === 0) return 0;
-  const { data: tokenRows } = await svc.from("device_push_tokens").select("user_id, token").in("user_id", Array.from(new Set(claimed.map((c) => c.recipient_user_id))));
-  const tokensByUser = new Map<string, string[]>();
-  for (const t of tokenRows ?? []) { const a = tokensByUser.get(t.user_id) ?? []; a.push(t.token); tokensByUser.set(t.user_id, a); }
-  const noDevice = claimed.filter((c) => !(tokensByUser.get(c.recipient_user_id)?.length));
+
+  const { data: tokenRows } = await svc.from("device_push_tokens").select("user_id, token, platform").in("user_id", Array.from(new Set(claimed.map((c) => c.recipient_user_id))));
+  const expoByUser = new Map<string, string[]>();
+  const webByUser = new Map<string, string[]>();
+  for (const t of tokenRows ?? []) {
+    const bucket = t.platform === "web" ? webByUser : expoByUser;
+    const a = bucket.get(t.user_id) ?? []; a.push(t.token); bucket.set(t.user_id, a);
+  }
+
+  const hasAnyDevice = (uid: string) => (expoByUser.get(uid)?.length ?? 0) + (webByUser.get(uid)?.length ?? 0) > 0;
+  const noDevice = claimed.filter((c) => !hasAnyDevice(c.recipient_user_id));
   if (noDevice.length) await svc.from("schedule_notifications").update({ status: "skipped", error_code: "no_device", status_updated_at: now }).in("id", noDevice.map((c) => c.id));
+
+  // Track per-row: did anything succeed, and did anything fail.
+  const okRows = new Set<string>();
+  const badRows = new Set<string>();
+
+  // ---- Expo (native app) ----
   const pairs: { id: string; to: string; title: string; body: string; data: any }[] = [];
-  for (const c of claimed) for (const to of (tokensByUser.get(c.recipient_user_id) ?? [])) pairs.push({ id: c.id, to, title: c.title, body: c.body, data: c.data });
-  const failedRowIds = new Set<string>();
+  for (const c of claimed) for (const to of (expoByUser.get(c.recipient_user_id) ?? [])) pairs.push({ id: c.id, to, title: c.title, body: c.body, data: c.data });
   for (const batch of chunk(pairs, 100)) {
     try {
       const res = await fetch(EXPO_PUSH, { method: "POST", headers: { "content-type": "application/json", "accept": "application/json" }, body: JSON.stringify(batch.map((p) => ({ to: p.to, title: p.title, body: p.body, data: p.data, sound: "default" }))) });
       const out = await res.json().catch(() => null);
       const tickets = out?.data ?? [];
-      if (!Array.isArray(tickets)) { for (const p of batch) failedRowIds.add(p.id); continue; }
-      tickets.forEach((t: any, i: number) => { if (t?.status !== "ok") failedRowIds.add(batch[i].id); });
-    } catch { for (const p of batch) failedRowIds.add(p.id); }
+      if (!Array.isArray(tickets)) { for (const p of batch) badRows.add(p.id); continue; }
+      tickets.forEach((t: any, i: number) => { if (t?.status === "ok") okRows.add(batch[i].id); else badRows.add(batch[i].id); });
+    } catch { for (const p of batch) badRows.add(p.id); }
   }
-  if (failedRowIds.size) await svc.from("schedule_notifications").update({ status: "failed", error_code: "push_error", status_updated_at: new Date().toISOString() }).in("id", Array.from(failedRowIds));
+
+  // ---- Web Push (web app + mobile browser) ----
+  // Env-gated the same way SMS is: with no VAPID secrets the browser channel is
+  // simply absent rather than an error.
+  const deadWebTokens: string[] = [];
+  if (VAPID_CONFIGURED) {
+    const webJobs: { id: string; token: string; title: string; body: string; data: any }[] = [];
+    for (const c of claimed) for (const token of (webByUser.get(c.recipient_user_id) ?? [])) webJobs.push({ id: c.id, token, title: c.title, body: c.body, data: c.data });
+    await Promise.all(webJobs.map(async (j) => {
+      let sub: unknown;
+      try { sub = JSON.parse(j.token); } catch { deadWebTokens.push(j.token); badRows.add(j.id); return; }
+      try {
+        const url = typeof j.data?.url === "string" ? j.data.url : "/schedule";
+        await webpush.sendNotification(sub as any, JSON.stringify({ title: j.title, body: j.body, url }), { TTL: 60 * 60 * 24 });
+        okRows.add(j.id);
+      } catch (e) {
+        const status = (e as { statusCode?: number })?.statusCode;
+        // 404/410 mean the browser dropped the subscription — prune it so every
+        // later run doesn't waste a round trip on a dead endpoint.
+        if (status === 404 || status === 410) deadWebTokens.push(j.token);
+        badRows.add(j.id);
+      }
+    }));
+    if (deadWebTokens.length) await svc.from("device_push_tokens").delete().in("token", deadWebTokens);
+  }
+
+  // Failed only when NOTHING got through for that row.
+  const failedRowIds = Array.from(badRows).filter((id) => !okRows.has(id));
+  if (failedRowIds.length) await svc.from("schedule_notifications").update({ status: "failed", error_code: "push_error", status_updated_at: new Date().toISOString() }).in("id", failedRowIds);
   return claimed.length;
 }
 

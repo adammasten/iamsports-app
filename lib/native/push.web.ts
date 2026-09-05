@@ -25,7 +25,14 @@
 import { supabase } from '@/supabase';
 import { useEffect } from 'react';
 
-const VAPID_PUBLIC_KEY = process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY ?? '';
+// The VAPID PUBLIC key. Hardcoded on purpose, the same way supabase.js hardcodes
+// the publishable key: it is public by design and ships in the client bundle
+// either way, so putting it in an env var buys no secrecy — it only adds a
+// Vercel setting that can silently go missing and make push "just not work".
+// The env var still wins if set, which is what makes key rotation painless.
+// The matching PRIVATE key exists only as the VAPID_PRIVATE_KEY Supabase secret.
+const VAPID_PUBLIC_KEY = process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY
+  ?? 'BIwCqdDZfvaa9Q6_2WfA0YGsPm0LeRpftWQkniyadm2aKyrCiLs7RQCi2HL0vbPRhpogClWIJBVu2_5zm8gaxdk';
 
 function supported(): boolean {
   return typeof window !== 'undefined'

@@ -66,3 +66,40 @@ export function usePushRegistration(userId: string | null) {
     return () => sub.remove();
   }, [userId]);
 }
+
+// ---------------------------------------------------------------------------
+// Cross-platform surface for the Account screen's push card.
+// push.web.ts exports the same three names with the browser's behaviour; these
+// are the native counterparts so one shared import resolves on both platforms.
+// ---------------------------------------------------------------------------
+
+/** Browser-only concern (iOS Safari needs a Home Screen install). Never true here. */
+export function isWebPushInstallGated(): boolean {
+  return false;
+}
+
+/** Ask for permission and register. Mirrors the web signature. */
+export async function requestWebPushPermission(userId: string): Promise<
+  'granted' | 'denied' | 'unsupported' | 'install-required'
+> {
+  if (!Device.isDevice) return 'unsupported';   // simulators can't receive push
+  const existing = await Notifications.getPermissionsAsync();
+  const granted = existing.granted
+    || (existing.canAskAgain && (await Notifications.requestPermissionsAsync()).granted);
+  if (!granted) return 'denied';
+  await registerForPushNotifications(userId);
+  return 'granted';
+}
+
+/** Current permission, read synchronously from the last known value. */
+export function webPushStatus(): 'granted' | 'denied' | 'default' | 'unsupported' {
+  return Device.isDevice ? 'default' : 'unsupported';
+}
+
+/** Drop this device's token so it stops receiving push. */
+export async function unregisterWebPush(): Promise<void> {
+  try {
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId: PROJECT_ID });
+    if (token) await supabase.from('device_push_tokens').delete().eq('token', token);
+  } catch { /* nothing registered */ }
+}
