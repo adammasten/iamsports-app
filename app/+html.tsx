@@ -17,6 +17,17 @@ export default function Root({ children }: PropsWithChildren) {
           href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,800;1,800&family=Barlow:wght@400;500;600;700&display=swap"
           rel="stylesheet"
         />
+        {/* PWA bits. The manifest is what lets iOS "Add to Home Screen" install
+            the app — and on iPhone that install is the ONLY way Web Push is
+            allowed to work at all. Desktop and Android don't need it, but it
+            also makes the app installable there. Files live in public/ and are
+            copied verbatim into dist/ by the static export. */}
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <meta name="theme-color" content="#534AB7" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+        <meta name="apple-mobile-web-app-title" content="IamSports" />
+        <link rel="apple-touch-icon" href="/icons/icon-192.png" />
         <ScrollViewStyleReset />
       </head>
       <body>{children}</body>
