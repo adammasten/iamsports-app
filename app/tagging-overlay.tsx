@@ -495,7 +495,10 @@ export default function TaggingOverlayScreen() {
   const hasWindow = startTime !== null && endTime !== null && endTime > startTime;
   const groupCount = stagedBundles.length + (building.length > 0 ? 1 : 0);
   const canAddGroup = building.length > 0 && !saving && videoReady;
-  const canSave = hasWindow && groupCount > 0 && !saving && videoReady;
+  // Football can save with just the structured breakdown (no player group) — mirror
+  // the web tagger's (isFootball || groupCount > 0). Without this the Save button stays
+  // disabled on a football clip that has no player tags.
+  const canSave = hasWindow && (groupCount > 0 || isFootball) && !saving && videoReady;
 
   // Highlight ★ button scale-pulse — fires only on enable (un-lit → lit).
   // Coaches frequently miss this button, so the pulse + larger size + label
@@ -1387,11 +1390,11 @@ const styles = StyleSheet.create({
   fbCols: { flex: 1, flexDirection: 'row' },
   odkBtn: {
     minWidth: 44, paddingHorizontal: 12, height: 30, borderRadius: 15, borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.35)', backgroundColor: 'rgba(0,0,0,0.35)',
+    borderColor: 'rgba(255,255,255,0.25)', backgroundColor: 'rgba(0,0,0,0.18)',
     alignItems: 'center', justifyContent: 'center',
   },
   odkBtnBig: { minWidth: 56, height: 36 },
-  odkBtnOn: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
+  odkBtnOn: { backgroundColor: 'rgba(239,159,39,0.82)', borderColor: 'rgba(239,159,39,0.9)' },
   odkTxt: { color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: '800' },
   odkTxtBig: { fontSize: 15 },
   odkTxtOn: { color: '#1a1a1a' },
@@ -1568,8 +1571,8 @@ const styles = StyleSheet.create({
     width: 36, height: 36, borderRadius: 18, borderWidth: 1.5,
     justifyContent: 'center', alignItems: 'center',
   },
-  periodDotOff: { backgroundColor: 'rgba(0,0,0,0.35)', borderColor: 'rgba(255,255,255,0.35)' },
-  periodDotOn: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
+  periodDotOff: { backgroundColor: 'rgba(0,0,0,0.18)', borderColor: 'rgba(255,255,255,0.25)' },
+  periodDotOn: { backgroundColor: 'rgba(239,159,39,0.82)', borderColor: 'rgba(239,159,39,0.9)' },
   periodDotText: { color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: '700' },
   periodDotTextOn: { color: '#1a1a1a' },
   topReadoutDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#EF9F27' },

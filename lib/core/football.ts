@@ -7,8 +7,8 @@ export type Odk = 'offense' | 'defense' | 'kicking';
 
 // The ODK toggle stamps each clip's possession (saved to clip_football.odk) and is
 // sticky across clips; flipping offense<->defense starts a new drive.
-export const ODK_SHORT: Record<Odk, string> = { offense: 'OFF', defense: 'DEF', kicking: 'K' };
-export const ODK_LABEL: Record<Odk, string> = { offense: 'Offense', defense: 'Defense', kicking: 'Kicking' };
+export const ODK_SHORT: Record<Odk, string> = { offense: 'OFF', defense: 'DEF', kicking: 'SP' };
+export const ODK_LABEL: Record<Odk, string> = { offense: 'Offense', defense: 'Defense', kicking: 'Special teams' };
 
 export type FbCtx = { odk: Odk; down: number | null; distance: number | null; drive: number };
 // A clip's structured picks. formation = the OFFENSE's formation, play = what the
