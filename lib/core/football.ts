@@ -11,7 +11,15 @@ export const ODK_SHORT: Record<Odk, string> = { offense: 'OFF', defense: 'DEF', 
 export const ODK_LABEL: Record<Odk, string> = { offense: 'Offense', defense: 'Defense', kicking: 'Kicking' };
 
 export type FbCtx = { odk: Odk; down: number | null; distance: number | null; drive: number };
-export type FbSel = { formation: string | null; play: string | null; result: string | null };
+// A clip's structured picks. formation = the OFFENSE's formation, play = what the
+// OFFENSE ran, defense = the DEFENSE's call — each field means the same thing
+// regardless of the toggle; `odk` records which side was US. So "our defense" vs
+// "the defense we faced on offense" can never be confused.
+export type FbSel = { formation: string | null; play: string | null; defense: string | null; result: string | null };
+
+export function isFlagFootball(sport: string | null | undefined): boolean {
+  return !!sport && sport.trim().toLowerCase() === 'flag football';
+}
 
 // ── Offense ──────────────────────────────────────────────────────────────────
 export const FB_FORMATIONS = ['Shotgun', 'Under Center', 'Pistol', 'Empty', 'I-Form', 'Trips', 'Bunch'];
@@ -29,6 +37,13 @@ export const FB_RESULT_DEF = ['Stop', 'TFL', 'Sack', 'INT', 'PBU', 'Forced Fumbl
 // ── Special teams / kicking ──────────────────────────────────────────────────
 export const FB_ST_UNITS = ['Kickoff', 'Punt', 'FG', 'PAT', 'Return', 'Onside'];
 export const FB_RESULT_ST = ['Good', 'Miss', 'Return TD', 'Block', 'Muff', 'Downed'];
+
+// ── FLAG football (no linemen → no tackle fronts/coverages) ───────────────────
+// Defense is simply the coverage/pressure call. Play types are shared (FB_PLAY_TYPES).
+export const FLAG_FORMATIONS = ['Trips', 'Bunch', 'Empty', 'Spread', 'Stack', 'Deuce', 'Trey', 'Motion'];
+export const FLAG_DEFENSES = ['Man', 'Zone', 'Blitz', 'Combo', 'Safe'];
+export const FLAG_RESULT_OFF = ['TD', '1st Down', 'Complete', 'Incomplete', 'Flag pull (TFL)', 'Sack', 'INT', 'No Gain', 'Fumble', 'Penalty'];
+export const FLAG_RESULT_DEF = ['Stop', 'Flag pull', 'Sack', 'INT', 'PBU', 'TD Allowed', '1st Down Allowed', 'Penalty'];
 
 // Results depend on which unit is on the field.
 export function fbResultsForOdk(odk: Odk): string[] {

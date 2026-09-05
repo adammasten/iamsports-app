@@ -10,8 +10,9 @@ import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import {
-  type Odk, type FbCtx, type FbSel, ODK_SHORT,
+  type Odk, type FbCtx, type FbSel, ODK_SHORT, isFlagFootball,
   FB_FORMATIONS, FB_PLAY_TYPES, FB_RESULT_OFF, FB_FRONTS, FB_COVERAGES, FB_RESULT_DEF, FB_ST_UNITS, FB_RESULT_ST,
+  FLAG_FORMATIONS, FLAG_DEFENSES, FLAG_RESULT_OFF, FLAG_RESULT_DEF,
 } from '@/lib/core/football';
 import { getCachedPathSync } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
@@ -44,7 +45,7 @@ const PLAYBACK_SPEEDS = [1, 1.2, 1.5, 2];
 type Tag = { id: string; name: string; category: string };
 type Built = { id: string; name: string; category: string };
 type ClipRow = { id: string; start: number; end: number; groups: { name: string; category: string }[][]; starred: boolean; poe: boolean; editTags: { id: string; name: string; category: string }[]; fb?: FbSummary | null };
-type FbSummary = { odk: Odk; down: number | null; distance: number | null; formation: string | null; play: string | null; result: string | null; drive: number | null };
+type FbSummary = { odk: Odk; down: number | null; distance: number | null; formation: string | null; play: string | null; defense: string | null; result: string | null; drive: number | null };
 
 function fmt(s: number) {
   if (!isFinite(s) || s < 0) s = 0;
@@ -106,7 +107,7 @@ export default function TaggingStudioWeb() {
   // Football situation — sticky, carries forward across clips. fbSel = this clip's
   // single-select descriptors (formation/play/result). Only used when isFootball.
   const [fbCtx, setFbCtx] = useState<FbCtx>({ odk: 'offense', down: 1, distance: 10, drive: 1 });
-  const [fbSel, setFbSel] = useState<FbSel>({ formation: null, play: null, result: null });
+  const [fbSel, setFbSel] = useState<FbSel>({ formation: null, play: null, defense: null, result: null });
 
   // ── player ──
   const cachedPath = videoId ? getCachedPathSync(videoId) : null;
@@ -158,11 +159,12 @@ export default function TaggingStudioWeb() {
 
   const tagSport = sport ?? activeTeam?.sport ?? null;
   const isFootball = isFootballSport(tagSport);
+  const isFlag = isFlagFootball(tagSport);   // flag uses the possession-relabeled model + flag vocab
 
   // Flip the ODK unit → new drive (possession changed); clear this clip's picks.
   const setOdk = useCallback((odk: Odk) => {
     setFbCtx(c => (c.odk === odk ? c : { ...c, odk, drive: c.drive + 1 }));
-    setFbSel({ formation: null, play: null, result: null });
+    setFbSel({ formation: null, play: null, defense: null, result: null });
   }, []);
   const fbPick = useCallback((field: keyof FbSel, val: string) => {
     setFbSel(s => ({ ...s, [field]: s[field] === val ? null : val }));
@@ -238,12 +240,18 @@ export default function TaggingStudioWeb() {
       const cfRaw = Array.isArray(c.clip_football) ? c.clip_football[0] : c.clip_football;
       const fb: FbSummary | null = cfRaw ? {
         odk: cfRaw.odk, down: cfRaw.down, distance: cfRaw.distance,
-        formation: cfRaw.off_formation ?? cfRaw.def_front ?? null, play: cfRaw.play_type ?? null, result: cfRaw.result ?? null,
+        // Flag: formation = the OFFENSE's formation (off_formation), defense = the DEFENSE's
+        // call (def_front) — both stored unconditionally. Tackle: formation = whichever of
+        // off_formation / def_front is set (its old single-formation-per-side model).
+        formation: isFlag ? (cfRaw.off_formation ?? null) : (cfRaw.off_formation ?? cfRaw.def_front ?? null),
+        play: cfRaw.play_type ?? null,
+        defense: isFlag ? (cfRaw.def_front ?? null) : null,
+        result: cfRaw.result ?? null,
         drive: cfRaw.drive_id ?? null,
       } : null;
       return { id: c.id, start: c.start_time, end: c.end_time, starred, poe, groups, editTags, fb };
     }));
-  }, [videoId, special]);
+  }, [videoId, special, isFlag]);
   useEffect(() => { loadClips(); }, [loadClips]);
 
   // ── hotkey assignment (players → number row; events → letter pool) ──
@@ -294,7 +302,7 @@ export default function TaggingStudioWeb() {
     // reflects (and can change) what was tagged.
     if (c.fb) {
       setFbCtx(cur => ({ odk: c.fb!.odk, down: c.fb!.down, distance: c.fb!.distance, drive: c.fb!.drive ?? cur.drive }));
-      setFbSel({ formation: c.fb.formation, play: c.fb.play, result: c.fb.result });
+      setFbSel({ formation: c.fb.formation, play: c.fb.play, defense: c.fb.defense, result: c.fb.result });
     }
     try { player.currentTime = Math.max(0, c.start); } catch {}
   }, [player]);
@@ -343,8 +351,8 @@ export default function TaggingStudioWeb() {
           clip_id: editingId,
           odk: fbCtx.odk, down: fbCtx.down, distance: fbCtx.distance,
           play_type: fbSel.play,
-          off_formation: fbCtx.odk === 'offense' ? fbSel.formation : null,
-          def_front: fbCtx.odk === 'defense' ? fbSel.formation : null,
+          off_formation: isFlag ? fbSel.formation : (fbCtx.odk === 'offense' ? fbSel.formation : null),
+          def_front: isFlag ? fbSel.defense : (fbCtx.odk === 'defense' ? fbSel.formation : null),
           result: fbSel.result, drive_id: fbCtx.drive,
         }, { onConflict: 'clip_id' });
         if (cfErr) console.error('[football] clip_football upsert failed', cfErr.message);
@@ -384,8 +392,8 @@ export default function TaggingStudioWeb() {
         down: fbCtx.down,
         distance: fbCtx.distance,
         play_type: fbSel.play,
-        off_formation: fbCtx.odk === 'offense' ? fbSel.formation : null,
-        def_front: fbCtx.odk === 'defense' ? fbSel.formation : null,
+        off_formation: isFlag ? fbSel.formation : (fbCtx.odk === 'offense' ? fbSel.formation : null),
+        def_front: isFlag ? fbSel.defense : (fbCtx.odk === 'defense' ? fbSel.formation : null),
         result: fbSel.result,
         drive_id: fbCtx.drive,
       });
@@ -397,7 +405,7 @@ export default function TaggingStudioWeb() {
       // Carry the situation forward: a 1st down / TD resets to 1st & 10, else the
       // down bumps. The coach can always tap to correct it.
       const scored = fbSel.result === '1st Down' || fbSel.result === 'TD';
-      setFbSel({ formation: null, play: null, result: null });
+      setFbSel({ formation: null, play: null, defense: null, result: null });
       setFbCtx(c => ({ ...c, down: scored ? 1 : Math.min(4, (c.down ?? 1) + 1), distance: scored ? 10 : c.distance }));
     }
     loadClips();
@@ -492,7 +500,7 @@ export default function TaggingStudioWeb() {
 
   // Football board column — single-select chips filling one clip_football field.
   // Same chip styling as the basketball board (styles.chip), so it feels identical.
-  const FB_COL_COLOR: Record<keyof FbSel, string> = { formation: C.offense, play: C.plays, result: C.defense };
+  const FB_COL_COLOR: Record<keyof FbSel, string> = { formation: C.offense, play: C.plays, defense: C.defense, result: C.accent };
   const fbCategory = (field: keyof FbSel, title: string, options: string[]) => {
     const col = FB_COL_COLOR[field];
     return (
@@ -702,10 +710,30 @@ export default function TaggingStudioWeb() {
                 </View>
               </View>
               <View style={styles.board}>
-                {fbCategory('formation', fbCtx.odk === 'defense' ? 'Front' : fbCtx.odk === 'kicking' ? 'Unit' : 'Formation', fbCtx.odk === 'defense' ? FB_FRONTS : fbCtx.odk === 'kicking' ? FB_ST_UNITS : FB_FORMATIONS)}
-                {fbCtx.odk !== 'kicking' ? <><View style={styles.vdiv} />{fbCategory('play', fbCtx.odk === 'defense' ? 'Coverage' : 'Play', fbCtx.odk === 'defense' ? FB_COVERAGES : FB_PLAY_TYPES)}</> : null}
-                <View style={styles.vdiv} />
-                {fbCategory('result', 'Result', fbCtx.odk === 'offense' ? FB_RESULT_OFF : fbCtx.odk === 'defense' ? FB_RESULT_DEF : FB_RESULT_ST)}
+                {isFlag && fbCtx.odk !== 'kicking' ? (
+                  // FLAG possession model — columns relabel by the toggle so ownership is
+                  // unmistakable. formation = the OFFENSE's formation, play = what the OFFENSE
+                  // ran, defense = the DEFENSE's call; `odk` records which side was us. So on
+                  // DEF, "Their Formation" = the opponent's (e.g. Shotgun) and "Our Defense"
+                  // = our man/zone/blitz call.
+                  <>
+                    {fbCategory('formation', fbCtx.odk === 'defense' ? 'Their Formation' : 'Our Formation', FLAG_FORMATIONS)}
+                    <View style={styles.vdiv} />
+                    {fbCategory('play', fbCtx.odk === 'defense' ? 'Their Play' : 'Our Play', FB_PLAY_TYPES)}
+                    <View style={styles.vdiv} />
+                    {fbCategory('defense', fbCtx.odk === 'defense' ? 'Our Defense' : 'Their Defense', FLAG_DEFENSES)}
+                    <View style={styles.vdiv} />
+                    {fbCategory('result', 'Result', fbCtx.odk === 'offense' ? FLAG_RESULT_OFF : FLAG_RESULT_DEF)}
+                  </>
+                ) : (
+                  // Tackle football (+ flag kicking): the original front/coverage board.
+                  <>
+                    {fbCategory('formation', fbCtx.odk === 'defense' ? 'Front' : fbCtx.odk === 'kicking' ? 'Unit' : 'Formation', fbCtx.odk === 'defense' ? FB_FRONTS : fbCtx.odk === 'kicking' ? FB_ST_UNITS : FB_FORMATIONS)}
+                    {fbCtx.odk !== 'kicking' ? <><View style={styles.vdiv} />{fbCategory('play', fbCtx.odk === 'defense' ? 'Coverage' : 'Play', fbCtx.odk === 'defense' ? FB_COVERAGES : FB_PLAY_TYPES)}</> : null}
+                    <View style={styles.vdiv} />
+                    {fbCategory('result', 'Result', fbCtx.odk === 'offense' ? FB_RESULT_OFF : fbCtx.odk === 'defense' ? FB_RESULT_DEF : FB_RESULT_ST)}
+                  </>
+                )}
                 <View style={styles.vdiv} />
                 {category('players', 'Players', true)}
               </View>
@@ -762,7 +790,7 @@ export default function TaggingStudioWeb() {
                   <Text style={styles.clipFb} numberOfLines={2}>
                     {ODK_SHORT[c.fb.odk]}
                     {c.fb.down ? ` · ${c.fb.down}${['', 'st', 'nd', 'rd', 'th'][c.fb.down] ?? 'th'}${c.fb.distance != null ? ` & ${c.fb.distance}` : ''}` : ''}
-                    {c.fb.formation ? ` · ${c.fb.formation}` : ''}{c.fb.play ? ` · ${c.fb.play}` : ''}{c.fb.result ? ` · ${c.fb.result}` : ''}
+                    {c.fb.formation ? ` · ${c.fb.formation}` : ''}{c.fb.play ? ` · ${c.fb.play}` : ''}{c.fb.defense ? ` · ${c.fb.defense}` : ''}{c.fb.result ? ` · ${c.fb.result}` : ''}
                   </Text>
                 ) : null}
                 {c.starred || c.poe ? <Text style={styles.clipFoot}>{c.starred ? '★ Highlight  ' : ''}{c.poe ? '◎ POE' : ''}</Text> : null}
