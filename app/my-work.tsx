@@ -1046,6 +1046,13 @@ export default function MyWorkScreen() {
   // state's action (see computeGameOffline). Prefetch is idempotent — cached
   // videos are cheap to re-request (they return { ok: true } immediately).
   function handleOfflineTap(game: Game, action: GameOfflineState['action']) {
+    // Offline caching is a NATIVE-only feature (the browser can't hold multi-GB videos
+    // on disk). On web the prefetch silently returns {reason:'web'} and the tap looked
+    // dead — tell the user to use the app instead of doing nothing.
+    if (Platform.OS === 'web') {
+      webAlert('Save offline', 'Saving a game to tag offline (e.g. on a plane) works in the IamSports app on iPhone/iPad — not the browser. Open the app and tap this button to download the game.');
+      return;
+    }
     if (action === 'inflight') return;
     const ready = game.videos.filter(v => v.uploadStatus === 'ready');
     if (ready.length === 0) return;
