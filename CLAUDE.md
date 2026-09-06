@@ -188,36 +188,31 @@ Tags across two bundles do NOT combine. Preserve this if you touch tag
 save/filter — it's how "Player A made a shot" avoids matching "A defended, B
 scored." All rows for a clip are inserted in one batch on save.
 
-#### Per-sport possession + structured clips — INVARIANT (don't drift)
+#### EVERY sport uses the tag-group model — INVARIANT (Adam, 2026-09-05, firm)
 
-**Every new sport must consciously address (a) how a coach marks OUR-team
-possession (offense vs defense) and (b) how any structured play data is READ back
-downstream (export/breakdown) — or explicitly decide it needs neither.** Adding a
-sport's tags without this is the drift to avoid: it leaves "our defense" vs "the
-opponent's defense we tagged while on offense" indistinguishable at export, and it
-buries captured data nothing reads.
+**Every sport — football and flag included — tags with GROUPABLE tags in the
+offense / defense / plays / players categories, matched into bundles/groups exactly
+like basketball. No sport gets a single-select "breakdown" tagger.** The reason is
+non-negotiable product truth: *the app does not work unless you can group tags* —
+grouping ("Conrad + Made 3", "QB + Pass + TD") is the whole gig, and a single-select
+structured board **cannot group**. So offense/defense for every sport are just tag
+categories full of groupable chips; possession is expressed by which category's tags
+you pick (tag from your own team's POV, the Hudl-basketball model), optionally an
+explicit "Offense"/"Defense" tag — never a separate rigid toggle that blocks grouping.
 
-**Current state (audited 2026-09-04 — this IS the drift, not the target):**
-- **Football only** (`Football` / `7-on-7` / `Flag Football`, `isFootballSport`)
-  has a real model: a sticky **ODK toggle** (offense/defense/kicking) that stamps
-  `clip_football.odk` (+ down/distance, `off_formation`, `def_front`, `play_type`,
-  `result`, `drive_id`). It is **WEB-ONLY** (`tagging-overlay.web.tsx`); the native
-  tagger has no football mode (port planned). Football vocab is shared in
-  `lib/core/football.ts` so web + the native port never diverge.
-- **Every other sport** (Basketball, Soccer, Lacrosse, Baseball, Softball,
-  Volleyball) has **NO possession stamp** — their offense/defense are only tag
-  *categories* (groupings of `clip_tags` chips), plus `clips.period`. There is no
-  `clip_<sport>` table for them (only `clip_football` exists).
-- **`clip_football` is write-only:** nothing downstream reads it — `export.tsx` is
-  football-blind (filters `clip_tags` groups only), and there's no stats/breakdown
-  view. So football's rich structured tagging currently can't be exported at all.
+**RETIRED (do not rebuild):** the football ODK single-select model — `clip_football`,
+the `isFootball` single-select board in `tagging-overlay.tsx` / `.web.tsx`, the
+possession toggle, and the down/distance/formation/coverage columns. `lib/core/football.ts`
+constants stop feeding a special board; football/flag tag palettes live in the `tags`
+table (sport-scoped, categories offense/defense/plays) like every other sport, and are
+seeded/expanded there. Export works for all sports via the existing tag-group matcher
+(`clipMatchesGroup`) — no per-sport export path needed.
 
-**Two open builds this implies:** (1) a football-aware export/filter that reads
-`clip_football` (filter by ODK + play type + formation + result) — this is what
-makes football tagging usable, arguably higher-value than the native port; (2) a
-possession indicator for the non-football sports if their offense/defense needs to
-be disambiguated the way football's is. Don't add another sport without deciding
-where it lands on this.
+**Adding a sport = seed its groupable tags** (offense/defense/plays), scoped by
+`tags.sport`, plus period names in `periodsForSport`. Nothing else. If deep
+football/scouting ANALYTICS is ever built, it's a SEPARATE premium/structured layer on
+TOP of the tags (progressive depth; see [[project_tags_vs_structured_analytics]]) —
+gated on the paid-tagger pipeline — never a replacement for groupable tags at the base.
 
 ### Media pipeline (upload / download) — SPEED MATTERS (see rule below)
 

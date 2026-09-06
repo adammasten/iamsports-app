@@ -8,7 +8,6 @@
 import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
-import { isFootballSport } from '@/lib/core/upload-meta';
 import {
   type Odk, type FbCtx, type FbSel, ODK_SHORT, isFlagFootball,
   FB_FORMATIONS, FB_PLAY_TYPES, FB_RESULT_OFF, FB_FRONTS, FB_COVERAGES, FB_RESULT_DEF, FB_ST_UNITS, FB_RESULT_ST,
@@ -158,8 +157,11 @@ export default function TaggingStudioWeb() {
   }, [videoId]);
 
   const tagSport = sport ?? activeTeam?.sport ?? null;
-  const isFootball = isFootballSport(tagSport);
-  const isFlag = isFlagFootball(tagSport);   // flag uses the possession-relabeled model + flag vocab
+  const isFlag = isFlagFootball(tagSport);   // (kept for the retired football board's dead code)
+  // RETIRED: the single-select football/flag board. Every sport now uses the groupable
+  // tag board (offense/defense/plays/players) so "Add Group / Save Clip" works everywhere
+  // — grouping is the whole gig. See CLAUDE.md invariant. false keeps the old board unreachable.
+  const useFbBoard = false;
 
   // Flip the ODK unit → new drive (possession changed); clear this clip's picks.
   const setOdk = useCallback((odk: Odk) => {
@@ -337,7 +339,7 @@ export default function TaggingStudioWeb() {
     // + clip-level ★/POE). Replaces all clip_tags for the clip.
     if (editingId) {
       // A football clip may have no player tags, so don't require a build group there.
-      if ((building.length === 0 && !isFootball) || !useMarks) return;
+      if (building.length === 0 || !useMarks) return;
       setSaving(true);
       await supabase.from('clips').update({ start_time: markIn as number, end_time: markOut as number }).eq('id', editingId);
       await supabase.from('clip_tags').delete().eq('clip_id', editingId);
@@ -346,7 +348,7 @@ export default function TaggingStudioWeb() {
       if (isPoe && special.poe) rows.push({ clip_id: editingId, tag_id: special.poe, bundle_number: 0 });
       if (activePeriod) rows.push({ clip_id: editingId, tag_id: activePeriod, bundle_number: 0 });
       if (rows.length) await supabase.from('clip_tags').insert(rows);
-      if (isFootball) {
+      if (useFbBoard) {
         const { error: cfErr } = await supabase.from('clip_football').upsert({
           clip_id: editingId,
           odk: fbCtx.odk, down: fbCtx.down, distance: fbCtx.distance,
@@ -372,7 +374,7 @@ export default function TaggingStudioWeb() {
     const bundles = [...stagedBundles, ...(building.length > 0 ? [building] : [])];
     // Basketball needs at least one tag group; a football clip can be just the
     // ODK breakdown (no player tags), so it may save with no bundles.
-    if (bundles.length === 0 && !isFootball) return;
+    if (bundles.length === 0) return;
     setSaving(true);
     const { data: clip, error } = await supabase
       .from('clips')
@@ -385,7 +387,7 @@ export default function TaggingStudioWeb() {
     if (isPoe && special.poe) rows.push({ clip_id: clip.id, tag_id: special.poe, bundle_number: 0 });
     if (activePeriod) rows.push({ clip_id: clip.id, tag_id: activePeriod, bundle_number: 0 });
     if (rows.length) await supabase.from('clip_tags').insert(rows);
-    if (isFootball) {
+    if (useFbBoard) {
       const { error: cfErr } = await supabase.from('clip_football').insert({
         clip_id: clip.id,
         odk: fbCtx.odk,
@@ -401,7 +403,7 @@ export default function TaggingStudioWeb() {
     }
     setSaving(false);
     setMarkIn(null); setMarkOut(null); setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false);
-    if (isFootball) {
+    if (useFbBoard) {
       // Carry the situation forward: a 1st down / TD resets to 1st & 10, else the
       // down bumps. The coach can always tap to correct it.
       const scored = fbSel.result === '1st Down' || fbSel.result === 'TD';
@@ -411,7 +413,7 @@ export default function TaggingStudioWeb() {
     loadClips();
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1600);
-  }, [building, stagedBundles, saving, userId, videoId, teamId, isStar, isPoe, special, markIn, markOut, editingId, loadClips, isFootball, fbCtx, fbSel]);
+  }, [building, stagedBundles, saving, userId, videoId, teamId, isStar, isPoe, special, markIn, markOut, editingId, loadClips, fbCtx, fbSel]);
 
   // Latest-commit ref, assigned DURING RENDER (not in an effect). Space/arrows
   // worked because they only touch the stable `player`; Enter called a stale
@@ -474,7 +476,7 @@ export default function TaggingStudioWeb() {
   const hasWindow = markIn != null && markOut != null && markOut > markIn;
   const groupCount = stagedBundles.length + (building.length > 0 ? 1 : 0);
   const canAddGroup = building.length > 0 && !saving && !editingId;
-  const canSave = !saving && (editingId ? ((building.length > 0 || isFootball) && hasWindow) : (hasWindow && (isFootball || groupCount > 0)));
+  const canSave = !saving && (editingId ? (building.length > 0 && hasWindow) : (hasWindow && groupCount > 0));
   const windowLabel = (markIn != null || markOut != null)
     ? `${markIn != null ? fmt(markIn) : '—'} → ${markOut != null ? fmt(markOut) : '—'}`
     : 'Mark Start + End';
@@ -677,8 +679,8 @@ export default function TaggingStudioWeb() {
             </Pressable>
           </View>
 
-          {/* tag board — football adds a sticky situation strip + football columns */}
-          {isFootball ? (
+          {/* tag board — every sport uses the groupable board (football board retired) */}
+          {useFbBoard ? (
             <>
               <View style={styles.fbStrip}>
                 <View style={styles.fbGroup}>
