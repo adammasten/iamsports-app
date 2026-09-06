@@ -79,6 +79,10 @@ export default function TaggingStudioWeb() {
   const [special, setSpecial] = useState<{ highlight: string | null; poe: string | null }>({ highlight: null, poe: null });
   const [periodTags, setPeriodTags] = useState<Tag[]>([]);
   const [activePeriod, setActivePeriod] = useState<string | null>(null);
+  // Possession (OFF/DEF/SP) — sticky clip-level stamp, mirrors the period pattern, so
+  // export can tell offense from defense/special-teams. Football shows all three.
+  const [possessionTags, setPossessionTags] = useState<Tag[]>([]);
+  const [activePossession, setActivePossession] = useState<string | null>(null);
   const [clips, setClips] = useState<ClipRow[]>([]);
   const [building, setBuilding] = useState<Built[]>([]);
   const [isStar, setIsStar] = useState(false);
@@ -194,11 +198,15 @@ export default function TaggingStudioWeb() {
       const grouped: Record<string, Tag[]> = { players: [], offense: [], defense: [], plays: [], formation: [], play: [], result: [] };
       let highlight: string | null = null, poe: string | null = null;
       const periods: Tag[] = [];
+      const possessions: Tag[] = [];
       (data || []).forEach((t: any) => {
         if (t.category === 'special') { if (t.name === '★ Highlight') highlight = t.id; else if (t.name === 'POE') poe = t.id; }
         else if (t.category === 'period') periods.push({ id: t.id, name: t.name, category: t.category });
+        else if (t.category === 'possession') possessions.push({ id: t.id, name: t.name, category: t.category });
         else if (grouped[t.category] && !hidden.has(t.id)) grouped[t.category].push({ id: t.id, name: t.name, category: t.category });
       });
+      const possOrder = ['Offense', 'Defense', 'Special Teams'];
+      possessions.sort((a, b) => possOrder.indexOf(a.name) - possOrder.indexOf(b.name));
       // Names-hidden tagger (a non-member hired to tag): the raw query returns NO
       // player tags — RLS hides the kids' names. Swap in the sanitized jersey-only
       // vocabulary: same REAL tag_ids, only the display label changes, so the owner
@@ -214,6 +222,7 @@ export default function TaggingStudioWeb() {
       setTags(grouped);
       setSpecial({ highlight, poe });
       setPeriodTags(periods);
+      setPossessionTags(possessions);
     })();
     return () => { cancelled = true; };
   }, [teamId, tagSport]);
@@ -349,6 +358,7 @@ export default function TaggingStudioWeb() {
       if (isStar && special.highlight) rows.push({ clip_id: editingId, tag_id: special.highlight, bundle_number: 0 });
       if (isPoe && special.poe) rows.push({ clip_id: editingId, tag_id: special.poe, bundle_number: 0 });
       if (activePeriod) rows.push({ clip_id: editingId, tag_id: activePeriod, bundle_number: 0 });
+      if (activePossession) rows.push({ clip_id: editingId, tag_id: activePossession, bundle_number: 0 });
       if (rows.length) await supabase.from('clip_tags').insert(rows);
       if (useFbBoard) {
         const { error: cfErr } = await supabase.from('clip_football').upsert({
@@ -388,6 +398,7 @@ export default function TaggingStudioWeb() {
     if (isStar && special.highlight) rows.push({ clip_id: clip.id, tag_id: special.highlight, bundle_number: 0 });
     if (isPoe && special.poe) rows.push({ clip_id: clip.id, tag_id: special.poe, bundle_number: 0 });
     if (activePeriod) rows.push({ clip_id: clip.id, tag_id: activePeriod, bundle_number: 0 });
+    if (activePossession) rows.push({ clip_id: clip.id, tag_id: activePossession, bundle_number: 0 });
     if (rows.length) await supabase.from('clip_tags').insert(rows);
     if (useFbBoard) {
       const { error: cfErr } = await supabase.from('clip_football').insert({
@@ -532,6 +543,10 @@ export default function TaggingStudioWeb() {
     .map(name => periodTags.find(p => p.name === name))
     .filter(Boolean) as Tag[];
 
+  // Possession options: football gets OFF/DEF/SP; other sports get OFF/DEF only.
+  const possOptions = possessionTags.filter(p => isFootball || p.name !== 'Special Teams');
+  const possShort = (name: string) => (name === 'Offense' ? 'OFF' : name === 'Defense' ? 'DEF' : 'SP');
+
   return (
     <GestureHandlerRootView style={styles.app}>
       {/* top bar */}
@@ -549,6 +564,22 @@ export default function TaggingStudioWeb() {
                   style={[styles.periodBtn, on && styles.periodBtnOn]}
                 >
                   <Text style={[styles.periodTxt, on && styles.periodTxtOn]}>{p.name}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+        {possOptions.length > 0 && (
+          <View style={[styles.periodRow, { marginLeft: 12 }]}>
+            {possOptions.map(p => {
+              const on = activePossession === p.id;
+              return (
+                <Pressable
+                  key={p.id}
+                  onPress={() => setActivePossession(on ? null : p.id)}
+                  style={[styles.periodBtn, on && styles.periodBtnOn]}
+                >
+                  <Text style={[styles.periodTxt, on && styles.periodTxtOn]}>{possShort(p.name)}</Text>
                 </Pressable>
               );
             })}
