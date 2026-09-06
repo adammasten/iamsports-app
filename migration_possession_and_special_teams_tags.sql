@@ -1,6 +1,11 @@
 -- Possession (offense/defense/special teams) + special-teams tags.
 -- HELD — do NOT apply to prod until Adam says "ship it" (paired with the tagger UI).
 --
+-- tags.category is CHECK-constrained; allow the two new categories first.
+alter table public.tags drop constraint if exists tags_category_check;
+alter table public.tags add constraint tags_category_check
+  check (category = any (array['offense','defense','plays','players','special','opponent','period','possession','special_teams']));
+
 -- Possession is a CLIP-LEVEL stamp (like the game period): a sticky OFF/DEF/SP selector
 -- stamps every clip with one of these `possession` tags (bundle_number 0), so EXPORT can
 -- tell offense from defense/special-teams. It coexists with grouping — it's a lens/stamp,
