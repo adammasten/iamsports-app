@@ -6,6 +6,7 @@
 import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
+import { isFootballSport } from '@/lib/core/upload-meta';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
@@ -112,7 +113,7 @@ export default function TaggingOverlayScreen() {
   const [stagedBundles, setStagedBundles] = useState<string[][]>([]);
   const [isStar, setIsStar] = useState(false);
   const [isPoe, setIsPoe] = useState(false);
-  const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [] });
+  const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [], special_teams: [] });
   // Special-category tags ('★ Highlight', 'POE') are looked up by name and
   // surfaced only via dedicated buttons in markGroup — never rendered in the
   // category columns. The ★ and POE buttons are just tag toggles in disguise.
@@ -124,6 +125,12 @@ export default function TaggingOverlayScreen() {
   // never in the tag columns.
   const [periodTags, setPeriodTags] = useState<any[]>([]);
   const [activePeriod, setActivePeriod] = useState<string | null>(null);
+  // Possession (offense/defense/special teams) — a sticky clip-level STAMP, like the
+  // period. Whichever is active stamps every saved clip (bundle 0) so EXPORT can tell
+  // offense from defense/ST. Coexists with grouping (it's a lens/stamp, not a group).
+  // activePossession is the possession TAG object ({id,name}); null = none selected.
+  const [possessionTags, setPossessionTags] = useState<any[]>([]);
+  const [activePossession, setActivePossession] = useState<any | null>(null);
 
   // Chrome visibility — pointerEvents flips synchronously via React state; the
   // opacity transition is driven by Reanimated over 200ms. Both must move
@@ -413,16 +420,19 @@ export default function TaggingOverlayScreen() {
       // functional and never appear in the hide UI, so they're unaffected).
       const hidden = tagTeamId ? await loadHiddenTagIds(tagTeamId).catch(() => new Set<string>()) : new Set<string>();
       if (cancelled) return;
-      const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [] };
+      const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [], special_teams: [] };
       let highlightId: string | null = null;
       let poeId: string | null = null;
       const periods: any[] = [];
+      const possessions: any[] = [];
       (data || []).forEach((t: any) => {
         if (t.category === 'special') {
           if (t.name === '★ Highlight') highlightId = t.id;
           else if (t.name === 'POE') poeId = t.id;
         } else if (t.category === 'period') {
           periods.push(t);
+        } else if (t.category === 'possession') {
+          possessions.push(t);
         } else if (grouped[t.category] && !hidden.has(t.id)) {
           grouped[t.category].push(t);
         }
@@ -442,6 +452,9 @@ export default function TaggingOverlayScreen() {
       setTags(grouped);
       setSpecialTagIds({ highlight: highlightId, poe: poeId });
       setPeriodTags(periods);
+      // Order the possession selector Offense → Defense → Special Teams.
+      const possOrder = ['Offense', 'Defense', 'Special Teams'];
+      setPossessionTags(possessions.sort((a, b) => possOrder.indexOf(a.name) - possOrder.indexOf(b.name)));
     })();
     return () => { cancelled = true; };
   }, [tagTeamId, tagSport]);
@@ -644,6 +657,7 @@ export default function TaggingOverlayScreen() {
     bundles.forEach((grp, i) => grp.forEach(tag_id => rows.push({ clip_id: clip.id, tag_id, bundle_number: i + 1 })));
     // Clip-level (bundle 0): sticky game period + ★ + POE.
     if (activePeriod) rows.push({ clip_id: clip.id, tag_id: activePeriod, bundle_number: 0 });
+    if (activePossession) rows.push({ clip_id: clip.id, tag_id: activePossession.id, bundle_number: 0 });
     if (isStar && specialTagIds.highlight) rows.push({ clip_id: clip.id, tag_id: specialTagIds.highlight, bundle_number: 0 });
     if (isPoe && specialTagIds.poe) rows.push({ clip_id: clip.id, tag_id: specialTagIds.poe, bundle_number: 0 });
     if (rows.length > 0) {
@@ -669,6 +683,22 @@ export default function TaggingOverlayScreen() {
   const sportPeriods = periodsForSport(tagSport)
     .map(name => periodTags.find((p: any) => p.name === name))
     .filter(Boolean) as any[];
+
+  // Possession selector: OFF/DEF everywhere, +SP for football. Football also SCOPES the
+  // visible columns to the possession (defense-specific, no offense overlap); other sports
+  // just stamp (all columns stay). Special Teams shows the special_teams column.
+  const isFootball = isFootballSport(tagSport);
+  const possOptions = possessionTags.filter(p => isFootball || p.name !== 'Special Teams');
+  const possShort = (name: string) => (name === 'Offense' ? 'OFF' : name === 'Defense' ? 'DEF' : 'SP');
+  const ST_CATEGORY = { key: 'special_teams', label: 'Special Teams', color: '#d68910', bg: '#fef5e7' };
+  const possName: string | null = activePossession?.name ?? null;
+  // Only scope columns when football AND possession tags actually loaded — otherwise show
+  // the full board (safe fallback if the possession migration isn't applied yet).
+  const scopeCols = isFootball && possOptions.length > 0;
+  const visibleCategories = !scopeCols ? CATEGORIES
+    : possName === 'Special Teams' ? [ST_CATEGORY, CATEGORIES.find(c => c.key === 'players')!]
+    : possName === 'Defense' ? CATEGORIES.filter(c => ['defense', 'plays', 'players'].includes(c.key))
+    : CATEGORIES.filter(c => ['offense', 'plays', 'players'].includes(c.key));
 
   return (
     <GestureHandlerRootView style={[styles.container, { width: landW, height: landH }]}>
@@ -849,6 +879,29 @@ export default function TaggingOverlayScreen() {
           </View>
         )}
 
+        {/* Possession selector (OFF/DEF/SP) — sticky clip-level stamp for export, right of
+            the period cluster. Football also scopes the columns (see visibleCategories). */}
+        {!isWatch && possOptions.length > 0 && (
+          <View
+            style={[styles.periodCluster, { top: insets.top + 60, left: insets.left + 6 + 132, width: 160 }]}
+            pointerEvents="box-none"
+          >
+            {possOptions.map((p) => {
+              const on = activePossession?.id === p.id;
+              return (
+                <TouchableOpacity
+                  key={p.id}
+                  style={[styles.periodDot, on ? styles.periodDotOn : styles.periodDotOff]}
+                  onPress={() => setActivePossession(on ? null : p)}
+                  hitSlop={4}
+                >
+                  <Text style={[styles.periodDotText, on && styles.periodDotTextOn]}>{possShort(p.name)}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
         {/* Tag region — 4 category columns. Compact: short strip above the
             controls row. Fullscreen: same left/right/bottom; top extends up
             under the top bar so the columns get much more vertical space.
@@ -874,7 +927,7 @@ export default function TaggingOverlayScreen() {
           ]}
           pointerEvents="box-none"
         >
-          {CATEGORIES.map(cat => (
+          {visibleCategories.map(cat => (
             <View key={cat.key} style={styles.tagColumn}>
               <Text style={[styles.colHeader, isTablet && styles.colHeaderBig, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
               <ScrollView showsVerticalScrollIndicator={false}>
