@@ -8,6 +8,7 @@
 import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
+import { isFootballSport } from '@/lib/core/upload-meta';
 import {
   type Odk, type FbCtx, type FbSel, ODK_SHORT, isFlagFootball,
   FB_FORMATIONS, FB_PLAY_TYPES, FB_RESULT_OFF, FB_FRONTS, FB_COVERAGES, FB_RESULT_DEF, FB_ST_UNITS, FB_RESULT_ST,
@@ -157,6 +158,7 @@ export default function TaggingStudioWeb() {
   }, [videoId]);
 
   const tagSport = sport ?? activeTeam?.sport ?? null;
+  const isFootball = isFootballSport(tagSport);   // football uses the 5-column groupable board
   const isFlag = isFlagFootball(tagSport);   // (kept for the retired football board's dead code)
   // RETIRED: the single-select football/flag board. Every sport now uses the groupable
   // tag board (offense/defense/plays/players) so "Add Group / Save Clip" works everywhere
@@ -189,7 +191,7 @@ export default function TaggingStudioWeb() {
       // Exclude tags this team has hidden (special tags never appear in the hide UI).
       const hidden = teamId ? await loadHiddenTagIds(teamId).catch(() => new Set<string>()) : new Set<string>();
       if (cancelled) return;
-      const grouped: Record<string, Tag[]> = { players: [], offense: [], defense: [], plays: [] };
+      const grouped: Record<string, Tag[]> = { players: [], offense: [], defense: [], plays: [], formation: [], play: [], result: [] };
       let highlight: string | null = null, poe: string | null = null;
       const periods: Tag[] = [];
       (data || []).forEach((t: any) => {
@@ -493,7 +495,7 @@ export default function TaggingStudioWeb() {
     );
   };
 
-  const category = (key: 'players' | 'offense' | 'defense' | 'plays', title: string, grow?: boolean) => (
+  const category = (key: 'players' | 'offense' | 'defense' | 'plays' | 'formation' | 'play' | 'result', title: string, grow?: boolean) => (
     <View style={[styles.catCol, grow && { flex: 1 }]}>
       <View style={styles.catHead}><View style={[styles.cdot, { backgroundColor: CAT_COLOR[key] }]} /><Text style={[styles.catTitle, { color: CAT_COLOR[key] }]}>{title}</Text></View>
       <View style={styles.chipWrap}>{tags[key].map(t => tagButton(t, key))}</View>
@@ -740,6 +742,19 @@ export default function TaggingStudioWeb() {
                 {category('players', 'Players', true)}
               </View>
             </>
+          ) : isFootball ? (
+            // Football/flag: 5 groupable columns (Formation · Play · Defense · Result · Players).
+            <View style={styles.board}>
+              {category('players', 'Players', true)}
+              <View style={styles.vdiv} />
+              {category('formation', 'Formation', true)}
+              <View style={styles.vdiv} />
+              {category('play', 'Play', true)}
+              <View style={styles.vdiv} />
+              {category('defense', 'Defense', true)}
+              <View style={styles.vdiv} />
+              {category('result', 'Result', true)}
+            </View>
           ) : (
             <View style={styles.board}>
               {category('players', 'Players', true)}

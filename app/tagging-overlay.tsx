@@ -113,7 +113,7 @@ export default function TaggingOverlayScreen() {
   const [stagedBundles, setStagedBundles] = useState<string[][]>([]);
   const [isStar, setIsStar] = useState(false);
   const [isPoe, setIsPoe] = useState(false);
-  const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [], special_teams: [] });
+  const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [], special_teams: [], formation: [], play: [], result: [] });
   // Special-category tags ('★ Highlight', 'POE') are looked up by name and
   // surfaced only via dedicated buttons in markGroup — never rendered in the
   // category columns. The ★ and POE buttons are just tag toggles in disguise.
@@ -420,7 +420,7 @@ export default function TaggingOverlayScreen() {
       // functional and never appear in the hide UI, so they're unaffected).
       const hidden = tagTeamId ? await loadHiddenTagIds(tagTeamId).catch(() => new Set<string>()) : new Set<string>();
       if (cancelled) return;
-      const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [], special_teams: [] };
+      const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [], special_teams: [], formation: [], play: [], result: [] };
       let highlightId: string | null = null;
       let poeId: string | null = null;
       const periods: any[] = [];
@@ -690,15 +690,17 @@ export default function TaggingOverlayScreen() {
   const isFootball = isFootballSport(tagSport);
   const possOptions = possessionTags.filter(p => isFootball || p.name !== 'Special Teams');
   const possShort = (name: string) => (name === 'Offense' ? 'OFF' : name === 'Defense' ? 'DEF' : 'SP');
-  const ST_CATEGORY = { key: 'special_teams', label: 'Special Teams', color: '#d68910', bg: '#fef5e7' };
-  const possName: string | null = activePossession?.name ?? null;
-  // Only scope columns when football AND possession tags actually loaded — otherwise show
-  // the full board (safe fallback if the possession migration isn't applied yet).
-  const scopeCols = isFootball && possOptions.length > 0;
-  const visibleCategories = !scopeCols ? CATEGORIES
-    : possName === 'Special Teams' ? [ST_CATEGORY, CATEGORIES.find(c => c.key === 'players')!]
-    : possName === 'Defense' ? CATEGORIES.filter(c => ['defense', 'plays', 'players'].includes(c.key))
-    : CATEGORIES.filter(c => ['offense', 'plays', 'players'].includes(c.key));
+  // Football/flag uses 5 GROUPABLE columns (Formation · Play · Defense · Result · Players);
+  // every other sport keeps Offense · Defense · Plays · Players. Possession (OFF/DEF/SP) is a
+  // sticky clip-level STAMP for export — NOT a column filter (nothing is hidden/taken away).
+  const FB_CATEGORIES = [
+    { key: 'formation', label: 'Formation', color: '#1a6fd4', bg: '#e8f0fe' },
+    { key: 'play',      label: 'Play',      color: '#1e8449', bg: '#e8f8ed' },
+    { key: 'defense',   label: 'Defense',   color: '#c0392b', bg: '#fde8e8' },
+    { key: 'result',    label: 'Result',    color: '#6c5ce7', bg: '#eeecfb' },
+    { key: 'players',   label: 'Players',   color: '#7d3c98', bg: '#f5eef8' },
+  ];
+  const visibleCategories = isFootball ? FB_CATEGORIES : CATEGORIES;
 
   return (
     <GestureHandlerRootView style={[styles.container, { width: landW, height: landH }]}>
