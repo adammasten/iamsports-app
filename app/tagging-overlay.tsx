@@ -859,6 +859,46 @@ export default function TaggingOverlayScreen() {
             <TouchableOpacity style={styles.backBtn} onPress={handleBack} hitSlop={8}>
               <Text style={styles.backBtnText}>←</Text>
             </TouchableOpacity>
+            {/* FLAG ONLY: quarters + OFF/DEF/SP + DN/DIST/DR live IN the top bar (one
+                row; flexWrap drops to a thin 2nd line inside the 60px bar if they can't
+                fit) so they never overlap the tag board. Same handlers as before — layout
+                only. Non-flag keeps the floating clusters below. */}
+            {!isWatch && isFlag && (
+              <View style={styles.tbClusters} pointerEvents="box-none">
+                {sportPeriods.map((p: any) => {
+                  const on = activePeriod === p.id;
+                  return (
+                    <TouchableOpacity key={p.id} style={[styles.tbChip, on && styles.tbChipOn]} onPress={() => setActivePeriod(on ? null : p.id)} hitSlop={4}>
+                      <Text style={[styles.tbChipText, on && styles.tbChipTextOn]}>{p.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                {possOptions.length > 0 && <View style={styles.tbSep} />}
+                {possOptions.map((p) => {
+                  const on = activePossession?.id === p.id;
+                  return (
+                    <TouchableOpacity key={p.id} style={[styles.tbChip, on && styles.tbChipOn]} onPress={() => setActivePossession(on ? null : p)} hitSlop={4}>
+                      <Text style={[styles.tbChipText, on && styles.tbChipTextOn]}>{possShort(p.name)}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                <View style={styles.tbSep} />
+                <Text style={styles.tbLbl}>DN</Text>
+                {[1, 2, 3, 4].map(d => (
+                  <TouchableOpacity key={d} style={[styles.tbChip, fbDown === d && styles.tbChipOn]} onPress={() => setFbDown(d)} hitSlop={4}>
+                    <Text style={[styles.tbChipText, fbDown === d && styles.tbChipTextOn]}>{d}</Text>
+                  </TouchableOpacity>
+                ))}
+                <Text style={styles.tbLbl}>DIST</Text>
+                <TouchableOpacity style={styles.tbStep} onPress={() => setFbDist(v => Math.max(0, v - 1))} hitSlop={4}><Text style={styles.tbStepText}>–</Text></TouchableOpacity>
+                <Text style={styles.tbNum}>{fbDist}</Text>
+                <TouchableOpacity style={styles.tbStep} onPress={() => setFbDist(v => v + 1)} hitSlop={4}><Text style={styles.tbStepText}>+</Text></TouchableOpacity>
+                <Text style={styles.tbLbl}>DR</Text>
+                <TouchableOpacity style={styles.tbStep} onPress={() => setFbDrive(v => Math.max(1, v - 1))} hitSlop={4}><Text style={styles.tbStepText}>–</Text></TouchableOpacity>
+                <Text style={styles.tbNum}>{fbDrive}</Text>
+                <TouchableOpacity style={styles.tbStep} onPress={() => setFbDrive(v => v + 1)} hitSlop={4}><Text style={styles.tbStepText}>+</Text></TouchableOpacity>
+              </View>
+            )}
             {/* Phone: Save clip lives top-right. On iPad it moves into the
                 bottom-right cluster (below), same shape as + Group. */}
             {!isWatch && !isTablet && (
@@ -873,7 +913,7 @@ export default function TaggingOverlayScreen() {
             {/* "Now tagged" readout — what's tagged at the current playhead, so a
                 tagger reviewing an already-tagged game sees the tags in context.
                 Centered, between Back and Save; tagging mode only. */}
-            {!isWatch && activeTagNames.length > 0 && (
+            {!isWatch && !isFlag && activeTagNames.length > 0 && (
               <View style={styles.topReadout} pointerEvents="none">
                 <View style={styles.topReadoutDot} />
                 <Text style={styles.topReadoutText} numberOfLines={1}>{activeTagNames.join('  ·  ')}</Text>
@@ -961,7 +1001,7 @@ export default function TaggingOverlayScreen() {
             the current sport (basketball → Q1..Q4, 1H, 2H). Sticky + mutually
             exclusive; the active period auto-stamps every saved clip. Renders
             only when the sport's period tags exist. */}
-        {!isWatch && sportPeriods.length > 0 && (
+        {!isWatch && !isFlag && sportPeriods.length > 0 && (
           <View
             style={[styles.periodCluster, { top: insets.top + 60, left: insets.left + 6 }]}
             pointerEvents="box-none"
@@ -984,7 +1024,7 @@ export default function TaggingOverlayScreen() {
 
         {/* Possession selector (OFF/DEF/SP) — sticky clip-level stamp for export, right of
             the period cluster. Football also scopes the columns (see visibleCategories). */}
-        {!isWatch && possOptions.length > 0 && (
+        {!isWatch && !isFlag && possOptions.length > 0 && (
           <View
             style={[styles.periodCluster, { top: insets.top + 60, left: insets.left + 6 + 132, width: 160 }]}
             pointerEvents="box-none"
@@ -1005,35 +1045,7 @@ export default function TaggingOverlayScreen() {
           </View>
         )}
 
-        {/* Flag football DOWN / DIST / DRIVE strip (situation stamp → clip_football).
-            BALL/odk is the OFF/DEF/SP pick above, so this strip is just the count. */}
-        {!isWatch && isFlag && (
-          <View
-            style={[styles.fbStrip, { top: insets.top + 60, left: insets.left + 6 + 132 + 170 }]}
-            pointerEvents="box-none"
-          >
-            <View style={styles.fbStripGroup}>
-              <Text style={styles.fbStripLbl}>DN</Text>
-              {[1, 2, 3, 4].map(d => (
-                <TouchableOpacity key={d} style={[styles.fbStripDot, fbDown === d && styles.periodDotOn]} onPress={() => setFbDown(d)} hitSlop={4}>
-                  <Text style={[styles.fbStripDotText, fbDown === d && styles.periodDotTextOn]}>{d}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <View style={styles.fbStripGroup}>
-              <Text style={styles.fbStripLbl}>DIST</Text>
-              <TouchableOpacity style={styles.fbStripStep} onPress={() => setFbDist(v => Math.max(0, v - 1))} hitSlop={4}><Text style={styles.fbStripStepText}>–</Text></TouchableOpacity>
-              <Text style={styles.fbStripNum}>{fbDist}</Text>
-              <TouchableOpacity style={styles.fbStripStep} onPress={() => setFbDist(v => v + 1)} hitSlop={4}><Text style={styles.fbStripStepText}>+</Text></TouchableOpacity>
-            </View>
-            <View style={styles.fbStripGroup}>
-              <Text style={styles.fbStripLbl}>DR</Text>
-              <TouchableOpacity style={styles.fbStripStep} onPress={() => setFbDrive(v => Math.max(1, v - 1))} hitSlop={4}><Text style={styles.fbStripStepText}>–</Text></TouchableOpacity>
-              <Text style={styles.fbStripNum}>{fbDrive}</Text>
-              <TouchableOpacity style={styles.fbStripStep} onPress={() => setFbDrive(v => v + 1)} hitSlop={4}><Text style={styles.fbStripStepText}>+</Text></TouchableOpacity>
-            </View>
-          </View>
-        )}
+        {/* Flag DOWN/DIST/DRIVE moved into the top bar (see tbClusters above). */}
 
         {/* Tag region — 4 category columns. Compact: short strip above the
             controls row. Fullscreen: same left/right/bottom; top extends up
@@ -1052,9 +1064,9 @@ export default function TaggingOverlayScreen() {
               bottom: insets.bottom + (isTablet ? 40 : 56 + 8 + 24 + 8),
               // Left inset clears the top-left period cluster (fullscreen/phone) OR,
               // on iPad, the bottom-left playback rail.
-              left: insets.left + (isTablet ? 104 : 12 + (tagMode === 'fullscreen' && sportPeriods.length > 0 ? 84 : 0)),
+              left: insets.left + (isTablet ? 104 : 12 + (!isFlag && tagMode === 'fullscreen' && sportPeriods.length > 0 ? 84 : 0)),
               // Right inset clears the phone side-strip OR the iPad bottom-right action rail.
-              right: insets.right + (isTablet ? 120 : SIDE_STRIP_W + 16),
+              right: insets.right + (isTablet ? 120 : SIDE_STRIP_W + (isFlag ? 24 : 16)),
             },
             tagMode === 'fullscreen' && { top: insets.top + 60 },
           ]}
@@ -1630,6 +1642,18 @@ const styles = StyleSheet.create({
   periodDotOn: { backgroundColor: 'rgba(239,159,39,0.82)', borderColor: 'rgba(239,159,39,0.9)' },
   periodDotText: { color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: '700' },
   periodDotTextOn: { color: '#1a1a1a' },
+  // Flag top-bar cluster row (quarters + OFF/DEF/SP + DN/DIST/DR). flexWrap drops to a
+  // 2nd thin line inside the 60px bar if it can't fit one row.
+  tbClusters: { flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', gap: 3, marginHorizontal: 8 },
+  tbChip: { minWidth: 26, height: 28, paddingHorizontal: 6, borderRadius: 14, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)', backgroundColor: 'rgba(0,0,0,0.28)', alignItems: 'center', justifyContent: 'center' },
+  tbChipOn: { backgroundColor: 'rgba(239,159,39,0.9)', borderColor: 'rgba(239,159,39,0.95)' },
+  tbChipText: { color: 'rgba(255,255,255,0.95)', fontSize: 12, fontWeight: '700' },
+  tbChipTextOn: { color: '#1a1a1a' },
+  tbSep: { width: 1, height: 22, backgroundColor: 'rgba(255,255,255,0.25)', marginHorizontal: 4 },
+  tbLbl: { color: 'rgba(255,255,255,0.6)', fontSize: 9, fontWeight: '800', marginLeft: 4, marginRight: 1 },
+  tbStep: { width: 26, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)', backgroundColor: 'rgba(0,0,0,0.28)', alignItems: 'center', justifyContent: 'center' },
+  tbStepText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  tbNum: { color: '#fff', fontSize: 13, fontWeight: '800', minWidth: 18, textAlign: 'center' },
   // Good Play toggle (phone side strip + iPad rail) — green counterpart to ★/POE.
   goodPlayBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, borderColor: '#1e8449', backgroundColor: 'rgba(0,0,0,0.34)', alignItems: 'center', justifyContent: 'center' },
   goodPlayBtnActive: { backgroundColor: '#1e8449', borderColor: '#1e8449' },
