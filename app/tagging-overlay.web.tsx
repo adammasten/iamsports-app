@@ -21,7 +21,7 @@ import { goBackOrHome } from '@/lib/nav';
 import { useEvent } from 'expo';
 import { useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
@@ -34,6 +34,11 @@ const C = {
 };
 const CAT_COLOR: Record<string, string> = {
   players: C.players, offense: C.offense, defense: C.defense, plays: C.plays,
+  formation: '#1a6fd4', play: '#1e8449', result: '#6c5ce7',
+  // Flag per-phase columns
+  off_formation: '#1a6fd4', off_play: '#1e8449', off_result: '#6c5ce7',
+  def_scheme: '#c0392b', def_opp_play: '#1a6fd4', def_our_play: '#1e8449', def_result: '#6c5ce7',
+  st_play: '#1e8449', st_result: '#6c5ce7',
 };
 // Event-tag hotkey pool (players use the number row). Reserved keys — space,
 // arrows, enter, backspace, and I/O (mark In/Out) — are never in here.
@@ -44,7 +49,7 @@ const PLAYBACK_SPEEDS = [1, 1.2, 1.5, 2];
 
 type Tag = { id: string; name: string; category: string };
 type Built = { id: string; name: string; category: string };
-type ClipRow = { id: string; start: number; end: number; groups: { name: string; category: string }[][]; starred: boolean; poe: boolean; editTags: { id: string; name: string; category: string }[]; fb?: FbSummary | null };
+type ClipRow = { id: string; start: number; end: number; groups: { name: string; category: string }[][]; starred: boolean; poe: boolean; goodPlay: boolean; editTags: { id: string; name: string; category: string }[]; fb?: FbSummary | null };
 type FbSummary = { odk: Odk; down: number | null; distance: number | null; formation: string | null; play: string | null; defense: string | null; result: string | null; drive: number | null };
 
 function fmt(s: number) {
@@ -76,7 +81,7 @@ export default function TaggingStudioWeb() {
   const [teamId, setTeamId] = useState<string | null>(null);
   const [sport, setSport] = useState<string | null>(null);
   const [tags, setTags] = useState<Record<string, Tag[]>>({ players: [], offense: [], defense: [], plays: [] });
-  const [special, setSpecial] = useState<{ highlight: string | null; poe: string | null }>({ highlight: null, poe: null });
+  const [special, setSpecial] = useState<{ highlight: string | null; poe: string | null; goodPlay: string | null }>({ highlight: null, poe: null, goodPlay: null });
   const [periodTags, setPeriodTags] = useState<Tag[]>([]);
   const [activePeriod, setActivePeriod] = useState<string | null>(null);
   // Possession (OFF/DEF/SP) — sticky clip-level stamp, mirrors the period pattern, so
@@ -87,6 +92,9 @@ export default function TaggingStudioWeb() {
   const [building, setBuilding] = useState<Built[]>([]);
   const [isStar, setIsStar] = useState(false);
   const [isPoe, setIsPoe] = useState(false);
+  // Good Play — third clip-level toggle beside ★/POE. id (special.goodPlay) is null until
+  // the phase-boards migration seeds it, so the button hides gracefully pre-migration.
+  const [isGoodPlay, setIsGoodPlay] = useState(false);
   const [markIn, setMarkIn] = useState<number | null>(null);
   const [markOut, setMarkOut] = useState<number | null>(null);
   // While a Start/End window is open, successive Adds append tag GROUPS (bundles)
@@ -195,12 +203,16 @@ export default function TaggingStudioWeb() {
       // Exclude tags this team has hidden (special tags never appear in the hide UI).
       const hidden = teamId ? await loadHiddenTagIds(teamId).catch(() => new Set<string>()) : new Set<string>();
       if (cancelled) return;
-      const grouped: Record<string, Tag[]> = { players: [], offense: [], defense: [], plays: [], formation: [], play: [], result: [] };
-      let highlight: string | null = null, poe: string | null = null;
+      const grouped: Record<string, Tag[]> = { players: [], offense: [], defense: [], plays: [], formation: [], play: [], result: [], off_formation: [], off_play: [], off_result: [], def_scheme: [], def_opp_play: [], def_our_play: [], def_result: [], st_play: [], st_result: [] };
+      let highlight: string | null = null, poe: string | null = null, goodPlay: string | null = null;
       const periods: Tag[] = [];
       const possessions: Tag[] = [];
       (data || []).forEach((t: any) => {
-        if (t.category === 'special') { if (t.name === '★ Highlight') highlight = t.id; else if (t.name === 'POE') poe = t.id; }
+        if (t.category === 'special') {
+          if (t.name === '★ Highlight') highlight = t.id;
+          else if (t.name === 'POE') poe = t.id;
+          else if (t.name === 'Good Play') goodPlay = t.id;
+        }
         else if (t.category === 'period') periods.push({ id: t.id, name: t.name, category: t.category });
         else if (t.category === 'possession') possessions.push({ id: t.id, name: t.name, category: t.category });
         else if (grouped[t.category] && !hidden.has(t.id)) grouped[t.category].push({ id: t.id, name: t.name, category: t.category });
@@ -220,9 +232,14 @@ export default function TaggingStudioWeb() {
       }
       if (cancelled) return;
       setTags(grouped);
-      setSpecial({ highlight, poe });
+      setSpecial({ highlight, poe, goodPlay });
       setPeriodTags(periods);
       setPossessionTags(possessions);
+      // Flag football: default to the Offense phase so a per-phase board shows immediately
+      // (pre-migration those categories are empty → the board falls back to the 5-col view).
+      if (isFlagFootball(tagSport)) {
+        setActivePossession(prev => prev ?? possessions.find(p => p.name === 'Offense')?.id ?? null);
+      }
     })();
     return () => { cancelled = true; };
   }, [teamId, tagSport]);
@@ -239,6 +256,7 @@ export default function TaggingStudioWeb() {
       // is_starred columns are dead), so the ★/POE badge finally reflects reality.
       const starred = special.highlight ? allTags.some((t: any) => t.id === special.highlight) : false;
       const poe = special.poe ? allTags.some((t: any) => t.id === special.poe) : false;
+      const goodPlay = special.goodPlay ? allTags.some((t: any) => t.id === special.goodPlay) : false;
       // Display groups by bundle — excluding the special star/POE tags (shown as a foot).
       const byBundle = new Map<number, { name: string; category: string }[]>();
       for (const ct of (c.clip_tags || [])) {
@@ -262,7 +280,7 @@ export default function TaggingStudioWeb() {
         result: cfRaw.result ?? null,
         drive: cfRaw.drive_id ?? null,
       } : null;
-      return { id: c.id, start: c.start_time, end: c.end_time, starred, poe, groups, editTags, fb };
+      return { id: c.id, start: c.start_time, end: c.end_time, starred, poe, goodPlay, groups, editTags, fb };
     }));
   }, [videoId, special, isFlag]);
   useEffect(() => { loadClips(); }, [loadClips]);
@@ -290,7 +308,7 @@ export default function TaggingStudioWeb() {
   const tapTag = useCallback((t: Tag) => {
     setBuilding(prev => prev.some(b => b.id === t.id) ? prev.filter(b => b.id !== t.id) : [...prev, { id: t.id, name: t.name, category: t.category }]);
   }, []);
-  const clearBuilding = useCallback(() => { setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null); }, []);
+  const clearBuilding = useCallback(() => { setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setIsGoodPlay(false); setMarkIn(null); setMarkOut(null); }, []);
   // After committing a group, clear only the tags/flags — KEEP the Start/End
   // window and the open clip so the next Add stacks another GROUP on the SAME
   // clip (e.g. Neo steal, then Neo fouled). A new window / Clear / Backspace
@@ -309,7 +327,7 @@ export default function TaggingStudioWeb() {
     setEditingId(c.id);
     setBuilding(c.editTags.map(t => ({ id: t.id, name: t.name, category: t.category })));
     setMarkIn(c.start); setMarkOut(c.end);
-    setIsStar(c.starred); setIsPoe(c.poe);
+    setIsStar(c.starred); setIsPoe(c.poe); setIsGoodPlay(c.goodPlay);
     setStagedBundles([]);
     // Reload the football breakdown onto the situation strip + board so editing
     // reflects (and can change) what was tagged.
@@ -320,7 +338,7 @@ export default function TaggingStudioWeb() {
     try { player.currentTime = Math.max(0, c.start); } catch {}
   }, [player]);
   const cancelEdit = useCallback(() => {
-    setEditingId(null); setBuilding([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null);
+    setEditingId(null); setBuilding([]); setIsStar(false); setIsPoe(false); setIsGoodPlay(false); setMarkIn(null); setMarkOut(null);
   }, []);
   const deleteClipRow = useCallback(async (id: string) => {
     if (typeof window !== 'undefined' && !window.confirm('Delete this clip? This can’t be undone.')) return;
@@ -345,6 +363,9 @@ export default function TaggingStudioWeb() {
   const commitClip = useCallback(async () => {
     if (saving || !userId) return;
     const useMarks = markIn != null && markOut != null && markOut > markIn;
+    // Flag situation stamp: odk derived from the OFF/DEF/SP phase pick.
+    const possName = possessionTags.find(p => p.id === activePossession)?.name;
+    const fbOdk = possName === 'Defense' ? 'defense' : possName === 'Special Teams' ? 'kicking' : 'offense';
 
     // EDIT MODE: overwrite the existing clip's window + tags (flattened to one group
     // + clip-level ★/POE). Replaces all clip_tags for the clip.
@@ -357,23 +378,19 @@ export default function TaggingStudioWeb() {
       const rows: { clip_id: string; tag_id: string; bundle_number: number }[] = building.map(b => ({ clip_id: editingId, tag_id: b.id, bundle_number: 1 }));
       if (isStar && special.highlight) rows.push({ clip_id: editingId, tag_id: special.highlight, bundle_number: 0 });
       if (isPoe && special.poe) rows.push({ clip_id: editingId, tag_id: special.poe, bundle_number: 0 });
+      if (isGoodPlay && special.goodPlay) rows.push({ clip_id: editingId, tag_id: special.goodPlay, bundle_number: 0 });
       if (activePeriod) rows.push({ clip_id: editingId, tag_id: activePeriod, bundle_number: 0 });
       if (activePossession) rows.push({ clip_id: editingId, tag_id: activePossession, bundle_number: 0 });
       if (rows.length) await supabase.from('clip_tags').insert(rows);
-      if (useFbBoard) {
-        const { error: cfErr } = await supabase.from('clip_football').upsert({
-          clip_id: editingId,
-          odk: fbCtx.odk, down: fbCtx.down, distance: fbCtx.distance,
-          play_type: fbSel.play,
-          off_formation: isFlag ? fbSel.formation : (fbCtx.odk === 'offense' ? fbSel.formation : null),
-          def_front: isFlag ? fbSel.defense : (fbCtx.odk === 'defense' ? fbSel.formation : null),
-          result: fbSel.result, drive_id: fbCtx.drive,
-        }, { onConflict: 'clip_id' });
-        if (cfErr) console.error('[football] clip_football upsert failed', cfErr.message);
+      if (isFlag) {
+        const { error: cfErr } = await supabase.from('clip_football').upsert(
+          { clip_id: editingId, odk: fbOdk, down: fbCtx.down, distance: fbCtx.distance, drive_id: fbCtx.drive },
+          { onConflict: 'clip_id' });
+        if (cfErr) console.warn('[clip_football] situation save skipped:', cfErr.message);
       }
       setSaving(false);
       setEditingId(null);
-      setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setMarkIn(null); setMarkOut(null);
+      setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setIsGoodPlay(false); setMarkIn(null); setMarkOut(null);
       loadClips();
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 1600);
@@ -397,36 +414,29 @@ export default function TaggingStudioWeb() {
     bundles.forEach((grp, i) => grp.forEach(b => rows.push({ clip_id: clip.id, tag_id: b.id, bundle_number: i + 1 })));
     if (isStar && special.highlight) rows.push({ clip_id: clip.id, tag_id: special.highlight, bundle_number: 0 });
     if (isPoe && special.poe) rows.push({ clip_id: clip.id, tag_id: special.poe, bundle_number: 0 });
+    if (isGoodPlay && special.goodPlay) rows.push({ clip_id: clip.id, tag_id: special.goodPlay, bundle_number: 0 });
     if (activePeriod) rows.push({ clip_id: clip.id, tag_id: activePeriod, bundle_number: 0 });
     if (activePossession) rows.push({ clip_id: clip.id, tag_id: activePossession, bundle_number: 0 });
     if (rows.length) await supabase.from('clip_tags').insert(rows);
-    if (useFbBoard) {
-      const { error: cfErr } = await supabase.from('clip_football').insert({
-        clip_id: clip.id,
-        odk: fbCtx.odk,
-        down: fbCtx.down,
-        distance: fbCtx.distance,
-        play_type: fbSel.play,
-        off_formation: isFlag ? fbSel.formation : (fbCtx.odk === 'offense' ? fbSel.formation : null),
-        def_front: isFlag ? fbSel.defense : (fbCtx.odk === 'defense' ? fbSel.formation : null),
-        result: fbSel.result,
-        drive_id: fbCtx.drive,
-      });
-      if (cfErr) console.error('[football] clip_football insert failed', cfErr.message);
+    if (isFlag) {
+      const { error: cfErr } = await supabase.from('clip_football')
+        .insert({ clip_id: clip.id, odk: fbOdk, down: fbCtx.down, distance: fbCtx.distance, drive_id: fbCtx.drive });
+      if (cfErr) console.warn('[clip_football] situation save skipped:', cfErr.message);
     }
     setSaving(false);
-    setMarkIn(null); setMarkOut(null); setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false);
-    if (useFbBoard) {
-      // Carry the situation forward: a 1st down / TD resets to 1st & 10, else the
-      // down bumps. The coach can always tap to correct it.
-      const scored = fbSel.result === '1st Down' || fbSel.result === 'TD';
-      setFbSel({ formation: null, play: null, defense: null, result: null });
+    setMarkIn(null); setMarkOut(null); setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setIsGoodPlay(false);
+    if (isFlag) {
+      // Carry the situation forward: a first down / TD / turnover resets to 1st & 10,
+      // else the down bumps (distance held). The coach can always tap to correct it.
+      const scoredNames = ['First down', 'Touchdown', 'Passing TD', 'Rushing TD', '2-pt conversion',
+        'First down allowed', 'TD allowed', 'Turnover', 'Interception'];
+      const scored = bundles.some(g => g.some(b => scoredNames.includes(b.name)));
       setFbCtx(c => ({ ...c, down: scored ? 1 : Math.min(4, (c.down ?? 1) + 1), distance: scored ? 10 : c.distance }));
     }
     loadClips();
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1600);
-  }, [building, stagedBundles, saving, userId, videoId, teamId, isStar, isPoe, special, markIn, markOut, editingId, loadClips, fbCtx, fbSel]);
+  }, [building, stagedBundles, saving, userId, videoId, teamId, isStar, isPoe, isGoodPlay, special, markIn, markOut, editingId, loadClips, fbCtx, isFlag, activePeriod, activePossession, possessionTags]);
 
   // Latest-commit ref, assigned DURING RENDER (not in an effect). Space/arrows
   // worked because they only touch the stable `player`; Enter called a stale
@@ -506,10 +516,10 @@ export default function TaggingStudioWeb() {
     );
   };
 
-  const category = (key: 'players' | 'offense' | 'defense' | 'plays' | 'formation' | 'play' | 'result', title: string, grow?: boolean) => (
+  const category = (key: string, title: string, grow?: boolean) => (
     <View style={[styles.catCol, grow && { flex: 1 }]}>
       <View style={styles.catHead}><View style={[styles.cdot, { backgroundColor: CAT_COLOR[key] }]} /><Text style={[styles.catTitle, { color: CAT_COLOR[key] }]}>{title}</Text></View>
-      <View style={styles.chipWrap}>{tags[key].map(t => tagButton(t, key))}</View>
+      <View style={styles.chipWrap}>{(tags[key] ?? []).map(t => tagButton(t, key))}</View>
     </View>
   );
 
@@ -547,6 +557,18 @@ export default function TaggingStudioWeb() {
   const possOptions = possessionTags.filter(p => isFootball || p.name !== 'Special Teams');
   const possShort = (name: string) => (name === 'Offense' ? 'OFF' : name === 'Defense' ? 'DEF' : 'SP');
 
+  // FLAG FOOTBALL: OFF/DEF/SP each swap in their OWN groupable columns. Falls back to the
+  // 5-col board if the picked phase has no tags yet (pre-migration window).
+  const FLAG_PHASE_COLS: Record<string, { key: string; label: string }[]> = {
+    Offense: [{ key: 'off_formation', label: 'Formation' }, { key: 'off_play', label: 'Play' }, { key: 'off_result', label: 'Result' }, { key: 'players', label: 'Players' }],
+    Defense: [{ key: 'def_scheme', label: 'Scheme' }, { key: 'def_opp_play', label: 'Their Play' }, { key: 'def_our_play', label: 'Our Play' }, { key: 'def_result', label: 'Result' }, { key: 'players', label: 'Players' }],
+    'Special Teams': [{ key: 'st_play', label: 'Play' }, { key: 'st_result', label: 'Result' }, { key: 'players', label: 'Players' }],
+  };
+  const activePossName = possessionTags.find(p => p.id === activePossession)?.name;
+  const flagPhaseCols = (isFlag && activePossName && FLAG_PHASE_COLS[activePossName]) || null;
+  const flagPhaseHasTags = !!flagPhaseCols && flagPhaseCols.some(c => c.key !== 'players' && (tags[c.key]?.length ?? 0) > 0);
+  const useFlagPhaseBoard = isFlag && flagPhaseHasTags;
+
   return (
     <GestureHandlerRootView style={styles.app}>
       {/* top bar */}
@@ -583,6 +605,23 @@ export default function TaggingStudioWeb() {
                 </Pressable>
               );
             })}
+          </View>
+        )}
+        {isFlag && (
+          <View style={[styles.periodRow, { marginLeft: 12, gap: 4 }]}>
+            <Text style={styles.fbStripLbl}>DN</Text>
+            {[1, 2, 3, 4].map(d => (
+              <Pressable key={d} onPress={() => setFbCtx(c => ({ ...c, down: d }))} style={[styles.periodBtn, fbCtx.down === d && styles.periodBtnOn]}>
+                <Text style={[styles.periodTxt, fbCtx.down === d && styles.periodTxtOn]}>{d}</Text>
+              </Pressable>
+            ))}
+            <Text style={[styles.fbStripLbl, { marginLeft: 6 }]}>DIST</Text>
+            <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: Math.max(0, (c.distance ?? 0) - 1) }))} style={styles.periodBtn}><Text style={styles.periodTxt}>–</Text></Pressable>
+            <Text style={styles.fbStripNum}>{fbCtx.distance ?? '—'}</Text>
+            <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: (c.distance ?? 0) + 1 }))} style={styles.periodBtn}><Text style={styles.periodTxt}>+</Text></Pressable>
+            <Text style={[styles.fbStripLbl, { marginLeft: 6 }]}>DR</Text>
+            <Text style={styles.fbStripNum}>{fbCtx.drive}</Text>
+            <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: c.drive + 1 }))} style={styles.periodBtn}><Text style={styles.periodTxt}>+</Text></Pressable>
           </View>
         )}
         <View style={{ flex: 1 }} />
@@ -700,6 +739,7 @@ export default function TaggingStudioWeb() {
             </View>
             <Pressable focusable={false} onPress={() => setIsStar(s => !s)} style={[styles.flag, { borderColor: C.star, backgroundColor: isStar ? C.star : C.star + '22' }]}><Text style={{ color: isStar ? '#1a1030' : C.star, fontWeight: '800' }}>★ Highlight</Text></Pressable>
             <Pressable focusable={false} onPress={() => setIsPoe(p => !p)} style={[styles.flag, { borderColor: '#dc3545', backgroundColor: isPoe ? '#dc3545' : '#dc354522' }]}><Text style={{ color: isPoe ? '#fff' : '#dc3545', fontWeight: '800' }}>◎ POE</Text></Pressable>
+            {special.goodPlay ? <Pressable focusable={false} onPress={() => setIsGoodPlay(g => !g)} style={[styles.flag, { borderColor: '#1e8449', backgroundColor: isGoodPlay ? '#1e8449' : '#1e844922' }]}><Text style={{ color: isGoodPlay ? '#fff' : '#2ecc71', fontWeight: '800' }}>✓ Good Play</Text></Pressable> : null}
             {editingId ? <Pressable focusable={false} onPress={cancelEdit} style={styles.clearBtn}><Text style={styles.clearTxt}>Cancel</Text></Pressable>
               : (building.length > 0 || stagedBundles.length > 0) ? <Pressable focusable={false} onPress={clearBuilding} style={styles.clearBtn}><Text style={styles.clearTxt}>Clear</Text></Pressable> : null}
             {!editingId && (
@@ -773,8 +813,18 @@ export default function TaggingStudioWeb() {
                 {category('players', 'Players', true)}
               </View>
             </>
+          ) : useFlagPhaseBoard ? (
+            // FLAG: the picked phase's OWN columns (OFF/DEF/SP each different). All groupable.
+            <View style={styles.board}>
+              {flagPhaseCols!.map((c, i) => (
+                <Fragment key={c.key}>
+                  {i > 0 ? <View style={styles.vdiv} /> : null}
+                  {category(c.key, c.label, true)}
+                </Fragment>
+              ))}
+            </View>
           ) : isFootball ? (
-            // Football/flag: 5 groupable columns (Formation · Play · Defense · Result · Players).
+            // Non-flag football (+ flag pre-migration fallback): 5 groupable columns.
             <View style={styles.board}>
               {category('players', 'Players', true)}
               <View style={styles.vdiv} />
@@ -863,6 +913,8 @@ const styles = StyleSheet.create({
   periodBtnOn: { backgroundColor: '#EF9F27', borderColor: '#EF9F27' },
   periodTxt: { color: C.dim, fontSize: 12, fontWeight: '800' },
   periodTxtOn: { color: '#1a1a1a' },
+  fbStripLbl: { color: C.dim, fontSize: 10, fontWeight: '800' },
+  fbStripNum: { color: C.text, fontSize: 13, fontWeight: '800', minWidth: 18, textAlign: 'center' },
   modeBtn: { borderWidth: 1, borderColor: C.line, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 5 },
   modeTxt: { color: C.dim, fontSize: 11, fontWeight: '700' },
   autosave: { flexDirection: 'row', alignItems: 'center', gap: 6 },

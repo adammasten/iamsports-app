@@ -7,6 +7,7 @@ import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
+import { isFlagFootball } from '@/lib/core/football';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
@@ -113,11 +114,19 @@ export default function TaggingOverlayScreen() {
   const [stagedBundles, setStagedBundles] = useState<string[][]>([]);
   const [isStar, setIsStar] = useState(false);
   const [isPoe, setIsPoe] = useState(false);
-  const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [], special_teams: [], formation: [], play: [], result: [] });
+  // Good Play — third clip-level toggle beside ★/POE (global 'special' tag). The id is
+  // null until the phase-boards migration seeds it, so the button hides gracefully pre-migration.
+  const [isGoodPlay, setIsGoodPlay] = useState(false);
+  // Flag-football situation stamp (Adam decision 3-A): down/distance/drive written to
+  // clip_football alongside tags. odk is derived from the OFF/DEF/SP possession pick.
+  const [fbDown, setFbDown] = useState(1);
+  const [fbDist, setFbDist] = useState(10);
+  const [fbDrive, setFbDrive] = useState(1);
+  const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [], special_teams: [], formation: [], play: [], result: [], off_formation: [], off_play: [], off_result: [], def_scheme: [], def_opp_play: [], def_our_play: [], def_result: [], st_play: [], st_result: [] });
   // Special-category tags ('★ Highlight', 'POE') are looked up by name and
   // surfaced only via dedicated buttons in markGroup — never rendered in the
   // category columns. The ★ and POE buttons are just tag toggles in disguise.
-  const [specialTagIds, setSpecialTagIds] = useState<{ highlight: string | null; poe: string | null }>({ highlight: null, poe: null });
+  const [specialTagIds, setSpecialTagIds] = useState<{ highlight: string | null; poe: string | null; goodPlay: string | null }>({ highlight: null, poe: null, goodPlay: null });
   // Game periods (category='period') — a sticky, mutually-exclusive selector in
   // the top bar. Whichever period is active auto-stamps every saved clip until
   // the coach switches (halftime → tap 2nd). Stays lit across saves (NOT reset
@@ -420,15 +429,17 @@ export default function TaggingOverlayScreen() {
       // functional and never appear in the hide UI, so they're unaffected).
       const hidden = tagTeamId ? await loadHiddenTagIds(tagTeamId).catch(() => new Set<string>()) : new Set<string>();
       if (cancelled) return;
-      const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [], special_teams: [], formation: [], play: [], result: [] };
+      const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [], special_teams: [], formation: [], play: [], result: [], off_formation: [], off_play: [], off_result: [], def_scheme: [], def_opp_play: [], def_our_play: [], def_result: [], st_play: [], st_result: [] };
       let highlightId: string | null = null;
       let poeId: string | null = null;
+      let goodPlayId: string | null = null;
       const periods: any[] = [];
       const possessions: any[] = [];
       (data || []).forEach((t: any) => {
         if (t.category === 'special') {
           if (t.name === '★ Highlight') highlightId = t.id;
           else if (t.name === 'POE') poeId = t.id;
+          else if (t.name === 'Good Play') goodPlayId = t.id;
         } else if (t.category === 'period') {
           periods.push(t);
         } else if (t.category === 'possession') {
@@ -450,11 +461,17 @@ export default function TaggingOverlayScreen() {
       }
       if (cancelled) return;
       setTags(grouped);
-      setSpecialTagIds({ highlight: highlightId, poe: poeId });
+      setSpecialTagIds({ highlight: highlightId, poe: poeId, goodPlay: goodPlayId });
       setPeriodTags(periods);
       // Order the possession selector Offense → Defense → Special Teams.
       const possOrder = ['Offense', 'Defense', 'Special Teams'];
-      setPossessionTags(possessions.sort((a, b) => possOrder.indexOf(a.name) - possOrder.indexOf(b.name)));
+      const possSorted = possessions.sort((a, b) => possOrder.indexOf(a.name) - possOrder.indexOf(b.name));
+      setPossessionTags(possSorted);
+      // Flag football: default to the Offense phase so a per-phase board shows immediately
+      // (pre-migration those categories are empty → the board falls back to the 5-col view).
+      if (isFlagFootball(tagSport)) {
+        setActivePossession((prev: any) => prev ?? possSorted.find(p => p.name === 'Offense') ?? null);
+      }
     })();
     return () => { cancelled = true; };
   }, [tagTeamId, tagSport]);
@@ -521,6 +538,24 @@ export default function TaggingOverlayScreen() {
     }
     setIsPoe(p => !p);
   }
+
+  // Good Play — green counterpart to ★/POE. Only interactive once the migration seeds
+  // the global 'Good Play' special tag (specialTagIds.goodPlay); button hidden until then.
+  const goodPlayScale = useSharedValue(1);
+  const goodPlayAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: goodPlayScale.value }],
+  }));
+  function toggleGoodPlay() {
+    if (!specialTagIds.goodPlay) return;
+    if (!isGoodPlay) {
+      goodPlayScale.value = withSequence(
+        withTiming(1.15, { duration: 100 }),
+        withTiming(1, { duration: 100 })
+      );
+    }
+    setIsGoodPlay(g => !g);
+  }
+  const goodPlayLit = isGoodPlay;
 
   // Scrubber drag uses seekBy (keyframe-tolerant, ~10x faster than
   // currentTime=). Coaches accept the keyframe rounding here because they're
@@ -660,9 +695,22 @@ export default function TaggingOverlayScreen() {
     if (activePossession) rows.push({ clip_id: clip.id, tag_id: activePossession.id, bundle_number: 0 });
     if (isStar && specialTagIds.highlight) rows.push({ clip_id: clip.id, tag_id: specialTagIds.highlight, bundle_number: 0 });
     if (isPoe && specialTagIds.poe) rows.push({ clip_id: clip.id, tag_id: specialTagIds.poe, bundle_number: 0 });
+    if (isGoodPlay && specialTagIds.goodPlay) rows.push({ clip_id: clip.id, tag_id: specialTagIds.goodPlay, bundle_number: 0 });
     if (rows.length > 0) {
       const { error: tagError } = await supabase.from('clip_tags').insert(rows);
       if (tagError) { Alert.alert('Error saving tags', tagError.message); setSaving(false); return; }
+    }
+
+    // Flag football: write the situation stamp (odk/down/distance/drive) alongside the
+    // tags. odk is derived from the OFF/DEF/SP phase. Non-fatal — a failure here must not
+    // lose the clip's tags, so we only warn.
+    const isFlag = isFlagFootball(tagSport);
+    if (isFlag) {
+      const odk = activePossession?.name === 'Defense' ? 'defense'
+        : activePossession?.name === 'Special Teams' ? 'kicking' : 'offense';
+      const { error: cfErr } = await supabase.from('clip_football')
+        .insert({ clip_id: clip.id, odk, down: fbDown, distance: fbDist, drive_id: fbDrive });
+      if (cfErr) console.warn('[clip_football] situation save skipped:', cfErr.message);
     }
 
     // Committed → reset the whole clip (window + groups + ★/POE) for the next one.
@@ -673,6 +721,19 @@ export default function TaggingOverlayScreen() {
     setStagedBundles([]);
     setIsStar(false);
     setIsPoe(false);
+    setIsGoodPlay(false);
+    // Flag auto-advance: a first down / TD / turnover resets to 1st & 10, otherwise the
+    // down bumps (distance held). The coach can always tap the strip to correct it.
+    if (isFlag) {
+      const nameById = new Map<string, string>(Object.values(tags).flat().map((t: any) => [t.id, t.name]));
+      const scored = bundles.flat().some(id => {
+        const n = nameById.get(id);
+        return !!n && ['First down', 'Touchdown', 'Passing TD', 'Rushing TD', '2-pt conversion',
+          'First down allowed', 'TD allowed', 'Turnover', 'Interception'].includes(n);
+      });
+      setFbDown(scored ? 1 : Math.min(4, fbDown + 1));
+      if (scored) setFbDist(10);
+    }
     loadExistingClips(); // refresh the marker strip with the just-saved clip
     setSaving(false);
   }
@@ -688,11 +749,11 @@ export default function TaggingOverlayScreen() {
   // visible columns to the possession (defense-specific, no offense overlap); other sports
   // just stamp (all columns stay). Special Teams shows the special_teams column.
   const isFootball = isFootballSport(tagSport);
+  const isFlag = isFlagFootball(tagSport);
   const possOptions = possessionTags.filter(p => isFootball || p.name !== 'Special Teams');
   const possShort = (name: string) => (name === 'Offense' ? 'OFF' : name === 'Defense' ? 'DEF' : 'SP');
-  // Football/flag uses 5 GROUPABLE columns (Formation · Play · Defense · Result · Players);
-  // every other sport keeps Offense · Defense · Plays · Players. Possession (OFF/DEF/SP) is a
-  // sticky clip-level STAMP for export — NOT a column filter (nothing is hidden/taken away).
+  // Non-flag football keeps the 5 GROUPABLE columns; every other sport keeps
+  // Offense · Defense · Plays · Players. (Flag overrides below.)
   const FB_CATEGORIES = [
     { key: 'formation', label: 'Formation', color: '#1a6fd4', bg: '#e8f0fe' },
     { key: 'play',      label: 'Play',      color: '#1e8449', bg: '#e8f8ed' },
@@ -700,7 +761,35 @@ export default function TaggingOverlayScreen() {
     { key: 'result',    label: 'Result',    color: '#6c5ce7', bg: '#eeecfb' },
     { key: 'players',   label: 'Players',   color: '#7d3c98', bg: '#f5eef8' },
   ];
-  const visibleCategories = isFootball ? FB_CATEGORIES : CATEGORIES;
+  // FLAG FOOTBALL ONLY: OFF/DEF/SP each swap in their OWN columns (phase-prefixed
+  // categories). Every column is still groupable. If the picked phase has no tags yet
+  // (pre-migration window), fall back to the 5-col FB board so the tagger never goes blank.
+  const FLAG_PHASE_COLS: Record<string, { key: string; label: string; color: string; bg: string }[]> = {
+    Offense: [
+      { key: 'off_formation', label: 'Formation', color: '#1a6fd4', bg: '#e8f0fe' },
+      { key: 'off_play',      label: 'Play',      color: '#1e8449', bg: '#e8f8ed' },
+      { key: 'off_result',    label: 'Result',    color: '#6c5ce7', bg: '#eeecfb' },
+      { key: 'players',       label: 'Players',   color: '#7d3c98', bg: '#f5eef8' },
+    ],
+    Defense: [
+      { key: 'def_scheme',   label: 'Scheme',     color: '#c0392b', bg: '#fde8e8' },
+      { key: 'def_opp_play', label: 'Their Play', color: '#1a6fd4', bg: '#e8f0fe' },
+      { key: 'def_our_play', label: 'Our Play',   color: '#1e8449', bg: '#e8f8ed' },
+      { key: 'def_result',   label: 'Result',     color: '#6c5ce7', bg: '#eeecfb' },
+      { key: 'players',      label: 'Players',    color: '#7d3c98', bg: '#f5eef8' },
+    ],
+    'Special Teams': [
+      { key: 'st_play',   label: 'Play',    color: '#1e8449', bg: '#e8f8ed' },
+      { key: 'st_result', label: 'Result',  color: '#6c5ce7', bg: '#eeecfb' },
+      { key: 'players',   label: 'Players', color: '#7d3c98', bg: '#f5eef8' },
+    ],
+  };
+  let visibleCategories = isFootball ? FB_CATEGORIES : CATEGORIES;
+  if (isFlag) {
+    const phaseCols = activePossession ? FLAG_PHASE_COLS[activePossession.name] : null;
+    const phaseHasTags = !!phaseCols && phaseCols.some(c => c.key !== 'players' && (tags[c.key]?.length ?? 0) > 0);
+    visibleCategories = phaseHasTags ? phaseCols! : FB_CATEGORIES;
+  }
 
   return (
     <GestureHandlerRootView style={[styles.container, { width: landW, height: landH }]}>
@@ -853,6 +942,18 @@ export default function TaggingOverlayScreen() {
               <Text style={[styles.poeText, poeLit && styles.poeTextActive]}>!</Text>
             </TouchableOpacity>
           </Animated.View>
+          {specialTagIds.goodPlay && (
+            <Animated.View style={[!videoReady && styles.disabledBtn, goodPlayAnimatedStyle]}>
+              <TouchableOpacity
+                style={[styles.goodPlayBtn, goodPlayLit && styles.goodPlayBtnActive]}
+                onPress={toggleGoodPlay}
+                hitSlop={8}
+                disabled={!videoReady}
+              >
+                <Text style={[styles.goodPlayText, goodPlayLit && styles.goodPlayTextActive]}>✓</Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
         </View>
         )}
 
@@ -901,6 +1002,35 @@ export default function TaggingOverlayScreen() {
                 </TouchableOpacity>
               );
             })}
+          </View>
+        )}
+
+        {/* Flag football DOWN / DIST / DRIVE strip (situation stamp → clip_football).
+            BALL/odk is the OFF/DEF/SP pick above, so this strip is just the count. */}
+        {!isWatch && isFlag && (
+          <View
+            style={[styles.fbStrip, { top: insets.top + 60, left: insets.left + 6 + 132 + 170 }]}
+            pointerEvents="box-none"
+          >
+            <View style={styles.fbStripGroup}>
+              <Text style={styles.fbStripLbl}>DN</Text>
+              {[1, 2, 3, 4].map(d => (
+                <TouchableOpacity key={d} style={[styles.fbStripDot, fbDown === d && styles.periodDotOn]} onPress={() => setFbDown(d)} hitSlop={4}>
+                  <Text style={[styles.fbStripDotText, fbDown === d && styles.periodDotTextOn]}>{d}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.fbStripGroup}>
+              <Text style={styles.fbStripLbl}>DIST</Text>
+              <TouchableOpacity style={styles.fbStripStep} onPress={() => setFbDist(v => Math.max(0, v - 1))} hitSlop={4}><Text style={styles.fbStripStepText}>–</Text></TouchableOpacity>
+              <Text style={styles.fbStripNum}>{fbDist}</Text>
+              <TouchableOpacity style={styles.fbStripStep} onPress={() => setFbDist(v => v + 1)} hitSlop={4}><Text style={styles.fbStripStepText}>+</Text></TouchableOpacity>
+            </View>
+            <View style={styles.fbStripGroup}>
+              <Text style={styles.fbStripLbl}>DR</Text>
+              <Text style={styles.fbStripNum}>{fbDrive}</Text>
+              <TouchableOpacity style={styles.fbStripStep} onPress={() => setFbDrive(v => v + 1)} hitSlop={4}><Text style={styles.fbStripStepText}>+</Text></TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -1203,6 +1333,18 @@ export default function TaggingOverlayScreen() {
                 <Text style={[styles.iStarText, highlightLit && styles.highlightStarActive]}>{highlightLit ? '★' : '☆'} Highlight</Text>
               </TouchableOpacity>
             </Animated.View>
+            {specialTagIds.goodPlay && (
+              <Animated.View style={[!videoReady && styles.disabledBtn, goodPlayAnimatedStyle]}>
+                <TouchableOpacity
+                  style={[styles.iGoodPlayBtn, goodPlayLit && styles.goodPlayBtnActive]}
+                  onPress={toggleGoodPlay}
+                  disabled={!videoReady}
+                  hitSlop={6}
+                >
+                  <Text style={[styles.iGoodPlayText, goodPlayLit && styles.goodPlayTextActive]}>{goodPlayLit ? '✓' : '✓'} Good Play</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            )}
             <TouchableOpacity
               style={[styles.iGroupBtn, !canAddGroup && styles.disabledBtn]}
               onPress={addGroup}
@@ -1487,6 +1629,22 @@ const styles = StyleSheet.create({
   periodDotOn: { backgroundColor: 'rgba(239,159,39,0.82)', borderColor: 'rgba(239,159,39,0.9)' },
   periodDotText: { color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: '700' },
   periodDotTextOn: { color: '#1a1a1a' },
+  // Good Play toggle (phone side strip + iPad rail) — green counterpart to ★/POE.
+  goodPlayBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, borderColor: '#1e8449', backgroundColor: 'rgba(0,0,0,0.34)', alignItems: 'center', justifyContent: 'center' },
+  goodPlayBtnActive: { backgroundColor: '#1e8449', borderColor: '#1e8449' },
+  goodPlayText: { color: '#2ecc71', fontSize: 22, fontWeight: '800' },
+  goodPlayTextActive: { color: '#fff' },
+  iGoodPlayBtn: { paddingVertical: 11, borderRadius: 12, borderWidth: 1.5, borderColor: '#1e8449', backgroundColor: 'rgba(0,0,0,0.34)', alignItems: 'center', justifyContent: 'center' },
+  iGoodPlayText: { color: '#2ecc71', fontSize: 14, fontWeight: '800' },
+  // Flag DOWN/DIST/DRIVE strip (top area, next to the OFF/DEF/SP selector).
+  fbStrip: { position: 'absolute', flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,0,0,0.34)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' },
+  fbStripGroup: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  fbStripLbl: { color: 'rgba(255,255,255,0.6)', fontSize: 9, fontWeight: '800', marginRight: 2 },
+  fbStripDot: { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.25)', backgroundColor: 'rgba(0,0,0,0.18)', alignItems: 'center', justifyContent: 'center' },
+  fbStripDotText: { color: 'rgba(255,255,255,0.95)', fontSize: 12, fontWeight: '700' },
+  fbStripStep: { width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.25)', backgroundColor: 'rgba(0,0,0,0.18)', alignItems: 'center', justifyContent: 'center' },
+  fbStripStepText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  fbStripNum: { color: '#fff', fontSize: 14, fontWeight: '800', minWidth: 20, textAlign: 'center' },
   topReadoutDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#EF9F27' },
   topReadoutText: {
     color: '#fff', fontSize: 13, fontWeight: '700', flexShrink: 1,
