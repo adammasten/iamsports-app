@@ -95,6 +95,15 @@ export default function TaggingStudioWeb() {
   // Good Play — third clip-level toggle beside ★/POE. id (special.goodPlay) is null until
   // the phase-boards migration seeds it, so the button hides gracefully pre-migration.
   const [isGoodPlay, setIsGoodPlay] = useState(false);
+  // Resizable video/board split. boardHeight = px height of the tag board; the video area
+  // (flex:1) absorbs the rest. Drag the handle up → smaller board / bigger video. Persisted.
+  const [boardHeight, setBoardHeight] = useState<number>(() => {
+    try { const v = localStorage.getItem('iamsports.tagger.boardHeight'); const n = v ? parseInt(v, 10) : NaN; if (!Number.isNaN(n)) return Math.max(120, n); } catch {}
+    return 220;
+  });
+  const [stageH, setStageH] = useState(0);
+  const boardLatestRef = useRef(boardHeight);
+  const boardDragStartRef = useRef(boardHeight);
   const [markIn, setMarkIn] = useState<number | null>(null);
   const [markOut, setMarkOut] = useState<number | null>(null);
   // While a Start/End window is open, successive Adds append tag GROUPS (bundles)
@@ -302,6 +311,16 @@ export default function TaggingStudioWeb() {
     setSpeed(s => PLAYBACK_SPEEDS[(PLAYBACK_SPEEDS.indexOf(s) + 1) % PLAYBACK_SPEEDS.length]);
   }, []);
   const seekBy = useCallback((d: number) => { try { player.currentTime = Math.max(0, Math.min(duration || 0, (player.currentTime || 0) + d)); } catch {} }, [player, duration]);
+  // Jump the playhead to the previous/next saved clip's start (parity with native ◄Tag/Tag►).
+  const jumpToTag = useCallback((dir: 1 | -1) => {
+    if (!clips.length) return;
+    const starts = clips.map(c => c.start).sort((a, b) => a - b);
+    const t = player.currentTime || 0;
+    let target: number | undefined;
+    if (dir > 0) target = starts.find(s => s > t + 0.05);
+    else for (let i = starts.length - 1; i >= 0; i--) { if (starts[i] < t - 0.05) { target = starts[i]; break; } }
+    if (target != null) { try { player.currentTime = target; } catch {} }
+  }, [clips, player]);
   const seekToX = useCallback((x: number) => { if (barWidth <= 0 || duration <= 0) return; try { player.currentTime = Math.max(0, Math.min(duration, (x / barWidth) * duration)); } catch {} }, [player, barWidth, duration]);
 
   // ── build-then-commit ──
@@ -459,6 +478,8 @@ export default function TaggingStudioWeb() {
       if (e.key === 'ArrowDown') { e.preventDefault(); seekBy(-5); return; }
       if (e.key === 'Enter') { e.preventDefault(); commitRef.current(); return; }
       if (e.key === 'Backspace') { e.preventDefault(); clearBuilding(); return; }
+      if (e.key === '[') { e.preventDefault(); jumpToTag(-1); return; }
+      if (e.key === ']') { e.preventDefault(); jumpToTag(1); return; }
       const k = e.key.toUpperCase();
       if (k === 'I') { e.preventDefault(); markInNow(); return; }
       if (k === 'O') { e.preventDefault(); markOutNow(); return; }
@@ -494,6 +515,21 @@ export default function TaggingStudioWeb() {
   const scrub = Gesture.Pan().minDistance(0)
     .onBegin(e => runOnJS(seekToX)(e.x))
     .onUpdate(e => runOnJS(seekToX)(e.x));
+
+  // Resizable split: drag the handle to size the board. Up = smaller board / bigger video.
+  // Clamp so the video area stays ≥200px and the board ≥120px (reserve ≈340 for video+controls).
+  const beginBoardDrag = () => { boardDragStartRef.current = boardLatestRef.current; };
+  const applyBoardDrag = (translationY: number) => {
+    const maxBoard = Math.max(120, stageH - 340);
+    const next = Math.min(maxBoard, Math.max(120, boardDragStartRef.current + translationY));
+    boardLatestRef.current = next;
+    setBoardHeight(next);
+  };
+  const saveBoardHeight = () => { try { localStorage.setItem('iamsports.tagger.boardHeight', String(Math.round(boardLatestRef.current))); } catch {} };
+  const boardResize = Gesture.Pan()
+    .onBegin(() => runOnJS(beginBoardDrag)())
+    .onUpdate(e => runOnJS(applyBoardDrag)(e.translationY))
+    .onEnd(() => runOnJS(saveBoardHeight)());
   const inPct = markIn != null && duration > 0 ? (markIn / duration) * 100 : null;
   const outPct = markOut != null && duration > 0 ? (markOut / duration) * 100 : null;
   const hasWindow = markIn != null && markOut != null && markOut > markIn;
@@ -632,7 +668,7 @@ export default function TaggingStudioWeb() {
 
       <View style={styles.main}>
         {/* left stage */}
-        <View style={styles.stage}>
+        <View style={styles.stage} onLayout={e => setStageH(e.nativeEvent.layout.height)}>
           <View
             style={styles.videoWrap}
             onLayout={e => setVbox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
@@ -680,6 +716,12 @@ export default function TaggingStudioWeb() {
               <Pressable focusable={false} style={[styles.tBtn, speed !== 1 && styles.tSpeedOn]} onPress={cycleSpeed}>
                 <Text style={[styles.tBtnTxt, speed !== 1 && styles.tSpeedOnTxt]}>{speed}×</Text>
               </Pressable>
+              {clips.length > 0 ? (
+                <>
+                  <Pressable focusable={false} style={styles.tBtn} onPress={() => jumpToTag(-1)}><Text style={styles.tBtnTxt}>◄ Tag</Text></Pressable>
+                  <Pressable focusable={false} style={styles.tBtn} onPress={() => jumpToTag(1)}><Text style={styles.tBtnTxt}>Tag ►</Text></Pressable>
+                </>
+              ) : null}
               <View style={styles.tDivider} />
               {/* Clip trim points — the most-used action. Big, plain-language,
                   color-matched to the green/orange scrubber ticks so it's clear
@@ -753,7 +795,12 @@ export default function TaggingStudioWeb() {
             </Pressable>
           </View>
 
+          {/* Resize handle — drag to size the tag board vs the video (up = bigger video). */}
+          <GestureDetector gesture={boardResize}>
+            <View style={[styles.boardHandle, { cursor: 'ns-resize' } as any]}><View style={styles.boardHandleGrip} /></View>
+          </GestureDetector>
           {/* tag board — every sport uses the groupable board (football board retired) */}
+          <ScrollView style={{ height: boardHeight }} contentContainerStyle={styles.boardScrollContent}>
           {useFbBoard ? (
             <>
               <View style={styles.fbStrip}>
@@ -848,9 +895,10 @@ export default function TaggingStudioWeb() {
               {category('plays', 'Plays', true)}
             </View>
           )}
+          </ScrollView>
 
           <View style={styles.shortcuts}>
-            <Text style={styles.scTxt}>Space play/pause · ←→ ±1s · ↑↓ ±5s · I / O = clip start / end · number = player · letter = event · ↵ done · ⌫ clear</Text>
+            <Text style={styles.scTxt}>Space play/pause · ←→ ±1s · ↑↓ ±5s · [ ] prev/next clip · I / O = clip start / end · number = player · letter = event · ↵ done · ⌫ clear</Text>
           </View>
         </View>
 
@@ -992,6 +1040,9 @@ const styles = StyleSheet.create({
   clipFb: { marginTop: 7, fontSize: 11, fontWeight: '700', color: C.offense },
 
   board: { backgroundColor: C.bg, flexDirection: 'row', gap: 14, paddingHorizontal: 18, paddingTop: 11, paddingBottom: 13 },
+  boardHandle: { height: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.panel, borderTopWidth: 1, borderTopColor: C.line },
+  boardHandleGrip: { width: 46, height: 4, borderRadius: 2, backgroundColor: C.dim },
+  boardScrollContent: { paddingBottom: 4 },
   catCol: { minWidth: 0 },
   catHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   cdot: { width: 8, height: 8, borderRadius: 4 },
