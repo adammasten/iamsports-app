@@ -104,6 +104,10 @@ export default function TaggingStudioWeb() {
   const [stageH, setStageH] = useState(0);
   const boardLatestRef = useRef(boardHeight);
   const boardDragStartRef = useRef(boardHeight);
+  // Browser fullscreen: on enter, collapse the board to min + hide the clip list so the
+  // video fills; the drag handle still works; on exit, restore the previous split.
+  const [isFS, setIsFS] = useState(false);
+  const preFSBoardRef = useRef(boardHeight);
   const [markIn, setMarkIn] = useState<number | null>(null);
   const [markOut, setMarkOut] = useState<number | null>(null);
   // While a Start/End window is open, successive Adds append tag GROUPS (bundles)
@@ -508,6 +512,26 @@ export default function TaggingStudioWeb() {
       else document.exitFullscreen?.();
     } catch {}
   }, []);
+  // Sync layout to browser fullscreen: entering collapses the board to its min (video
+  // fills) and hides the clip list; exiting restores the split you had before.
+  useEffect(() => {
+    const onFsChange = () => {
+      const fs = !!document.fullscreenElement;
+      setIsFS(fs);
+      if (fs) {
+        preFSBoardRef.current = boardLatestRef.current;
+        boardLatestRef.current = 120;
+        setBoardHeight(120);
+      } else {
+        const p = preFSBoardRef.current;
+        boardLatestRef.current = p;
+        setBoardHeight(p);
+        try { localStorage.setItem('iamsports.tagger.boardHeight', String(Math.round(p))); } catch {}
+      }
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
 
   // Apply playback rate; re-assert once the video is ready (rate can reset on load).
   useEffect(() => {
@@ -766,7 +790,7 @@ export default function TaggingStudioWeb() {
           </View>
         )}
         <View style={{ flex: 1 }} />
-        <Pressable onPress={toggleFS} style={styles.modeBtn}><Text style={styles.modeTxt}>⛶ Full screen</Text></Pressable>
+        <Pressable onPress={toggleFS} style={styles.modeBtn}><Text style={styles.modeTxt}>{isFS ? '⤡ Exit full screen' : '⛶ Full screen'}</Text></Pressable>
         <View style={styles.autosave}><View style={styles.saveDot} /><Text style={styles.autosaveTxt}>{saving ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Auto-saves each clip'}</Text></View>
       </View>
 
@@ -1006,7 +1030,8 @@ export default function TaggingStudioWeb() {
           </View>
         </View>
 
-        {/* right clip list */}
+        {/* right clip list — hidden in fullscreen so the video fills */}
+        {!isFS && (
         <View style={styles.clipsPanel}>
           <View style={styles.clipsHead}><Text style={styles.clipsTitle}>CLIPS</Text><Text style={styles.clipsCount}>{clips.length} saved</Text></View>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
@@ -1050,6 +1075,7 @@ export default function TaggingStudioWeb() {
             {clips.length === 0 ? <Text style={styles.clipsEmpty}>No clips yet — tag something.</Text> : null}
           </ScrollView>
         </View>
+        )}
       </View>
     </GestureHandlerRootView>
   );
