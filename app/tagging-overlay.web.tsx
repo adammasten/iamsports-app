@@ -97,13 +97,17 @@ export default function TaggingStudioWeb() {
   const [isGoodPlay, setIsGoodPlay] = useState(false);
   // Resizable video/board split. boardHeight = px height of the tag board; the video area
   // (flex:1) absorbs the rest. Drag the handle up → smaller board / bigger video. Persisted.
-  const [boardHeight, setBoardHeight] = useState<number>(() => {
-    try { const v = localStorage.getItem('iamsports.tagger.boardHeight'); const n = v ? parseInt(v, 10) : NaN; if (!Number.isNaN(n)) return Math.max(120, n); } catch {}
-    return 220;
-  });
+  const savedBoard = (() => { try { const v = localStorage.getItem('iamsports.tagger.boardHeight'); const n = v ? parseInt(v, 10) : NaN; return Number.isNaN(n) ? null : Math.max(120, n); } catch { return null; } })();
+  const [boardHeight, setBoardHeight] = useState<number>(savedBoard ?? 220);
   const [stageH, setStageH] = useState(0);
   const boardLatestRef = useRef(boardHeight);
   const boardDragStartRef = useRef(boardHeight);
+  // Once the user has chosen a size (saved value, drag, or nudge) we stop auto-defaulting.
+  const boardUserSetRef = useRef(savedBoard != null);
+  // Right clip list can collapse to a thin strip so the video reclaims that 300px.
+  const [clipsCollapsed, setClipsCollapsed] = useState<boolean>(() => { try { return localStorage.getItem('iamsports.tagger.clipsCollapsed') === '1'; } catch { return false; } });
+  const toggleClipsCollapsed = () => setClipsCollapsed(c => { const n = !c; try { localStorage.setItem('iamsports.tagger.clipsCollapsed', n ? '1' : '0'); } catch {} return n; });
+  const [handleHover, setHandleHover] = useState(false);
   // Browser fullscreen: on enter, collapse the board to min + hide the clip list so the
   // video fills; the drag handle still works; on exit, restore the previous split.
   const [isFS, setIsFS] = useState(false);
@@ -547,14 +551,25 @@ export default function TaggingStudioWeb() {
 
   // Resizable split: drag the handle to size the board. Up = smaller board / bigger video.
   // Clamp so the video area stays ≥200px and the board ≥120px (reserve ≈340 for video+controls).
-  const beginBoardDrag = () => { boardDragStartRef.current = boardLatestRef.current; };
+  const beginBoardDrag = () => { boardUserSetRef.current = true; boardDragStartRef.current = boardLatestRef.current; };
+  // Board can grow until the video area would drop below ~200px; if the stage isn't
+  // measured yet, allow a generous max so it never feels stuck.
+  const maxBoardH = () => (stageH > 0 ? Math.max(140, stageH - 260) : 600);
   const applyBoardDrag = (translationY: number) => {
-    const maxBoard = Math.max(120, stageH - 340);
-    const next = Math.min(maxBoard, Math.max(120, boardDragStartRef.current + translationY));
+    const next = Math.min(maxBoardH(), Math.max(120, boardDragStartRef.current + translationY));
     boardLatestRef.current = next;
     setBoardHeight(next);
   };
   const saveBoardHeight = () => { try { localStorage.setItem('iamsports.tagger.boardHeight', String(Math.round(boardLatestRef.current))); } catch {} };
+  // Tap-to-nudge the split (in case the drag isn't discovered). − = smaller board / bigger
+  // video; + = bigger board. Same clamps as the drag; persists.
+  const nudgeBoard = (delta: number) => {
+    boardUserSetRef.current = true;
+    const next = Math.min(maxBoardH(), Math.max(120, boardLatestRef.current + delta));
+    boardLatestRef.current = next;
+    setBoardHeight(next);
+    saveBoardHeight();
+  };
   const boardResize = Gesture.Pan()
     .onBegin(() => runOnJS(beginBoardDrag)())
     .onUpdate(e => runOnJS(applyBoardDrag)(e.translationY))
@@ -796,7 +811,15 @@ export default function TaggingStudioWeb() {
 
       <View style={styles.main}>
         {/* left stage */}
-        <View style={styles.stage} onLayout={e => setStageH(e.nativeEvent.layout.height)}>
+        <View style={styles.stage} onLayout={e => {
+          const h = e.nativeEvent.layout.height; setStageH(h);
+          // Default split until the user picks a size: board ~30% of the stage so the
+          // video keeps at least half the height. The board scrolls for the rest.
+          if (!boardUserSetRef.current && h > 0) {
+            const def = Math.min(Math.max(120, Math.round(h * 0.3)), Math.max(140, h - 260));
+            boardLatestRef.current = def; setBoardHeight(def);
+          }
+        }}>
           <View
             style={styles.videoWrap}
             onLayout={e => setVbox({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
@@ -924,8 +947,23 @@ export default function TaggingStudioWeb() {
           </View>
 
           {/* Resize handle — drag to size the tag board vs the video (up = bigger video). */}
+          {/* Full-width resize bar between video and board — drag anywhere on it, or tap ▲/▼. */}
           <GestureDetector gesture={boardResize}>
-            <View style={[styles.boardHandle, { cursor: 'ns-resize' } as any]}><View style={styles.boardHandleGrip} /></View>
+            <View
+              style={[styles.boardHandle, handleHover && styles.boardHandleHover, { cursor: 'row-resize' } as any]}
+              {...({ onMouseEnter: () => setHandleHover(true), onMouseLeave: () => setHandleHover(false) } as any)}
+            >
+              <View style={styles.boardGripLines}>
+                <View style={styles.boardGripLine} />
+                <View style={styles.boardGripLine} />
+                <View style={styles.boardGripLine} />
+              </View>
+              <Text style={styles.boardHandleLbl}>⇅ drag to resize</Text>
+              <View style={styles.boardHandleBtns}>
+                <Pressable focusable={false} onPress={() => nudgeBoard(-48)} style={styles.boardNudge} hitSlop={4}><Text style={styles.boardNudgeTxt}>▲ video</Text></Pressable>
+                <Pressable focusable={false} onPress={() => nudgeBoard(48)} style={styles.boardNudge} hitSlop={4}><Text style={styles.boardNudgeTxt}>▼ tags</Text></Pressable>
+              </View>
+            </View>
           </GestureDetector>
           {/* tag board — every sport uses the groupable board (football board retired) */}
           <ScrollView style={{ height: boardHeight }} contentContainerStyle={styles.boardScrollContent}>
@@ -1030,10 +1068,22 @@ export default function TaggingStudioWeb() {
           </View>
         </View>
 
-        {/* right clip list — hidden in fullscreen so the video fills */}
-        {!isFS && (
+        {/* right clip list — hidden in fullscreen; collapsible to a thin strip otherwise */}
+        {!isFS && clipsCollapsed && (
+          <Pressable style={styles.clipsStrip} onPress={toggleClipsCollapsed}>
+            <Text style={styles.clipsStripChev}>‹</Text>
+            <Text style={styles.clipsStripLbl}>CLIPS</Text>
+            <Text style={styles.clipsStripCount}>{clips.length}</Text>
+          </Pressable>
+        )}
+        {!isFS && !clipsCollapsed && (
         <View style={styles.clipsPanel}>
-          <View style={styles.clipsHead}><Text style={styles.clipsTitle}>CLIPS</Text><Text style={styles.clipsCount}>{clips.length} saved</Text></View>
+          <View style={styles.clipsHead}>
+            <Text style={styles.clipsTitle}>CLIPS</Text>
+            <Text style={styles.clipsCount}>{clips.length} saved</Text>
+            <View style={{ flex: 1 }} />
+            <Pressable onPress={toggleClipsCollapsed} hitSlop={8}><Text style={styles.clipsCollapseBtn}>›</Text></Pressable>
+          </View>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
             {clips.map(c => (
               <View key={c.id} style={[styles.clipCard, editingId === c.id && styles.clipCardEditing]}>
@@ -1170,8 +1220,14 @@ const styles = StyleSheet.create({
   clipFb: { marginTop: 7, fontSize: 11, fontWeight: '700', color: C.offense },
 
   board: { backgroundColor: C.bg, flexDirection: 'row', gap: 14, paddingHorizontal: 18, paddingTop: 11, paddingBottom: 13 },
-  boardHandle: { height: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.panel, borderTopWidth: 1, borderTopColor: C.line },
-  boardHandleGrip: { width: 46, height: 4, borderRadius: 2, backgroundColor: C.dim },
+  boardHandle: { height: 26, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: C.panel2, borderTopWidth: 1, borderTopColor: C.line, borderBottomWidth: 1, borderBottomColor: C.line },
+  boardHandleHover: { backgroundColor: 'rgba(83,74,183,0.28)', borderTopColor: C.accent, borderBottomColor: C.accent },
+  boardGripLines: { gap: 3, alignItems: 'center' },
+  boardGripLine: { width: 26, height: 2, borderRadius: 1, backgroundColor: C.dim },
+  boardHandleLbl: { color: C.faint, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  boardHandleBtns: { position: 'absolute', right: 12, top: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  boardNudge: { paddingHorizontal: 9, height: 20, borderRadius: 5, borderWidth: 1, borderColor: C.line, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center' },
+  boardNudgeTxt: { color: C.accent, fontSize: 10, fontWeight: '800' },
   boardScrollContent: { paddingBottom: 4 },
   catCol: { minWidth: 0 },
   catHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
@@ -1222,6 +1278,11 @@ const styles = StyleSheet.create({
   clipsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: C.line },
   clipsTitle: { fontSize: 11, fontWeight: '800', letterSpacing: 1, color: C.faint },
   clipsCount: { fontSize: 11, color: C.dim },
+  clipsCollapseBtn: { color: C.dim, fontSize: 20, fontWeight: '800', paddingHorizontal: 4 },
+  clipsStrip: { width: 30, backgroundColor: C.panel, borderLeftWidth: 1, borderLeftColor: C.line, alignItems: 'center', paddingTop: 12, gap: 8 },
+  clipsStripChev: { color: C.accent, fontSize: 18, fontWeight: '800' },
+  clipsStripLbl: { color: C.dim, fontSize: 11, fontWeight: '800', letterSpacing: 1, transform: [{ rotate: '90deg' }], marginTop: 22 },
+  clipsStripCount: { color: C.faint, fontSize: 12, fontWeight: '800', marginTop: 34 },
   clipCard: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 11, padding: 11, marginBottom: 9 },
   clipCardEditing: { borderColor: C.accent, backgroundColor: '#211f34' },
   clipCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
