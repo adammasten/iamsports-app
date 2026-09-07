@@ -1028,6 +1028,7 @@ export default function TaggingOverlayScreen() {
             </View>
             <View style={styles.fbStripGroup}>
               <Text style={styles.fbStripLbl}>DR</Text>
+              <TouchableOpacity style={styles.fbStripStep} onPress={() => setFbDrive(v => Math.max(1, v - 1))} hitSlop={4}><Text style={styles.fbStripStepText}>–</Text></TouchableOpacity>
               <Text style={styles.fbStripNum}>{fbDrive}</Text>
               <TouchableOpacity style={styles.fbStripStep} onPress={() => setFbDrive(v => v + 1)} hitSlop={4}><Text style={styles.fbStripStepText}>+</Text></TouchableOpacity>
             </View>

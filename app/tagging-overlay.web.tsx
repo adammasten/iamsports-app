@@ -620,6 +620,7 @@ export default function TaggingStudioWeb() {
             <Text style={styles.fbStripNum}>{fbCtx.distance ?? '—'}</Text>
             <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: (c.distance ?? 0) + 1 }))} style={styles.periodBtn}><Text style={styles.periodTxt}>+</Text></Pressable>
             <Text style={[styles.fbStripLbl, { marginLeft: 6 }]}>DR</Text>
+            <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: Math.max(1, c.drive - 1) }))} style={styles.periodBtn}><Text style={styles.periodTxt}>–</Text></Pressable>
             <Text style={styles.fbStripNum}>{fbCtx.drive}</Text>
             <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: c.drive + 1 }))} style={styles.periodBtn}><Text style={styles.periodTxt}>+</Text></Pressable>
           </View>
