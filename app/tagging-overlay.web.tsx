@@ -22,7 +22,7 @@ import { useEvent } from 'expo';
 import { useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 
@@ -123,6 +123,11 @@ export default function TaggingStudioWeb() {
   // contentFit can't letterbox and the frame stretches. Feeding explicit px
   // dimensions gives it a real box → contentFit="contain" works.
   const [vbox, setVbox] = useState({ w: 0, h: 0 });
+  // Phone-sized browser → immersive full-bleed layout that mirrors the native app
+  // (desktop web layout unchanged). mBoardFS = tag panel compact vs fullscreen.
+  const { width: winW, height: winH } = useWindowDimensions();
+  const isPhone = Math.min(winW, winH) <= 500;
+  const [mBoardFS, setMBoardFS] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false); // brief "Saved ✓" after each clip commits
   // Football situation — sticky, carries forward across clips. fbSel = this clip's
@@ -605,6 +610,105 @@ export default function TaggingStudioWeb() {
   const flagPhaseHasTags = !!flagPhaseCols && flagPhaseCols.some(c => c.key !== 'players' && (tags[c.key]?.length ?? 0) > 0);
   const useFlagPhaseBoard = isFlag && flagPhaseHasTags;
 
+  // ── MOBILE BROWSER: immersive full-bleed layout mirroring the native app. Reuses
+  //    every handler + the same top-bar arrangement; desktop layout (below) unchanged. ──
+  if (isPhone) {
+    const boardCols = useFlagPhaseBoard
+      ? flagPhaseCols!.map(c => ({ key: c.key, label: c.label }))
+      : isFootball
+        ? [{ key: 'players', label: 'Players' }, { key: 'formation', label: 'Formation' }, { key: 'play', label: 'Play' }, { key: 'defense', label: 'Defense' }, { key: 'result', label: 'Result' }]
+        : [{ key: 'players', label: 'Players' }, { key: 'offense', label: 'Offense' }, { key: 'defense', label: 'Defense' }, { key: 'plays', label: 'Plays' }];
+    return (
+      <GestureHandlerRootView style={styles.mApp}>
+        <VideoView player={player} style={{ position: 'absolute', top: 0, left: 0, width: winW, height: winH }} nativeControls={false} contentFit="contain" />
+        {!videoReady ? <View style={styles.mLoad}><ActivityIndicator color="#fff" size="large" /></View> : null}
+
+        {/* top bar: back + quarters/OFF-DEF-SP/DN-DIST-DR + save (the standard arrangement) */}
+        <View style={styles.mTop}>
+          <Pressable onPress={goBackOrHome} hitSlop={10}><Text style={styles.mBack}>‹</Text></Pressable>
+          <View style={styles.mClusters}>
+            {sportPeriods.map(p => { const on = activePeriod === p.id; return (
+              <Pressable key={p.id} onPress={() => setActivePeriod(on ? null : p.id)} style={[styles.mChip, on && styles.mChipOn]}><Text style={[styles.mChipTxt, on && styles.mChipTxtOn]}>{p.name}</Text></Pressable>
+            ); })}
+            {possOptions.length > 0 ? <View style={styles.mSep} /> : null}
+            {possOptions.map(p => { const on = activePossession === p.id; return (
+              <Pressable key={p.id} onPress={() => setActivePossession(on ? null : p.id)} style={[styles.mChip, on && styles.mChipOn]}><Text style={[styles.mChipTxt, on && styles.mChipTxtOn]}>{possShort(p.name)}</Text></Pressable>
+            ); })}
+            {isFlag ? (
+              <Fragment>
+                <View style={styles.mSep} />
+                <Text style={styles.mLbl}>DN</Text>
+                {[1, 2, 3, 4].map(d => (
+                  <Pressable key={d} onPress={() => setFbCtx(c => ({ ...c, down: d }))} style={[styles.mChip, fbCtx.down === d && styles.mChipOn]}><Text style={[styles.mChipTxt, fbCtx.down === d && styles.mChipTxtOn]}>{d}</Text></Pressable>
+                ))}
+                <Text style={styles.mLbl}>DIST</Text>
+                <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: Math.max(0, (c.distance ?? 0) - 1) }))} style={styles.mChip}><Text style={styles.mChipTxt}>–</Text></Pressable>
+                <Text style={styles.mNum}>{fbCtx.distance ?? '—'}</Text>
+                <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: (c.distance ?? 0) + 1 }))} style={styles.mChip}><Text style={styles.mChipTxt}>+</Text></Pressable>
+                <Text style={styles.mLbl}>DR</Text>
+                <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: Math.max(1, c.drive - 1) }))} style={styles.mChip}><Text style={styles.mChipTxt}>–</Text></Pressable>
+                <Text style={styles.mNum}>{fbCtx.drive}</Text>
+                <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: c.drive + 1 }))} style={styles.mChip}><Text style={styles.mChipTxt}>+</Text></Pressable>
+              </Fragment>
+            ) : null}
+          </View>
+          <Pressable onPress={commitClip} disabled={!canSave} style={[styles.mSave, !canSave && { opacity: 0.4 }]}><Text style={styles.mSaveTxt}>{saving ? '…' : editingId ? 'Save' : groupCount > 0 ? `Save (${groupCount})` : 'Save'}</Text></Pressable>
+        </View>
+
+        {/* tag board overlay (horizontal scroll of columns; TAG toggle grows it) */}
+        <View style={[styles.mBoard, mBoardFS && styles.mBoardFS]}>
+          <ScrollView horizontal contentContainerStyle={styles.mBoardRow}>
+            {boardCols.map(c => (
+              <View key={c.key} style={styles.mCol}>
+                <Text style={[styles.mColHead, { color: CAT_COLOR[c.key] }]}>{c.label.toUpperCase()}</Text>
+                <ScrollView style={{ maxHeight: mBoardFS ? Math.round(winH * 0.62) : 118 }} showsVerticalScrollIndicator={false}>
+                  <View style={styles.mChipsWrap}>{(tags[c.key] ?? []).map(t => tagButton(t, c.key))}</View>
+                </ScrollView>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* right rail: TAG size toggle + group + star/POE/GoodPlay */}
+        <View style={styles.mRail}>
+          <Pressable onPress={() => setMBoardFS(f => !f)} style={styles.mRailBtn}><Text style={styles.mRailTxt}>TAG{mBoardFS ? '↓' : '↑'}</Text></Pressable>
+          {!editingId ? <Pressable onPress={addGroup} disabled={!canAddGroup} style={[styles.mRailBtn, !canAddGroup && { opacity: 0.4 }]}><Text style={styles.mRailTxt}>+Grp{groupCount > 0 ? ` ${groupCount}` : ''}</Text></Pressable> : null}
+          <Pressable onPress={() => setIsStar(s => !s)} style={[styles.mRailBtn, isStar && { backgroundColor: C.star }]}><Text style={[styles.mRailTxt, isStar && { color: '#1a1030' }]}>★</Text></Pressable>
+          <Pressable onPress={() => setIsPoe(p => !p)} style={[styles.mRailBtn, isPoe && { backgroundColor: '#dc3545' }]}><Text style={[styles.mRailTxt, isPoe && { color: '#fff' }]}>!</Text></Pressable>
+          {special.goodPlay ? <Pressable onPress={() => setIsGoodPlay(g => !g)} style={[styles.mRailBtn, isGoodPlay && { backgroundColor: '#1e8449' }]}><Text style={[styles.mRailTxt, isGoodPlay && { color: '#fff' }]}>✓</Text></Pressable> : null}
+        </View>
+
+        {/* bottom: scrubber + transport + mark */}
+        <View style={styles.mBottom}>
+          <GestureDetector gesture={scrub}>
+            <View style={styles.scrubTouch} onLayout={e => setBarWidth(e.nativeEvent.layout.width)}>
+              <View style={styles.scrubTrack}>
+                {inPct != null && outPct != null ? <View style={[styles.inOutBand, { left: `${inPct}%`, width: `${Math.max(0, outPct - inPct)}%` }]} /> : null}
+                <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
+              </View>
+            </View>
+          </GestureDetector>
+          <View style={styles.mTransport}>
+            <Text style={styles.mTime}>{fmt(currentTime)} / {fmt(duration)}</Text>
+            <Pressable onPress={() => seekBy(-5)} style={styles.mTBtn}><Text style={styles.mTTxt}>−5s</Text></Pressable>
+            <Pressable onPress={togglePlay} style={[styles.mTBtn, styles.mPlay]}><Text style={styles.mTTxt}>{isPlaying ? '❚❚' : '▶'}</Text></Pressable>
+            <Pressable onPress={() => seekBy(5)} style={styles.mTBtn}><Text style={styles.mTTxt}>+5s</Text></Pressable>
+            <Pressable onPress={cycleSpeed} style={[styles.mTBtn, speed !== 1 && styles.tSpeedOn]}><Text style={[styles.mTTxt, speed !== 1 && styles.tSpeedOnTxt]}>{speed}×</Text></Pressable>
+            {clips.length > 0 ? (
+              <Fragment>
+                <Pressable onPress={() => jumpToTag(-1)} style={styles.mTBtn}><Text style={styles.mTTxt}>◄</Text></Pressable>
+                <Pressable onPress={() => jumpToTag(1)} style={styles.mTBtn}><Text style={styles.mTTxt}>►</Text></Pressable>
+              </Fragment>
+            ) : null}
+            <View style={{ flex: 1 }} />
+            <Pressable onPress={markInNow} style={[styles.mMark, { borderColor: C.made }, markIn != null && { backgroundColor: C.made }]}><Text style={styles.mMarkTxt}>{markIn != null ? `In ${fmt(markIn)}` : 'In'}</Text></Pressable>
+            <Pressable onPress={markOutNow} style={[styles.mMark, { borderColor: C.poe }, markOut != null && { backgroundColor: C.poe }]}><Text style={styles.mMarkTxt}>{markOut != null ? `Out ${fmt(markOut)}` : 'Out'}</Text></Pressable>
+          </View>
+        </View>
+      </GestureHandlerRootView>
+    );
+  }
+
   return (
     <GestureHandlerRootView style={styles.app}>
       {/* top bar */}
@@ -1055,6 +1159,38 @@ const styles = StyleSheet.create({
 
   shortcuts: { backgroundColor: C.panel, borderTopWidth: 1, borderTopColor: C.line, paddingHorizontal: 18, paddingVertical: 8 },
   scTxt: { color: C.faint, fontSize: 11 },
+  // ── Mobile browser immersive layout ──
+  mApp: { flex: 1, backgroundColor: '#000' },
+  mLoad: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  mTop: { position: 'absolute', top: 0, left: 0, right: 0, height: 52, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8, backgroundColor: 'rgba(0,0,0,0.42)' },
+  mBack: { color: '#fff', fontSize: 30, fontWeight: '700', paddingHorizontal: 4 },
+  mClusters: { flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 3 },
+  mChip: { minWidth: 24, height: 26, paddingHorizontal: 5, borderRadius: 13, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.28)', backgroundColor: 'rgba(0,0,0,0.3)', alignItems: 'center', justifyContent: 'center' },
+  mChipOn: { backgroundColor: 'rgba(239,159,39,0.9)', borderColor: 'rgba(239,159,39,0.95)' },
+  mChipTxt: { color: 'rgba(255,255,255,0.95)', fontSize: 11, fontWeight: '700' },
+  mChipTxtOn: { color: '#1a1a1a' },
+  mSep: { width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.25)', marginHorizontal: 3 },
+  mLbl: { color: 'rgba(255,255,255,0.6)', fontSize: 8, fontWeight: '800', marginLeft: 3 },
+  mNum: { color: '#fff', fontSize: 12, fontWeight: '800', minWidth: 16, textAlign: 'center' },
+  mSave: { backgroundColor: '#534AB7', borderRadius: 16, paddingHorizontal: 12, height: 32, alignItems: 'center', justifyContent: 'center' },
+  mSaveTxt: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  mBoard: { position: 'absolute', top: 56, left: 4, right: 52, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 8, paddingVertical: 4 },
+  mBoardFS: { bottom: 78, top: 56 },
+  mBoardRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 6, alignItems: 'flex-start' },
+  mCol: { minWidth: 96 },
+  mColHead: { fontSize: 10, fontWeight: '800', marginBottom: 3, paddingLeft: 2 },
+  mChipsWrap: { gap: 4 },
+  mRail: { position: 'absolute', top: 56, right: 4, width: 44, gap: 6, alignItems: 'stretch' },
+  mRailBtn: { height: 34, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', backgroundColor: 'rgba(0,0,0,0.42)', alignItems: 'center', justifyContent: 'center' },
+  mRailTxt: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  mBottom: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 10, paddingBottom: 6, paddingTop: 4, backgroundColor: 'rgba(0,0,0,0.42)' },
+  mTransport: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  mTime: { color: '#fff', fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  mTBtn: { minWidth: 40, height: 34, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.28)', backgroundColor: 'rgba(0,0,0,0.34)', alignItems: 'center', justifyContent: 'center' },
+  mPlay: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
+  mTTxt: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  mMark: { height: 34, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  mMarkTxt: { color: '#fff', fontSize: 12, fontWeight: '800' },
 
   clipsPanel: { width: 300, backgroundColor: C.panel, borderLeftWidth: 1, borderLeftColor: C.line },
   clipsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: C.line },
