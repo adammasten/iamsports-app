@@ -134,7 +134,11 @@ export default function TaggingStudioWeb() {
   // Phone-sized browser → immersive full-bleed layout that mirrors the native app
   // (desktop web layout unchanged). mBoardFS = tag panel compact vs fullscreen.
   const { width: winW, height: winH } = useWindowDimensions();
-  const isPhone = Math.min(winW, winH) <= 500;
+  // Immersive layout only on ACTUAL touch devices (coarse pointer) that are phone-sized —
+  // never on a desktop with a mouse, even if the window is small. So desktop always gets
+  // the resizable split layout.
+  const coarsePointer = (() => { try { return window.matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
+  const isPhone = coarsePointer && Math.min(winW, winH) <= 820;
   const [mBoardFS, setMBoardFS] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false); // brief "Saved ✓" after each clip commits
@@ -651,7 +655,7 @@ export default function TaggingStudioWeb() {
 
   // ── MOBILE BROWSER: immersive full-bleed layout mirroring the native app. Reuses
   //    every handler + the same top-bar arrangement; desktop layout (below) unchanged. ──
-  if (isPhone) {
+  if (isPhone || isFS) {
     const boardCols = useFlagPhaseBoard
       ? flagPhaseCols!.map(c => ({ key: c.key, label: c.label }))
       : isFootball
@@ -692,6 +696,7 @@ export default function TaggingStudioWeb() {
             ) : null}
           </View>
           <Pressable onPress={commitClip} disabled={!canSave} style={[styles.mSave, !canSave && { opacity: 0.4 }]}><Text style={styles.mSaveTxt}>{saving ? '…' : editingId ? 'Save' : groupCount > 0 ? `Save (${groupCount})` : 'Save'}</Text></Pressable>
+          {isFS ? <Pressable onPress={toggleFS} hitSlop={8} style={styles.mExitFS}><Text style={styles.mExitFSTxt}>⤡</Text></Pressable> : null}
         </View>
 
         {/* tag board overlay (horizontal scroll of columns; TAG toggle grows it) */}
@@ -1256,6 +1261,8 @@ const styles = StyleSheet.create({
   mNum: { color: '#fff', fontSize: 12, fontWeight: '800', minWidth: 16, textAlign: 'center' },
   mSave: { backgroundColor: '#534AB7', borderRadius: 16, paddingHorizontal: 12, height: 32, alignItems: 'center', justifyContent: 'center' },
   mSaveTxt: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  mExitFS: { width: 34, height: 32, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)', backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  mExitFSTxt: { color: '#fff', fontSize: 18, fontWeight: '800' },
   mBoard: { position: 'absolute', top: 56, left: 4, right: 52, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 8, paddingVertical: 4 },
   mBoardFS: { bottom: 78, top: 56 },
   mBoardRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 6, alignItems: 'flex-start' },
