@@ -102,6 +102,10 @@ export default function TaggingStudioWeb() {
   const [stageH, setStageH] = useState(0);
   const boardLatestRef = useRef(boardHeight);
   const boardDragStartRef = useRef(boardHeight);
+  // Measured height of the board's own content (from the ScrollView) — the board is never
+  // clamped taller than this, so there's no empty space under the last chip row.
+  const [boardContentH, setBoardContentH] = useState(0);
+  const boardContentHRef = useRef(0);
   // Once the user has chosen a size (saved value, drag, or nudge) we stop auto-defaulting.
   const boardUserSetRef = useRef(savedBoard != null);
   // Right clip list can collapse to a thin strip so the video reclaims that 300px.
@@ -559,21 +563,31 @@ export default function TaggingStudioWeb() {
   // Board can grow until the video area would drop below ~200px; if the stage isn't
   // measured yet, allow a generous max so it never feels stuck.
   const maxBoardH = () => (stageH > 0 ? Math.max(140, stageH - 260) : 600);
+  // ONE clamp used everywhere: never past the video reserve (maxBoardH), never taller than the
+  // board's own content, never below the 120 min.
+  const clampBoard = (h: number) => Math.min(maxBoardH(), boardContentH || Infinity, Math.max(120, h));
   const applyBoardDrag = (translationY: number) => {
-    const next = Math.min(maxBoardH(), Math.max(120, boardDragStartRef.current + translationY));
+    // Handle sits ABOVE the board: drag DOWN (translationY > 0) → shrink board / grow video.
+    const next = clampBoard(boardDragStartRef.current - translationY);
     boardLatestRef.current = next;
     setBoardHeight(next);
   };
   const saveBoardHeight = () => { try { localStorage.setItem('iamsports.tagger.boardHeight', String(Math.round(boardLatestRef.current))); } catch {} };
   // Tap-to-nudge the split (in case the drag isn't discovered). − = smaller board / bigger
-  // video; + = bigger board. Same clamps as the drag; persists.
+  // video; + = bigger board. Same clamp as the drag; persists.
   const nudgeBoard = (delta: number) => {
     boardUserSetRef.current = true;
-    const next = Math.min(maxBoardH(), Math.max(120, boardLatestRef.current + delta));
+    const next = clampBoard(boardLatestRef.current + delta);
     boardLatestRef.current = next;
     setBoardHeight(next);
     saveBoardHeight();
   };
+  // When the content height first measures or changes (e.g. phase switch / resize), re-clamp
+  // the current board height so a stale persisted value can't leave it taller than its content.
+  useEffect(() => {
+    setBoardHeight(prev => { const c = clampBoard(prev); boardLatestRef.current = c; return c; });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardContentH, stageH]);
   const boardResize = Gesture.Pan()
     .onBegin(() => runOnJS(beginBoardDrag)())
     .onUpdate(e => runOnJS(applyBoardDrag)(e.translationY))
@@ -971,7 +985,7 @@ export default function TaggingStudioWeb() {
             </View>
           </GestureDetector>
           {/* tag board — every sport uses the groupable board (football board retired) */}
-          <ScrollView style={{ height: boardHeight }} contentContainerStyle={styles.boardScrollContent}>
+          <ScrollView style={{ height: boardHeight }} contentContainerStyle={styles.boardScrollContent} onContentSizeChange={(_w, h) => { boardContentHRef.current = h; setBoardContentH(h); }}>
           {useFbBoard ? (
             <>
               <View style={styles.fbStrip}>
