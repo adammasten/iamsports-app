@@ -9,6 +9,35 @@ Guidance for Claude Code when working in this repo.
 > that. Use the Supabase MCP (`.mcp.json` wires it up) to check live schema/RLS
 > before asserting anything about the database.
 
+## INVARIANTS — never change without Adam's explicit written approval
+
+Stated by Adam 2026-09-06. These outrank anything else in this file. If a task
+appears to require breaking one, stop and ask — do not "improve" your way past it.
+
+1. **TAGGING MODEL:** tap tags → "+ Group" bundles them → "Save clip" writes the
+   clip with its groups. This is the same on every sport, every surface (web,
+   iPhone, iPad). Never replace it with single-select, auto-save-on-tap, or any
+   other flow.
+2. **Highlight, POE, Start/End, quarters/halves, transport bar, keyboard
+   shortcuts:** present on every sport board.
+3. **Football sports (Flag, 7-on-7, Football):** OFF/DEF/SP is a sticky selector
+   that swaps the board to that phase's own columns and stamps the clip. Each
+   phase's tags are separate (phase-prefixed categories).
+4. **Database tag changes are additive-first:** ship the build that reads new
+   categories, confirm it's installed, THEN migrate. Never empty a category an
+   installed build still reads.
+5. **Scope discipline:** change exactly what was asked. Anything adjacent gets
+   **written down and asked about, not done** — flagging it afterwards is not the
+   same as asking first.
+
+> ✅ **SETTLED (Adam, 2026-09-06).** Invariant 3 and the 2026-09-05 "EVERY sport
+> uses the tag-group model" section below are compatible, and both stand.
+> **Grouping is never blocked.** The OFF/DEF/SP selector is a board **FILTER**,
+> not single-select: it swaps which groupable columns render, and "+ Group" /
+> "Save clip" work identically inside each phase. What is retired is only the
+> single-select board that wrote formation/play/defense/result as one-pick
+> `clip_football` fields.
+
 ## Overview
 
 **IamSports** (slug `iamsports`, bundle `com.masten32.iamsports`) — Expo / React
@@ -200,13 +229,27 @@ categories full of groupable chips; possession is expressed by which category's 
 you pick (tag from your own team's POV, the Hudl-basketball model), optionally an
 explicit "Offense"/"Defense" tag — never a separate rigid toggle that blocks grouping.
 
-**RETIRED (do not rebuild):** the football ODK single-select model — `clip_football`,
-the `isFootball` single-select board in `tagging-overlay.tsx` / `.web.tsx`, the
-possession toggle, and the down/distance/formation/coverage columns. `lib/core/football.ts`
-constants stop feeding a special board; football/flag tag palettes live in the `tags`
-table (sport-scoped, categories offense/defense/plays) like every other sport, and are
-seeded/expanded there. Export works for all sports via the existing tag-group matcher
-(`clipMatchesGroup`) — no per-sport export path needed.
+**RETIRED (do not rebuild):** the single-select football board that wrote
+formation/play/defense/result as one-pick `clip_football` fields instead of groupable
+tags. A phase selector that only filters which groupable columns are visible is NOT
+this and is required (see Invariant 3).
+
+`lib/core/football.ts` constants stop feeding a special board; football/flag tag
+palettes live in the `tags` table (sport-scoped, categories offense/defense/plays)
+like every other sport, and are seeded/expanded there. Export works for all sports
+via the existing tag-group matcher (`clipMatchesGroup`) — no per-sport export path
+needed.
+
+**`clip_football` is KEPT, narrowed to `odk` / `down` / `distance` / `drive_id`**
+(Adam, 2026-09-06, per the approved plan) — situational context that is genuinely
+one-valued per play and is not a tag. The live table currently also has
+`yard_line`, `play_type`, `gap`, `off_formation`, `def_front`, `result`,
+`gain_loss`, `opp_formation` (verified against the live DB 2026-09-06).
+`play_type` / `gap` / `off_formation` / `def_front` / `result` / `opp_formation`
+are the one-pick fields the retired board wrote and become groupable tags instead.
+`yard_line` and `gain_loss` were named in neither list — **ask before touching
+them.** Any column removal is a tag-migration and therefore governed by
+Invariant 4: ship the reading build, confirm it is installed, THEN migrate.
 
 **Adding a sport = seed its groupable tags** (offense/defense/plays), scoped by
 `tags.sport`, plus period names in `periodsForSport`. Nothing else. If deep
