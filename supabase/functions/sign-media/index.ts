@@ -97,11 +97,16 @@ Deno.serve(async (req) => {
       if (error) return json({ error: 'Not allowed' }, 403);
       authedKey = `reel-thumbnails/${reelId}.jpg`;
     } else {
-      const { data: vid } = await admin.from('videos').select('id').eq('url', key).maybeSingle();
-      if (vid?.id) {
-        const { data, error } = await asUser.rpc('authorize_video_playback', { p_video_id: vid.id });
-        if (error) return json({ error: 'Not allowed' }, 403);
-        authedKey = data as string;
+      // A storage key can be shared by >1 videos row (e.g. a demo/seed that re-used another
+      // team's object). .maybeSingle() erred on that and 404'd a legit viewer. Fetch ALL
+      // non-deleted rows for the key and authorize each; sign for the first the caller passes.
+      const { data: vids } = await admin.from('videos').select('id').eq('url', key).is('deleted_at', null);
+      if (vids && vids.length > 0) {
+        for (const row of vids) {
+          const { data, error } = await asUser.rpc('authorize_video_playback', { p_video_id: row.id });
+          if (!error && data) { authedKey = data as string; break; }
+        }
+        if (!authedKey) return json({ error: 'Not allowed' }, 403);
       } else {
         const { data: reel } = await admin.from('highlight_reels').select('id').eq('storage_path', key).maybeSingle();
         if (reel?.id) {
