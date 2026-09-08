@@ -38,6 +38,40 @@ appears to require breaking one, stop and ask — do not "improve" your way past
 > single-select board that wrote formation/play/defense/result as one-pick
 > `clip_football` fields.
 
+## LOCKED: Tagging overlay layout — all sports, all time
+
+Stated by Adam 2026-09-08. The tagging overlay layout (`app/tagging-overlay.web.tsx`
+and `app/tagging-overlay.tsx`) is the cross-sport standard. It is the same screen,
+same functionality, same element placement for basketball, flag football, and every
+sport added later. This is a product decision, not a default to be revisited.
+
+Fixed and off-limits without explicit written approval from Adam:
+- Top bar: Back, game label, period buttons (Q1–Q4 / 1H–2H), phase buttons
+  (OFF/DEF/SP), down/distance/drive controls, Full screen, auto-save indicator
+- Video pane on top; transport row (−5s, play, +5s, speed, ◀Tag / Tag▶, Start,
+  End, timecode)
+- Building-clip row: Highlight, POE, Good Play, + Add group, Save clip
+- Drag handle between video and tag board, with ▲ video / ▼ tags
+- Tag board below: category columns left-to-right, Players column always last
+- Clips panel on the right
+- Keyboard shortcuts row at the bottom
+
+What changes per sport: only the tag categories, the chips inside them, and which
+phase/period/down controls are visible. Nothing else.
+
+Rules:
+1. Never move, remove, rename, resize, reorder, restyle, or add an element to this
+   layout as part of another task. If a task seems to require it, STOP AND ASK
+   BEFORE WRITING CODE. Name the element and why.
+2. Never make a layout change "while you're in there," to fix an unrelated bug, or
+   because it seems like an improvement.
+3. If Adam asks for a change that touches this layout, restate this rule, confirm he
+   is explicitly overriding it for that specific element, and only then proceed —
+   scoped to that element only.
+4. When editing either overlay file for any reason, the last line of your report
+   must state either "Layout unchanged — no elements moved, removed, added, or
+   restyled" or list precisely what changed and the approval that authorized it.
+
 ## Overview
 
 **IamSports** (slug `iamsports`, bundle `com.masten32.iamsports`) — Expo / React
