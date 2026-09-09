@@ -8,6 +8,7 @@ import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import { isFlagFootball } from '@/lib/core/football';
+import ClipPill from './components/ClipPill';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
@@ -219,29 +220,63 @@ export default function TaggingOverlayScreen() {
   // tagged at the current playhead (the core review primitive). Read-only here;
   // editing lands in a later slice.
   const [existingClips, setExistingClips] = useState<
-    { id: string; start: number; end: number; starred: boolean; poe: boolean; tags: { name: string; category: string }[] }[]
+    { id: string; start: number; end: number; starred: boolean; poe: boolean; goodPlay: boolean; side: string | null; clipLevel: { id: string; name: string; category: string }[]; groups: { id: string; name: string; category: string }[][]; groupCount: number; tagCount: number; tags: { name: string; category: string }[] }[]
   >([]);
+  // Clip pill (review): refs to measure the 5 chrome elements live for the free band.
+  const pillTopBarRef = useRef<any>(null);
+  const pillLeftRailRef = useRef<any>(null);
+  const pillRightRailRef = useRef<any>(null);
+  const pillScrubberRef = useRef<any>(null);
+  const pillTagRegionRef = useRef<any>(null);
+  const [pillRects, setPillRects] = useState<Record<string, { x: number; y: number; w: number; h: number }>>({});
+  const measurePill = (key: string, node: any) => {
+    node?.measureInWindow?.((x: number, y: number, w: number, h: number) => {
+      setPillRects(r => { const p = r[key]; if (p && p.x === x && p.y === y && p.w === w && p.h === h) return r; return { ...r, [key]: { x, y, w, h } }; });
+    });
+  };
 
   const loadExistingClips = useCallback(async () => {
     if (!videoId) return;
     const { data, error } = await supabase
       .from('clips')
-      .select('id, start_time, end_time, is_starred, is_point_of_emphasis, clip_tags ( tags ( name, category ) )')
+      .select('id, start_time, end_time, is_starred, is_point_of_emphasis, clip_tags ( id, bundle_number, tag_id, tags ( id, name, category ) )')
       .eq('video_id', videoId)
       .order('start_time');
     if (error || !data) return;
+    const STAMP = new Set(['special', 'period', 'possession']);
     setExistingClips(
-      data.map((c: any) => ({
-        id: c.id,
-        start: c.start_time,
-        end: c.end_time,
-        starred: !!c.is_starred,
-        poe: !!c.is_point_of_emphasis,
-        tags: (c.clip_tags || [])
-          .map((ct: any) => ct.tags)
-          .filter(Boolean)
-          .map((t: any) => ({ name: t.name, category: t.category })),
-      })),
+      data.map((c: any) => {
+        // Group clip_tags by bundle_number: 0 = clip-level, 1+ = one group each (bundle-aware pill).
+        const byBundle = new Map<number, { id: string; name: string; category: string }[]>();
+        for (const ct of (c.clip_tags || [])) {
+          if (!ct.tags) continue;
+          const bn = ct.bundle_number ?? 0;
+          if (!byBundle.has(bn)) byBundle.set(bn, []);
+          byBundle.get(bn)!.push({ id: ct.tags.id, name: ct.tags.name, category: ct.tags.category });
+        }
+        const clipLevel = byBundle.get(0) || [];
+        const groups = [...byBundle.keys()].filter(bn => bn >= 1).sort((a, b) => a - b).map(bn => byBundle.get(bn)!);
+        const side = clipLevel.find(t => t.category === 'possession')?.name ?? null;
+        const goodPlay = clipLevel.some(t => t.category === 'special' && t.name === 'Good Play');
+        const tagCount = [...byBundle.values()].flat().filter(t => !STAMP.has(t.category)).length;
+        return {
+          id: c.id,
+          start: c.start_time,
+          end: c.end_time,
+          starred: !!c.is_starred,
+          poe: !!c.is_point_of_emphasis,
+          goodPlay,
+          side,
+          clipLevel,
+          groups,
+          groupCount: groups.length,
+          tagCount,
+          tags: (c.clip_tags || [])
+            .map((ct: any) => ct.tags)
+            .filter(Boolean)
+            .map((t: any) => ({ name: t.name, category: t.category })),
+        };
+      }),
     );
   }, [videoId]);
 
@@ -791,6 +826,22 @@ export default function TaggingOverlayScreen() {
     visibleCategories = phaseHasTags ? phaseCols! : FB_CATEGORIES;
   }
 
+  // Clip-pill free band: below the top bar, above min(board top, scrubber top), between the
+  // two rails — computed from LIVE measurements only. Null (→ pill hidden) when any rect is
+  // unmeasured or the band is under the compressed-pill minimum (220×40), e.g. fullscreen tagMode.
+  const pillBand = (() => {
+    const { topBar, leftRail, rightRail, scrubber, tagRegion } = pillRects;
+    if (!topBar || !leftRail || !rightRail || !scrubber || !tagRegion) return null;
+    const left = leftRail.x + leftRail.w;
+    const right = rightRail.x;
+    const top = topBar.y + topBar.h;
+    const bottom = Math.min(tagRegion.y, scrubber.y);
+    const width = right - left;
+    const height = bottom - top;
+    if (width < 220 || height < 40) return null;
+    return { left, top, width, height };
+  })();
+
   return (
     <GestureHandlerRootView style={[styles.container, { width: landW, height: landH }]}>
       <VideoView
@@ -853,8 +904,10 @@ export default function TaggingOverlayScreen() {
           pointerEvents="box-none"
         >
           <View
+            ref={pillTopBarRef}
             style={[styles.topBar, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
             pointerEvents="box-none"
+            onLayout={() => measurePill('topBar', pillTopBarRef.current)}
           >
             <TouchableOpacity style={styles.backBtn} onPress={handleBack} hitSlop={8}>
               <Text style={styles.backBtnText}>←</Text>
@@ -1070,7 +1123,9 @@ export default function TaggingOverlayScreen() {
             },
             tagMode === 'fullscreen' && { top: insets.top + 60 },
           ]}
+          ref={pillTagRegionRef}
           pointerEvents="box-none"
+          onLayout={() => measurePill('tagRegion', pillTagRegionRef.current)}
         >
           {visibleCategories.map(cat => (
             <View key={cat.key} style={styles.tagColumn}>
@@ -1110,6 +1165,17 @@ export default function TaggingOverlayScreen() {
         </View>
         )}
 
+        {/* Clip pill (review, Slice 1) — one per clip at the playhead, positioned in the live
+            free band; hidden when the band is too small (e.g. fullscreen tagMode). Sibling only. */}
+        {!isWatch && pillBand && activeClips.length > 0 && (
+          <View
+            style={{ position: 'absolute', left: pillBand.left, top: pillBand.top, width: pillBand.width, height: pillBand.height, justifyContent: 'flex-end', alignItems: 'center', gap: 6, paddingBottom: 6 }}
+            pointerEvents="box-none"
+          >
+            {activeClips.map(c => <ClipPill key={c.id} clip={c} maxHeight={pillBand.height - 12} />)}
+          </View>
+        )}
+
         {/* Bottom gradient + scrub bar + controls row — same in both tag modes.
             Toggle ("Tags" / "Video") sits rightmost in the controls row. */}
         <LinearGradient
@@ -1121,8 +1187,10 @@ export default function TaggingOverlayScreen() {
               thumb while dragging. Pan auto-pauses on drag start; stays paused
               on release per spec. */}
           <View
+            ref={pillScrubberRef}
             style={[styles.scrubBarWrapper, { paddingLeft: insets.left + (isTablet ? 112 : 12), paddingRight: insets.right + (isTablet ? 124 : 12) }]}
             pointerEvents="box-none"
+            onLayout={() => measurePill('scrubber', pillScrubberRef.current)}
           >
             <GestureDetector gesture={pan}>
               <View
@@ -1266,8 +1334,10 @@ export default function TaggingOverlayScreen() {
             RIGHT = clip actions (Start at the very bottom). */}
         {isTablet && (
           <View
+            ref={pillLeftRailRef}
             style={[styles.iLeftRail, { left: insets.left + 8, bottom: insets.bottom + 40 }]}
             pointerEvents="box-none"
+            onLayout={() => measurePill('leftRail', pillLeftRailRef.current)}
           >
             {!isWatch && existingClips.length > 0 && (
               <View style={styles.iSkipRow}>
@@ -1315,8 +1385,10 @@ export default function TaggingOverlayScreen() {
 
         {isTablet && !isWatch && (
           <View
+            ref={pillRightRailRef}
             style={[styles.iRightRail, { right: insets.right + 8, bottom: insets.bottom + 40 }]}
             pointerEvents="box-none"
+            onLayout={() => measurePill('rightRail', pillRightRailRef.current)}
           >
             <TouchableOpacity
               style={styles.iTagSizeBtn}
