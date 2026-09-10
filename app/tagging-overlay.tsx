@@ -785,6 +785,9 @@ export default function TaggingOverlayScreen() {
   // just stamp (all columns stay). Special Teams shows the special_teams column.
   const isFootball = isFootballSport(tagSport);
   const isFlag = isFlagFootball(tagSport);
+  // iPad non-football sports inherit the flag top-bar shell (periods + OFF/DEF), replacing
+  // the floating top-left clusters (which stay on phone). Football/7-on-7 = a later slice.
+  const iPadNonFootball = isTablet && !isFootball;
   const possOptions = possessionTags.filter(p => isFootball || p.name !== 'Special Teams');
   const possShort = (name: string) => (name === 'Offense' ? 'OFF' : name === 'Defense' ? 'DEF' : 'SP');
   // Non-flag football keeps the 5 GROUPABLE columns; every other sport keeps
@@ -952,6 +955,29 @@ export default function TaggingOverlayScreen() {
                 <TouchableOpacity style={styles.tbStep} onPress={() => setFbDrive(v => v + 1)} hitSlop={4}><Text style={styles.tbStepText}>+</Text></TouchableOpacity>
               </View>
             )}
+            {/* iPad non-football (per the cross-sport standard): periods + OFF/DEF in the SAME
+                top bar / chip style as flag — no SP/DN/DIST/DR. Flag block above untouched. */}
+            {!isWatch && iPadNonFootball && (
+              <View style={styles.tbClusters} pointerEvents="box-none">
+                {sportPeriods.map((p: any) => {
+                  const on = activePeriod === p.id;
+                  return (
+                    <TouchableOpacity key={p.id} style={[styles.tbChip, on && styles.tbChipOn]} onPress={() => setActivePeriod(on ? null : p.id)} hitSlop={4}>
+                      <Text style={[styles.tbChipText, on && styles.tbChipTextOn]}>{p.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                {possOptions.length > 0 && <View style={styles.tbSep} />}
+                {possOptions.map((p) => {
+                  const on = activePossession?.id === p.id;
+                  return (
+                    <TouchableOpacity key={p.id} style={[styles.tbChip, on && styles.tbChipOn]} onPress={() => setActivePossession(on ? null : p)} hitSlop={4}>
+                      <Text style={[styles.tbChipText, on && styles.tbChipTextOn]}>{possShort(p.name)}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
             {/* Phone: Save clip lives top-right. On iPad it moves into the
                 bottom-right cluster (below), same shape as + Group. */}
             {!isWatch && !isTablet && (
@@ -1054,7 +1080,7 @@ export default function TaggingOverlayScreen() {
             the current sport (basketball → Q1..Q4, 1H, 2H). Sticky + mutually
             exclusive; the active period auto-stamps every saved clip. Renders
             only when the sport's period tags exist. */}
-        {!isWatch && !isFlag && sportPeriods.length > 0 && (
+        {!isWatch && !isFlag && !iPadNonFootball && sportPeriods.length > 0 && (
           <View
             style={[styles.periodCluster, { top: insets.top + 60, left: insets.left + 6 }]}
             pointerEvents="box-none"
@@ -1077,7 +1103,7 @@ export default function TaggingOverlayScreen() {
 
         {/* Possession selector (OFF/DEF/SP) — sticky clip-level stamp for export, right of
             the period cluster. Football also scopes the columns (see visibleCategories). */}
-        {!isWatch && !isFlag && possOptions.length > 0 && (
+        {!isWatch && !isFlag && !iPadNonFootball && possOptions.length > 0 && (
           <View
             style={[styles.periodCluster, { top: insets.top + 60, left: insets.left + 6 + 132, width: 160 }]}
             pointerEvents="box-none"
