@@ -767,9 +767,18 @@ export default function TaggingStudioWeb() {
     );
   }
 
+  // FS immersive board columns — the SAME set the non-FS desktop board shows below,
+  // just floated over the video. Computed unconditionally (used only inside {isFS}).
+  const boardCols = useFlagPhaseBoard
+    ? flagPhaseCols!.map(c => ({ key: c.key, label: c.label }))
+    : isFootball
+      ? [{ key: 'players', label: 'Players' }, { key: 'formation', label: 'Formation' }, { key: 'play', label: 'Play' }, { key: 'defense', label: 'Defense' }, { key: 'result', label: 'Result' }]
+      : [{ key: 'players', label: 'Players' }, { key: 'offense', label: 'Offense' }, { key: 'defense', label: 'Defense' }, { key: 'plays', label: 'Plays' }];
+
   return (
     <GestureHandlerRootView style={styles.app}>
-      {/* top bar */}
+      {/* top bar — hidden in FS; a translucent floating strip (immersive) replaces it */}
+      {!isFS && (
       <View style={styles.topbar}>
         <Pressable onPress={goBackOrHome} hitSlop={10}><Text style={styles.back}>‹ Back</Text></Pressable>
         <Text style={styles.gameLabel} numberOfLines={1}>{label}</Text>
@@ -827,6 +836,7 @@ export default function TaggingStudioWeb() {
         <Pressable onPress={toggleFS} style={styles.modeBtn}><Text style={styles.modeTxt}>{isFS ? '⤡ Exit full screen' : '⛶ Full screen'}</Text></Pressable>
         <View style={styles.autosave}><View style={styles.saveDot} /><Text style={styles.autosaveTxt}>{saving ? 'Saving…' : savedFlash ? 'Saved ✓' : 'Auto-saves each clip'}</Text></View>
       </View>
+      )}
 
       <View style={styles.main}>
         {/* left stage */}
@@ -856,6 +866,128 @@ export default function TaggingStudioWeb() {
             ) : null}
           </View>
 
+          {/* FS IMMERSIVE (desktop full screen): floating chrome layered over the SAME
+              VideoView above — it is never remounted, so playback survives the toggle.
+              Mirrors the mobile branch's arrangement + reuses its styles. Authorized by
+              Adam 2026-09-10 (LOCKED-layout override, fullscreen state only). */}
+          {isFS && (
+            <View style={styles.fsOverlay} pointerEvents="box-none">
+              {/* translucent floating top strip (replaces the solid 52px band) */}
+              <View style={styles.mTop}>
+                <Pressable onPress={toggleFS} hitSlop={8} style={styles.mExitFS}><Text style={styles.mExitFSTxt}>⤡</Text></Pressable>
+                <View style={styles.mClusters}>
+                  {sportPeriods.map(p => { const on = activePeriod === p.id; return (
+                    <Pressable key={p.id} onPress={() => setActivePeriod(on ? null : p.id)} style={[styles.mChip, on && styles.mChipOn]}><Text style={[styles.mChipTxt, on && styles.mChipTxtOn]}>{p.name}</Text></Pressable>
+                  ); })}
+                  {possOptions.length > 0 ? <View style={styles.mSep} /> : null}
+                  {possOptions.map(p => { const on = activePossession === p.id; return (
+                    <Pressable key={p.id} onPress={() => setActivePossession(on ? null : p.id)} style={[styles.mChip, on && styles.mChipOn]}><Text style={[styles.mChipTxt, on && styles.mChipTxtOn]}>{possShort(p.name)}</Text></Pressable>
+                  ); })}
+                  {isFlag ? (
+                    <Fragment>
+                      <View style={styles.mSep} />
+                      <Text style={styles.mLbl}>DN</Text>
+                      {[1, 2, 3, 4].map(d => (
+                        <Pressable key={d} onPress={() => setFbCtx(c => ({ ...c, down: d }))} style={[styles.mChip, fbCtx.down === d && styles.mChipOn]}><Text style={[styles.mChipTxt, fbCtx.down === d && styles.mChipTxtOn]}>{d}</Text></Pressable>
+                      ))}
+                      <Text style={styles.mLbl}>DIST</Text>
+                      <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: Math.max(0, (c.distance ?? 0) - 1) }))} style={styles.mChip}><Text style={styles.mChipTxt}>–</Text></Pressable>
+                      <Text style={styles.mNum}>{fbCtx.distance ?? '—'}</Text>
+                      <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: (c.distance ?? 0) + 1 }))} style={styles.mChip}><Text style={styles.mChipTxt}>+</Text></Pressable>
+                      <Text style={styles.mLbl}>DR</Text>
+                      <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: Math.max(1, c.drive - 1) }))} style={styles.mChip}><Text style={styles.mChipTxt}>–</Text></Pressable>
+                      <Text style={styles.mNum}>{fbCtx.drive}</Text>
+                      <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: c.drive + 1 }))} style={styles.mChip}><Text style={styles.mChipTxt}>+</Text></Pressable>
+                    </Fragment>
+                  ) : null}
+                </View>
+                <Pressable onPress={commitClip} disabled={!canSave} style={[styles.mSave, !canSave && { opacity: 0.4 }]}><Text style={styles.mSaveTxt}>{saving ? '…' : editingId ? 'Save' : groupCount > 0 ? `Save (${groupCount})` : 'Save'}</Text></Pressable>
+              </View>
+
+              {/* floating tag columns (TAG↑ grows them) — right-inset so they clear the clips panel */}
+              <View style={[styles.mBoard, mBoardFS && styles.mBoardFS, styles.fsBoardInset]}>
+                <ScrollView horizontal contentContainerStyle={styles.mBoardRow}>
+                  {boardCols.map(c => (
+                    <View key={c.key} style={styles.mCol}>
+                      <Text style={[styles.mColHead, { color: CAT_COLOR[c.key] }]}>{c.label.toUpperCase()}</Text>
+                      <ScrollView style={{ maxHeight: mBoardFS ? Math.round(winH * 0.62) : 118 }} showsVerticalScrollIndicator={false}>
+                        <View style={styles.mChipsWrap}>{(tags[c.key] ?? []).map(t => tagButton(t, c.key))}</View>
+                      </ScrollView>
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* right rail: TAG size toggle + group + star/POE/GoodPlay */}
+              <View style={styles.mRail}>
+                <Pressable onPress={() => setMBoardFS(f => !f)} style={styles.mRailBtn}><Text style={styles.mRailTxt}>TAG{mBoardFS ? '↓' : '↑'}</Text></Pressable>
+                {!editingId ? <Pressable onPress={addGroup} disabled={!canAddGroup} style={[styles.mRailBtn, !canAddGroup && { opacity: 0.4 }]}><Text style={styles.mRailTxt}>+Grp{groupCount > 0 ? ` ${groupCount}` : ''}</Text></Pressable> : null}
+                <Pressable onPress={() => setIsStar(s => !s)} style={[styles.mRailBtn, isStar && { backgroundColor: C.star }]}><Text style={[styles.mRailTxt, isStar && { color: '#1a1030' }]}>★</Text></Pressable>
+                <Pressable onPress={() => setIsPoe(p => !p)} style={[styles.mRailBtn, isPoe && { backgroundColor: '#dc3545' }]}><Text style={[styles.mRailTxt, isPoe && { color: '#fff' }]}>!</Text></Pressable>
+                {special.goodPlay ? <Pressable onPress={() => setIsGoodPlay(g => !g)} style={[styles.mRailBtn, isGoodPlay && { backgroundColor: '#1e8449' }]}><Text style={[styles.mRailTxt, isGoodPlay && { color: '#fff' }]}>✓</Text></Pressable> : null}
+              </View>
+
+              {/* saved clips — added to the FS immersive per Adam 2026-09-10 (translucent,
+                  right side, just inboard of the rail). Tap a clip to jump. */}
+              <View style={styles.fsClips}>
+                <View style={styles.fsClipsHead}>
+                  <Text style={styles.clipsTitle}>CLIPS</Text>
+                  <Text style={styles.clipsCount}>{clips.length}</Text>
+                </View>
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 8, gap: 8 }}>
+                  {clips.map(c => (
+                    <Pressable key={c.id} onPress={() => jumpToClip(c.start)} style={styles.fsClipCard}>
+                      <Text style={styles.clipTime}>▶ {fmt(c.start)}</Text>
+                      {c.groups.map((g, gi) => (
+                        <View key={gi} style={styles.clipGroup}>
+                          {c.groups.length > 1 ? <Text style={styles.clipGroupNum}>{gi + 1}</Text> : null}
+                          <View style={styles.clipTags}>
+                            {orderTags(g).map((t, i) => (
+                              <View key={i} style={[styles.miniTag, { backgroundColor: CAT_COLOR[t.category] ?? C.dim }]}>
+                                <Text style={styles.miniTxt}>{t.name}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      ))}
+                      {c.starred || c.poe ? <Text style={styles.clipFoot}>{c.starred ? '★ ' : ''}{c.poe ? '◎ POE' : ''}</Text> : null}
+                    </Pressable>
+                  ))}
+                  {clips.length === 0 ? <Text style={styles.clipsEmpty}>No clips yet.</Text> : null}
+                </ScrollView>
+              </View>
+
+              {/* bottom: scrubber + transport + mark */}
+              <View style={styles.mBottom}>
+                <GestureDetector gesture={scrub}>
+                  <View style={styles.scrubTouch} onLayout={e => setBarWidth(e.nativeEvent.layout.width)}>
+                    <View style={styles.scrubTrack}>
+                      {inPct != null && outPct != null ? <View style={[styles.inOutBand, { left: `${inPct}%`, width: `${Math.max(0, outPct - inPct)}%` }]} /> : null}
+                      <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
+                    </View>
+                  </View>
+                </GestureDetector>
+                <View style={styles.mTransport}>
+                  <Text style={styles.mTime}>{fmt(currentTime)} / {fmt(duration)}</Text>
+                  <Pressable onPress={() => seekBy(-5)} style={styles.mTBtn}><Text style={styles.mTTxt}>−5s</Text></Pressable>
+                  <Pressable onPress={togglePlay} style={[styles.mTBtn, styles.mPlay]}><Text style={styles.mTTxt}>{isPlaying ? '❚❚' : '▶'}</Text></Pressable>
+                  <Pressable onPress={() => seekBy(5)} style={styles.mTBtn}><Text style={styles.mTTxt}>+5s</Text></Pressable>
+                  <Pressable onPress={cycleSpeed} style={[styles.mTBtn, speed !== 1 && styles.tSpeedOn]}><Text style={[styles.mTTxt, speed !== 1 && styles.tSpeedOnTxt]}>{speed}×</Text></Pressable>
+                  {clips.length > 0 ? (
+                    <Fragment>
+                      <Pressable onPress={() => jumpToTag(-1)} style={styles.mTBtn}><Text style={styles.mTTxt}>◄ Tag</Text></Pressable>
+                      <Pressable onPress={() => jumpToTag(1)} style={styles.mTBtn}><Text style={styles.mTTxt}>Tag ►</Text></Pressable>
+                    </Fragment>
+                  ) : null}
+                  <View style={{ flex: 1 }} />
+                  <Pressable onPress={markInNow} style={[styles.mMark, { borderColor: C.made }, markIn != null && { backgroundColor: C.made }]}><Text style={styles.mMarkTxt}>{markIn != null ? `Start ${fmt(markIn)}` : 'Start'}</Text></Pressable>
+                  <Pressable onPress={markOutNow} style={[styles.mMark, { borderColor: C.poe }, markOut != null && { backgroundColor: C.poe }]}><Text style={styles.mMarkTxt}>{markOut != null ? `End ${fmt(markOut)}` : 'End'}</Text></Pressable>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {!isFS && (<>
           {/* scrubber + transport */}
           <View style={styles.scrubZone}>
             <GestureDetector gesture={scrub}>
@@ -1085,6 +1217,7 @@ export default function TaggingStudioWeb() {
           <View style={styles.shortcuts}>
             <Text style={styles.scTxt}>Space play/pause · ←→ ±1s · ↑↓ ±5s · [ ] prev/next clip · I / O = clip start / end · number = player · letter = event · ↵ done · ⌫ clear</Text>
           </View>
+          </>)}
         </View>
 
         {/* right clip list — hidden in fullscreen; collapsible to a thin strip otherwise */}
@@ -1262,6 +1395,13 @@ const styles = StyleSheet.create({
   scTxt: { color: C.faint, fontSize: 11 },
   // ── Mobile browser immersive layout ──
   mApp: { flex: 1, backgroundColor: '#000' },
+  fsOverlay: { ...StyleSheet.absoluteFillObject },
+  // FS immersive clips panel — translucent, right side, inboard of the 44px rail.
+  fsClips: { position: 'absolute', top: 56, right: 52, bottom: 82, width: 200, backgroundColor: 'rgba(11,12,16,0.72)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  fsClipsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)' },
+  fsClipCard: { backgroundColor: 'rgba(27,30,38,0.7)', borderWidth: 1, borderColor: C.line, borderRadius: 9, padding: 8 },
+  // Keep the tag columns clear of the clips panel (rail 44 + gaps + panel 200).
+  fsBoardInset: { right: 256 },
   mLoad: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   mTop: { position: 'absolute', top: 0, left: 0, right: 0, height: 52, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8, backgroundColor: 'rgba(0,0,0,0.42)' },
   mBack: { color: '#fff', fontSize: 30, fontWeight: '700', paddingHorizontal: 4 },
