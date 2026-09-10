@@ -72,6 +72,49 @@ Rules:
    must state either "Layout unchanged — no elements moved, removed, added, or
    restyled" or list precisely what changed and the approval that authorized it.
 
+## iPad tagger: the flag football board is the reference layout for every sport
+
+Stated by Adam 2026-09-09. The flag football iPad tagger is the finished,
+approved design. It is what every sport's iPad tagger looks like. Not "similar
+to" — the same shell, and the only things that differ per sport are chip
+content and which top-bar controls are relevant.
+
+The shell, top to bottom (from the flag board as shipped in build 57):
+
+1. TOP BAR — one horizontal row, centered, in the black band above the video.
+   Contains, left to right, only what the sport needs:
+   - Period selector (Q1 Q2 Q3 Q4 | 1H 2H, or innings/sets per periodsForSport)
+   - Phase selector (OFF DEF SP) — football family only
+   - DN / DIST / DR — football family only
+   Nothing sport-specific ever floats over the video or over the tag columns.
+   If a sport needs a situational control that isn't listed here, it goes in
+   this bar, in this style (tbChip / tbChipOn), and nowhere else.
+
+2. TAG BOARD — four columns over the video, left to right, headers in the
+   category color: three sport categories then PLAYERS always last. Column
+   x-positions, header y, chip style, and wrap behavior are identical across
+   sports. Chip content is the only variable.
+
+3. RIGHT RAIL — TAG ↓/↑, POE, Highlight, Good Play, + Group, Save clip, End,
+   Start. Same order, same position, every sport.
+
+4. BOTTOM-LEFT TRANSPORT — ◀Tag / Tag▶, timecode, speed, −5s/+5s, −1s/+1s,
+   play/pause. Same every sport.
+
+5. SCRUBBER with clip markers. Same every sport.
+
+6. CLIP PILL (Slice 1) in the band above the board when the playhead is inside
+   a saved clip. Same every sport.
+
+Rules:
+- A sport is added by seeding its tags and its period names. It inherits this
+  shell. No sport gets its own layout.
+- Any element that exists on one sport's iPad board and not another's is a
+  bug, unless it is on the football-only list above.
+- Any proposal to change this shell is a change to EVERY sport and requires
+  Adam's explicit written approval naming the element. "Improving" one sport's
+  board is not a thing.
+
 ## Overview
 
 **IamSports** (slug `iamsports`, bundle `com.masten32.iamsports`) — Expo / React
