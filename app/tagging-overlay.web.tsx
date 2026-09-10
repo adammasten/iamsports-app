@@ -669,7 +669,7 @@ export default function TaggingStudioWeb() {
 
   // ── MOBILE BROWSER: immersive full-bleed layout mirroring the native app. Reuses
   //    every handler + the same top-bar arrangement; desktop layout (below) unchanged. ──
-  if (isPhone || isFS) {
+  if (isPhone) {
     const boardCols = useFlagPhaseBoard
       ? flagPhaseCols!.map(c => ({ key: c.key, label: c.label }))
       : isFootball
