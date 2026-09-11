@@ -126,3 +126,27 @@ export const BOARD_CATEGORY_KEYS: ReadonlySet<string> = new Set(Object.keys(ALL_
 export function isActionCategory(category: string | null | undefined): boolean {
   return !!category && BOARD_CATEGORY_KEYS.has(category);
 }
+
+// A category as surfaced in a CROSS-SPORT picker (Export, and FilterBar in 0b
+// item 2): the category descriptor plus, for a phased sport, its phase code
+// (OFF/DEF/SP) so the picker can label "OFF · Result" vs "DEF · Result".
+export type PickerCategory = TagCategory & { phase?: string };
+
+// Union of a set of sports' categories, deduped by key (first sport wins order).
+// A phased sport tags each category with its phase code. Empty input → the
+// default (basketball) flat categories, matching a sport-less picker's behavior.
+export function categoriesForSports(sports: Iterable<string | null | undefined>): PickerCategory[] {
+  const list = [...sports];
+  const use = list.length ? list : [DEFAULT_SPORT];
+  const seen = new Set<string>();
+  const out: PickerCategory[] = [];
+  for (const s of use) {
+    const ph = phasesForSport(s);
+    if (ph) {
+      for (const p of ph) for (const c of categoriesForSport(s, p.code)) if (!seen.has(c.key)) { seen.add(c.key); out.push({ ...c, phase: p.code }); }
+    } else {
+      for (const c of categoriesForSport(s)) if (!seen.has(c.key)) { seen.add(c.key); out.push({ ...c }); }
+    }
+  }
+  return out;
+}

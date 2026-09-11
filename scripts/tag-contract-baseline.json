@@ -37,6 +37,15 @@
       "group_tag_ids": ["8386231e-c073-4107-a774-c740dfb0f5dd", "081f2098-951b-42f9-a3c8-0a0866c46b59"],
       "group_readable": ["Touchdown (off_result)", "DJ (players)"],
       "matched_clip_ids": []
+    },
+    {
+      "label": "flag_touchdown_via_off_result",
+      "note": "0b item 1: the Touchdown tag (category off_result) is now selectable in the export picker under the OFF · RESULT section. Selecting it must match the same clips as flag_touchdown — matching is tag-id based and untouched.",
+      "group_index": 3,
+      "video_id": "aa365e27-e062-4eca-b5e3-28ff3a84d427",
+      "group_tag_ids": ["8386231e-c073-4107-a774-c740dfb0f5dd"],
+      "group_readable": ["Touchdown (off_result)"],
+      "matched_clip_ids": ["95c87a58-958e-47c0-9e88-c2e0df3d01b7", "f8c8f511-8908-49b6-a8b1-606e07333a84"]
     }
   ]
 }

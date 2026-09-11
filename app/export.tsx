@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { clipMatchesGroup } from '@/lib/core/clip-filtering';
+import { categoriesForSports } from '@/lib/core/tag-categories';
 import { generateReelThumbnailInBackground } from '@/lib/native/optimize';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
@@ -323,7 +324,7 @@ export default function ExportScreen() {
     // bar can offer Event/Season/Tournament without extra round-trips.
     const { data, error } = await supabase
       .from('games')
-      .select('*, seasons (name), tournaments (name), videos (id, event_type)')
+      .select('*, seasons (name), tournaments (name), videos (id, event_type, sport)')
       .is('deleted_at', null) // don't surface soft-deleted games — every other screen filters this; export was the lone gap
       .order('created_at', { ascending: false });
     if (error) { webAlert('Couldn’t load games', error.message); return; }
@@ -744,7 +745,17 @@ export default function ExportScreen() {
   }
 
   if (step === 'tags') {
-    const categories = ['offense', 'defense', 'plays', 'players'];
+    // Picker categories come from the sport definition (SPORT_TAG_CONTRACT), unioned
+    // over the sports of the selected games, so a flag game shows its OFF/DEF/SP
+    // phase categories and a basketball game is unchanged. Players stays last.
+    const pickerSports = new Set<string>();
+    selectedGames.forEach(gid => (gamesById.get(gid)?.videos || []).forEach((v: any) => {
+      if (v.sport) pickerSports.add(String(v.sport).trim().toLowerCase());
+    }));
+    const categoryDefs: { key: string; label: string; phase?: string }[] = [
+      ...categoriesForSports(pickerSports),
+      { key: 'players', label: 'Players' },
+    ];
     const highlightSelected = !!highlightTagId && currentGroup.includes(highlightTagId);
     const poeSelected = !!poeTagId && currentGroup.includes(poeTagId);
     // Over-stacked = a group that can't realistically land on one play: 3+ action
@@ -826,12 +837,12 @@ export default function ExportScreen() {
         </View>
 
         {/* SLICE 1: only tags actually applied in the selected games. */}
-        {categories.map(cat => {
-          const catTags = tags.filter(t => t.category === cat && usedTagIds.has(t.id));
+        {categoryDefs.map(cat => {
+          const catTags = tags.filter(t => t.category === cat.key && usedTagIds.has(t.id));
           if (catTags.length === 0) return null;
           return (
-            <View key={cat} style={styles.section}>
-              <Text style={styles.sectionTitle}>{cat.toUpperCase()}</Text>
+            <View key={cat.key} style={styles.section}>
+              <Text style={styles.sectionTitle}>{cat.phase ? `${cat.phase} · ${cat.label.toUpperCase()}` : cat.label.toUpperCase()}</Text>
               <View style={styles.tagGrid}>
                 {catTags.map(tag => {
                   const selected = currentGroup.includes(tag.id);
@@ -854,7 +865,7 @@ export default function ExportScreen() {
           );
         })}
         {/* Empty-state hint when the selected games have no applied tags yet. */}
-        {!categories.some(cat => tags.some(t => t.category === cat && usedTagIds.has(t.id))) ? (
+        {!categoryDefs.some(cat => tags.some(t => t.category === cat.key && usedTagIds.has(t.id))) ? (
           <Text style={styles.emptyTagsHint}>No tags found in the selected game{selectedGames.length === 1 ? '' : 's'} yet. Tag some plays first, or pick a different game.</Text>
         ) : null}
 
