@@ -1,0 +1,42 @@
+{
+  "purpose": "Phase 0 (SPORT_TAG_CONTRACT) regression baseline. Re-run these exact group selections through export's match logic after Phase 0; matched_clip_ids MUST be identical. Computed 2026-09-11 via the same predicate as lib/core/clip-filtering.ts clipMatchesGroup (clip-level = clip_tags.bundle_number 0; a group matches iff all its tag ids are in clip-level, or in clip-level union one bundle). Read-only; no DB rows changed.",
+  "games": {
+    "flag": { "video_id": "aa365e27-e062-4eca-b5e3-28ff3a84d427", "label": "Vs Ravens Week 1", "sport": "Flag Football", "clips": 43 },
+    "basketball": { "video_id": "14debc94-f063-4082-9224-fc29d787f2b9", "label": "Vs AYS", "sport": "Basketball", "clips": 79 }
+  },
+  "groups": [
+    {
+      "label": "bball_made3",
+      "group_index": 0,
+      "video_id": "14debc94-f063-4082-9224-fc29d787f2b9",
+      "group_tag_ids": ["b3b80399-679f-4f9d-97f2-53a520e1a15d"],
+      "group_readable": ["MADE 3 (offense)"],
+      "matched_clip_ids": ["0735f4a6-4d4a-40e5-953d-79bc5258020d", "dcf2d21a-fa15-4e9f-8806-5571bdaadaeb"]
+    },
+    {
+      "label": "flag_touchdown",
+      "group_index": 0,
+      "video_id": "aa365e27-e062-4eca-b5e3-28ff3a84d427",
+      "group_tag_ids": ["8386231e-c073-4107-a774-c740dfb0f5dd"],
+      "group_readable": ["Touchdown (off_result)"],
+      "matched_clip_ids": ["95c87a58-958e-47c0-9e88-c2e0df3d01b7", "f8c8f511-8908-49b6-a8b1-606e07333a84"]
+    },
+    {
+      "label": "flag_td_plus_Moses",
+      "group_index": 1,
+      "video_id": "aa365e27-e062-4eca-b5e3-28ff3a84d427",
+      "group_tag_ids": ["8386231e-c073-4107-a774-c740dfb0f5dd", "750a7e4a-6039-4bc0-a68d-a4b779b92466"],
+      "group_readable": ["Touchdown (off_result)", "Moses (players)"],
+      "matched_clip_ids": ["95c87a58-958e-47c0-9e88-c2e0df3d01b7", "f8c8f511-8908-49b6-a8b1-606e07333a84"]
+    },
+    {
+      "label": "flag_td_plus_DJ_control",
+      "note": "Control: DJ is in a DIFFERENT bundle than Touchdown on the TD clip, so the AND match must return zero. Proves the bundle-boundary logic; must stay empty.",
+      "group_index": 2,
+      "video_id": "aa365e27-e062-4eca-b5e3-28ff3a84d427",
+      "group_tag_ids": ["8386231e-c073-4107-a774-c740dfb0f5dd", "081f2098-951b-42f9-a3c8-0a0866c46b59"],
+      "group_readable": ["Touchdown (off_result)", "DJ (players)"],
+      "matched_clip_ids": []
+    }
+  ]
+}

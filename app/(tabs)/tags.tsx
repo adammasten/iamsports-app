@@ -1,4 +1,5 @@
 import { useTeamContext } from '@/context';
+import { categoriesForSport, categoryDescriptor, phasesForSport, type TagCategory } from '@/lib/core/tag-categories';
 import { hideTag, loadHiddenTagIds, unhideTag } from '@/lib/core/hiddenTags';
 import { computeSortOrderUpdates } from '@/lib/core/tag-reorder';
 import { supabase } from '@/supabase';
@@ -10,16 +11,16 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 type Tag = { id: string; name: string; category: string; sort_order: number; scope: 'global' | 'team'; };
 
-const CATEGORIES = [
-  { key: 'offense', label: 'Offense', color: '#1a6fd4', bg: '#e8f0fe' },
-  { key: 'defense', label: 'Defense', color: '#c0392b', bg: '#fde8e8' },
-  { key: 'plays', label: 'Plays', color: '#1e8449', bg: '#e8f8ed' },
-  { key: 'players', label: 'Players', color: '#7d3c98', bg: '#f5eef8' },
-];
+// Categories now come from the sport definition (lib/core/tag-categories.ts).
+// Players is appended by this screen (not part of the definition), keeping the
+// exact color it has always had. Stamp categories are never shown as board
+// columns here (unchanged from before — they were dropped by the old 4-key list).
+const PLAYERS: TagCategory = { key: 'players', label: 'Players', color: '#7d3c98', bg: '#f5eef8' };
+const STAMP_CATEGORIES = new Set(['players', 'possession', 'period', 'special']);
 
 export default function TagsScreen() {
   const { activeTeam, userId } = useTeamContext();
-  const [tags, setTags] = useState<Record<string, Tag[]>>({ offense: [], defense: [], plays: [], players: [] });
+  const [tags, setTags] = useState<Record<string, Tag[]>>({});
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newTagName, setNewTagName] = useState('');
@@ -47,8 +48,11 @@ export default function TagsScreen() {
     }
     const { data } = await query;
     if (!data) return;
-    const grouped: Record<string, Tag[]> = { offense: [], defense: [], plays: [], players: [] };
-    data.forEach(t => { if (grouped[t.category]) grouped[t.category].push(t); });
+    // Bucket EVERY category present (no dropping) so the sport's phase categories
+    // and any legacy/mis-filed categories all surface. Stamp categories
+    // (possession/period/★special) are excluded from the board render below.
+    const grouped: Record<string, Tag[]> = {};
+    data.forEach(t => { (grouped[t.category] ??= []).push(t); });
     setTags(grouped);
   }
 
@@ -58,7 +62,7 @@ export default function TagsScreen() {
       Alert.alert('No team selected', 'Pick a team to add a team-scoped tag.');
       return;
     }
-    const existing = tags[addingTo];
+    const existing = tags[addingTo] ?? [];
     // tags.profile_id is gone in V3. Only name/category/sort_order/scope are
     // unconditional; team_id is set IFF scope='team' (DB CHECK enforces this).
     const tagData: any = { name: newTagName, category: addingTo, sort_order: existing.length, scope: newTagScope };
@@ -121,6 +125,58 @@ export default function TagsScreen() {
     return '';
   }
 
+  // Board sections: the sport's definition categories (grouped by phase for a
+  // phased sport like flag), then any legacy categories that still hold tags — so
+  // nothing is ever hidden (mis-filed tags, or football/7-on-7 tags that still
+  // live in offense/defense/plays) — then Players last. For basketball this
+  // resolves to offense/defense/plays/players, identical to before.
+  const phases = phasesForSport(activeTeam?.sport);
+  const defSections: { phaseLabel: string | null; cats: TagCategory[] }[] = phases
+    ? phases.map(p => ({ phaseLabel: p.label, cats: categoriesForSport(activeTeam?.sport, p.code) }))
+    : [{ phaseLabel: null, cats: categoriesForSport(activeTeam?.sport) }];
+  const defKeys = new Set(defSections.flatMap(s => s.cats.map(c => c.key)));
+  const extraCats: TagCategory[] = Object.keys(tags)
+    .filter(k => (tags[k]?.length ?? 0) > 0 && !defKeys.has(k) && !STAMP_CATEGORIES.has(k))
+    .sort()
+    .map(categoryDescriptor);
+
+  const renderCategory = (cat: TagCategory) => {
+    const rows = tags[cat.key] ?? [];
+    return (
+      <View key={cat.key}>
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: cat.color }]}>{cat.label}</Text>
+          <TouchableOpacity onPress={() => { setAddingTo(cat.key); setNewTagName(''); setNewTagScope(activeTeam ? 'team' : 'global'); }}>
+            <Text style={[styles.addBtn, { color: cat.color }]}>+ Add</Text>
+          </TouchableOpacity>
+        </View>
+        {rows.map((tag, index) => {
+          const isFirst = index === 0;
+          const isLast = index === rows.length - 1;
+          const hidden = hiddenIds.has(tag.id);
+          return (
+            <View key={tag.id} style={[styles.tagRow, { backgroundColor: cat.bg }, hidden && styles.tagRowHidden]}>
+              <TouchableOpacity style={styles.tagBody} onLongPress={() => deleteTag(tag)} delayLongPress={400}>
+                <Text style={[styles.tagText, { color: cat.color }, hidden && styles.tagTextHidden]}>
+                  {getScopeLabel(tag)} {tag.name}{hidden ? '  · hidden' : ''}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => toggleHide(tag)} style={styles.moveBtn}>
+                <Text style={styles.moveBtnText}>{hidden ? '🙈' : '👁'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => moveTag(cat.key, index, index - 1)} disabled={isFirst} style={[styles.moveBtn, isFirst && styles.moveBtnDisabled]}>
+                <Text style={[styles.moveBtnText, { color: cat.color }]}>▲</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => moveTag(cat.key, index, index + 1)} disabled={isLast} style={[styles.moveBtn, isLast && styles.moveBtnDisabled]}>
+                <Text style={[styles.moveBtnText, { color: cat.color }]}>▼</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -140,7 +196,7 @@ export default function TagsScreen() {
         {addingTo && (
           <View style={styles.addForm}>
             <Text style={styles.addFormTitle}>
-              Add to {CATEGORIES.find(c => c.key === addingTo)?.label}
+              Add to {categoryDescriptor(addingTo).label}
             </Text>
             <TextInput
               style={styles.input}
@@ -178,54 +234,14 @@ export default function TagsScreen() {
           </View>
         )}
 
-        {CATEGORIES.map(cat => (
-          <View key={cat.key}>
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: cat.color }]}>{cat.label}</Text>
-              <TouchableOpacity onPress={() => { setAddingTo(cat.key); setNewTagName(''); setNewTagScope(activeTeam ? 'team' : 'global'); }}>
-                <Text style={[styles.addBtn, { color: cat.color }]}>+ Add</Text>
-              </TouchableOpacity>
-            </View>
-            {tags[cat.key].map((tag, index) => {
-              const isFirst = index === 0;
-              const isLast = index === tags[cat.key].length - 1;
-              const hidden = hiddenIds.has(tag.id);
-              return (
-                <View key={tag.id} style={[styles.tagRow, { backgroundColor: cat.bg }, hidden && styles.tagRowHidden]}>
-                  <TouchableOpacity
-                    style={styles.tagBody}
-                    onLongPress={() => deleteTag(tag)}
-                    delayLongPress={400}
-                  >
-                    <Text style={[styles.tagText, { color: cat.color }, hidden && styles.tagTextHidden]}>
-                      {getScopeLabel(tag)} {tag.name}{hidden ? '  · hidden' : ''}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => toggleHide(tag)}
-                    style={styles.moveBtn}
-                  >
-                    <Text style={styles.moveBtnText}>{hidden ? '🙈' : '👁'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => moveTag(cat.key, index, index - 1)}
-                    disabled={isFirst}
-                    style={[styles.moveBtn, isFirst && styles.moveBtnDisabled]}
-                  >
-                    <Text style={[styles.moveBtnText, { color: cat.color }]}>▲</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => moveTag(cat.key, index, index + 1)}
-                    disabled={isLast}
-                    style={[styles.moveBtn, isLast && styles.moveBtnDisabled]}
-                  >
-                    <Text style={[styles.moveBtnText, { color: cat.color }]}>▼</Text>
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
+        {defSections.map((sec, si) => (
+          <View key={`sec-${si}`}>
+            {sec.phaseLabel ? <Text style={styles.phaseHeader}>{sec.phaseLabel}</Text> : null}
+            {sec.cats.map(renderCategory)}
           </View>
         ))}
+        {extraCats.map(renderCategory)}
+        {renderCategory(PLAYERS)}
       </ScrollView>
     </GestureHandlerRootView>
   );
@@ -238,6 +254,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: '700', marginBottom: 2 },
   context: { fontSize: 14, color: '#534AB7', fontWeight: '600', marginBottom: 4 },
   subtitle: { fontSize: 12, color: '#888' },
+  phaseHeader: { fontSize: 13, fontWeight: '800', color: '#111', textTransform: 'uppercase', letterSpacing: 1, marginTop: 22, marginBottom: 2 },
   addForm: { backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 20 },
   addFormTitle: { fontSize: 14, fontWeight: '600', marginBottom: 10, color: '#333' },
   input: { backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 10, fontSize: 16, borderWidth: 1, borderColor: '#ddd' },

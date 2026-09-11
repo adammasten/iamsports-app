@@ -4,6 +4,7 @@
 // duplicate flags) -> render a reel. Data-driven per sport. Reached from the Home
 // "Make a highlight" bar.
 import { useTeamContext } from '@/context';
+import { isActionCategory } from '@/lib/core/tag-categories';
 import { deriveStoragePath, renderReel, saveHighlightReel, type RenderClip } from '@/lib/core/render-reel';
 import { goBackOrHome } from '@/lib/nav';
 import { downloadMedia } from '@/lib/native/download-media';
@@ -123,7 +124,7 @@ export default function MakeHighlightScreen() {
           const bn = ct.bundle_number ?? 0;
           const b = bmap.get(bn) ?? { playerId: null, actions: [] };
           if (t.category === 'players') b.playerId = t.player_id;
-          else if (t.category === 'offense' || t.category === 'defense' || t.category === 'plays') b.actions.push(t.name);
+          else if (isActionCategory(t.category)) b.actions.push(t.name);
           bmap.set(bn, b);
         });
         const bundles: Bundle[] = [...bmap.values()].filter((b) => b.actions.length > 0 || b.playerId)
