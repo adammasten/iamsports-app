@@ -29,6 +29,27 @@ appears to require breaking one, stop and ask — do not "improve" your way past
 5. **Scope discipline:** change exactly what was asked. Anything adjacent gets
    **written down and asked about, not done** — flagging it afterwards is not the
    same as asking first.
+6. **BACKGROUND UPLOAD ROLLOUT (Adam, 2026-09-10).** The foreground TUS uploader
+   is **never deleted.** Background upload ships **behind a switch that starts ON
+   for Adam's account only and OFF for everyone else.** Web upload
+   (browser/Vercel) **stays on TUS and is not in the diff.** The finished object
+   must land in the **same bucket, same key shape, same `videos` row contract**
+   (`upload_status` pending → ready) so playback, `sign-media`, purge, export, and
+   the taggers **cannot tell which uploader produced it.** The **playback audit
+   must be green** before the change and after each of Adam's test uploads. **If
+   anything looks wrong during the solo test, the switch goes back to OFF first
+   and investigation second.** The flag widens **only after** Adam's real-device
+   uploads (small, large, phone locked mid-upload) all land and play on every
+   surface. Run the slice on the same loop as any locked change: investigation-
+   first (report the swap, resume-metadata persistence, "enqueued — come back
+   later" UX, and prove web is untouched; no code until go); pre-code blast radius
+   + adversarial pass **twice**, specifically covering app-killed-mid-upload, a
+   second upload while one is in flight, `multipart-upload` erroring partway, and
+   whether a failed background upload can leave a `videos` row stuck at pending;
+   post-code Pass A diff audit (every removed line justified) + a field-by-field
+   compare of a background-uploaded `videos` row + storage object against a
+   foreground-uploaded one + green playback audit; TestFlight build; Adam tests
+   solo; then and only then the flag widens.
 
 > ✅ **SETTLED (Adam, 2026-09-06).** Invariant 3 and the 2026-09-05 "EVERY sport
 > uses the tag-group model" section below are compatible, and both stand.
