@@ -50,6 +50,41 @@ appears to require breaking one, stop and ask — do not "improve" your way past
    compare of a background-uploaded `videos` row + storage object against a
    foreground-uploaded one + green playback audit; TestFlight build; Adam tests
    solo; then and only then the flag widens.
+7. **THE LOOP IS MANDATORY (Adam, 2026-09-12).** Every change to app code, Edge
+   Functions, SQL, or config runs this loop. No exceptions for "small" or
+   "one-line" changes — those are where the regressions have come from.
+
+   **PRE-CODE (report, then WAIT for go):**
+   a. **Blast radius:** every file to be touched, every existing function to be
+      modified, every existing style key to be modified. Expected counts stated
+      up front; any surprise = STOP.
+   b. **Consumers:** grep for every caller/importer of anything being changed.
+      List them. Anything shared with another surface, sport, or screen is named
+      explicitly.
+   c. **Baseline:** capture what "before" looks like for the thing being changed
+      and for the nearest thing that could break — screenshots, the export
+      baseline file, the playback audit, a query result. Whatever proves
+      "unchanged" afterward.
+   d. **Adversarial pass, twice:** "how could this change something I did not
+      intend?" Turn every "probably not" into a concrete check with evidence.
+      Specifically cover: other sports, other surfaces (native / web / phone
+      browser), existing tagged clips, playback, and the locked layouts.
+
+   **POST-CODE (report, then WAIT for go before commit):**
+   e. **Diff audit:** `git diff --stat` matches the pre-code file list exactly.
+      Every removed line pasted and justified individually. Zero unplanned
+      style-key changes. Lint + typecheck clean.
+   f. **Baseline re-run:** everything captured in (c) re-captured and compared.
+      Identical, or the difference is exactly the intended change and nothing
+      else.
+   g. **Cross-surface sanity:** open the changed thing on every surface it exists
+      on, for a flag team and a basketball team.
+   h. **Closing line** per rule 4 of the locked-layout section, stating what
+      changed and what did not. If the line cannot be written truthfully, do not
+      commit.
+
+   Adam paste-approves between pre-code and code, and between post-code and
+   commit. A change that skips a step is reverted, not patched.
 
 > ✅ **SETTLED (Adam, 2026-09-06).** Invariant 3 and the 2026-09-05 "EVERY sport
 > uses the tag-group model" section below are compatible, and both stand.
