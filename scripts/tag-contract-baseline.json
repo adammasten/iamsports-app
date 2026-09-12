@@ -46,6 +46,24 @@
       "group_tag_ids": ["8386231e-c073-4107-a774-c740dfb0f5dd"],
       "group_readable": ["Touchdown (off_result)"],
       "matched_clip_ids": ["95c87a58-958e-47c0-9e88-c2e0df3d01b7", "f8c8f511-8908-49b6-a8b1-606e07333a84"]
+    },
+    {
+      "label": "quick_export_all_offense",
+      "note": "0b item 2: 'All offense' quick-export button = group [Offense possession tag] via clipMatchesGroup, output CHRONOLOGICAL (game_date, video sort_order, clip start_time). Vs Ravens = single video, so start_time order. Must match exactly, in order.",
+      "order": "chronological",
+      "video_id": "aa365e27-e062-4eca-b5e3-28ff3a84d427",
+      "group_tag_ids": ["a3421314-9eb9-44e6-91c4-a901e656033e"],
+      "group_readable": ["Offense (possession stamp)"],
+      "matched_clip_ids": ["4bc8843c-5ad5-4b85-8c4b-1f8b7dabd23c", "1c792986-9004-491c-bf9d-4ec62cbf6a84", "e5785542-5b4f-434f-a3ea-5667783c53b4", "200a822e-ed8f-4a8a-a65c-573e28624166", "ce060ac3-6178-49bd-98f9-cf016369370d", "f8c8f511-8908-49b6-a8b1-606e07333a84", "95c87a58-958e-47c0-9e88-c2e0df3d01b7", "ab18bb14-4d21-4dbc-be26-cc86af8deb51", "45fdd7e5-7723-4ea1-a62a-696453ccf29d", "38ba291f-03c1-45cd-b0bd-a5018cc3557c", "34c3b813-f161-4b50-88de-b879137ba989", "abee1126-af7d-440b-ab2e-6e29ac9702df", "b0dc039f-e334-42ad-b16b-fa056c01e3a1", "2356e322-3905-4984-87cb-00631960ae84", "a63d7d4d-cb36-43fe-a96a-aef8aaf9e17f", "66096475-d6f4-4341-a76e-9f89222e3bd8", "f5846c14-29b3-4a58-b6d2-8459e06ab885", "d84cb8a6-4890-4261-848b-4dd311aa60b9", "3ffef5ab-6533-46dd-bec7-3243785962d6"]
+    },
+    {
+      "label": "quick_export_all_defense",
+      "note": "0b item 2: 'All defense' quick-export button = group [Defense possession tag], chronological order.",
+      "order": "chronological",
+      "video_id": "aa365e27-e062-4eca-b5e3-28ff3a84d427",
+      "group_tag_ids": ["a57e1ddd-f54a-400f-ba37-69facc9f6ef2"],
+      "group_readable": ["Defense (possession stamp)"],
+      "matched_clip_ids": ["64f782b8-996a-419e-9c04-c9a318f1d7f8", "dc5d1e37-6b35-49b0-9cc0-309d7c2aacb0", "b3fbd20a-f010-428d-8672-f19ebede9883", "a8f9d9e9-e21e-42fc-a425-95a179d402aa", "1d518c3f-9d29-401e-b9ad-cb78c67dffd3", "a2a5f05f-04ad-4081-b7cc-c24a8871661b", "dfc752fb-3a70-4714-905c-3eb58ed31295", "08828c8a-c12f-463e-bc97-28f4ced31be5", "5fe17a35-f0e6-402e-b83b-0110fdb7b39b", "bc4a5d74-7278-48eb-bfe0-15da82748627", "ca1b098b-ceb1-4c48-af93-9331c1ef9f16", "f84116df-c866-4848-bc47-04218041eb8e", "c7ff5b78-e401-4f50-aa74-6453313146f1", "84a70f8f-1401-43a9-b5fc-3a42cdbcbeb9", "851cf3be-cab8-4b6c-9540-f632dd15184d", "66839bd7-33c5-46e7-9dce-649716d1c86b", "81e05af7-6241-40af-ad19-ed99672ee8ac", "762c85fb-8013-43c8-97d4-57fecab621a3", "aa85b2c9-2e54-4bb2-b730-7b52ae731c10", "ecd4aff5-3d50-4ae6-ab0e-b6cf90718a3a", "b16a192b-3ad5-4959-a7a2-ef9d53896860", "45098a97-c2f0-43bc-ad21-7098fa6a73d4"]
     }
   ]
 }

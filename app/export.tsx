@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { clipMatchesGroup } from '@/lib/core/clip-filtering';
-import { categoriesForSports } from '@/lib/core/tag-categories';
+import { categoriesForSports, phasesForSport } from '@/lib/core/tag-categories';
 import { generateReelThumbnailInBackground } from '@/lib/native/optimize';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
@@ -493,15 +493,15 @@ export default function ExportScreen() {
     setExcludedClips(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
   }
 
-  async function loadClips() {
-    const allGroups = currentGroup.length > 0 ? [...tagGroups, currentGroup] : tagGroups;
+  async function loadClips(groupsArg?: string[][], chronological = false) {
+    const allGroups = groupsArg ?? (currentGroup.length > 0 ? [...tagGroups, currentGroup] : tagGroups);
     if (selectedGames.length === 0) { webAlert('Select at least one game', 'Select at least one game'); return; }
     if (allGroups.length === 0) { webAlert('Add at least one tag group', 'Add at least one tag group'); return; }
     setLoading(true);
 
     const { data: videos, error: videosErr } = await supabase
       .from('videos')
-      .select('id, url, original_url, label, game_id, upload_status, sport, team_id')
+      .select('id, url, original_url, label, game_id, upload_status, sport, team_id, sort_order')
       .in('game_id', selectedGames)
       .is('deleted_at', null); // skip soft-deleted videos too
     if (videosErr) { webAlert('Couldn’t load videos', videosErr.message); setLoading(false); return; }
@@ -556,6 +556,8 @@ export default function ExportScreen() {
         videoTeamId: (video?.team_id ?? null) as string | null,
         videoLabel: video?.label,
         gameTitle: game?.title,
+        gameDate: game?.game_date ?? null,
+        videoSortOrder: (video?.sort_order ?? 0) as number,
       };
     });
 
@@ -568,12 +570,28 @@ export default function ExportScreen() {
       });
     });
 
+    // Quick export requests chronological game order (game date → video sort_order →
+    // clip start). Normal selections are left in their existing order (unchanged).
+    if (chronological) {
+      matchedClips.sort((a, b) =>
+        String(a.gameDate ?? '').localeCompare(String(b.gameDate ?? '')) ||
+        (a.videoSortOrder - b.videoSortOrder) ||
+        ((a.start_time ?? 0) - (b.start_time ?? 0)));
+    }
     setClips(matchedClips);
     setExcludedClips([]);
     if (currentGroup.length > 0) setTagGroups(allGroups);
     setCurrentGroup([]);
     setStep('review');
     setLoading(false);
+  }
+
+  // Quick export: one tap selects every clip stamped with a phase (OFF/DEF/SP) via a
+  // normal single-tag group, so clipMatchesGroup does the matching unchanged; output
+  // is chronological (game order). Rendered only for phased sports (see tags step).
+  function runQuickExport(phaseTagId: string) {
+    setTagGroups([[phaseTagId]]);
+    loadClips([[phaseTagId]], true);
   }
 
   async function pollJob(jobId: string) {
@@ -756,6 +774,15 @@ export default function ExportScreen() {
       ...categoriesForSports(pickerSports),
       { key: 'players', label: 'Players' },
     ];
+    // Quick-export phase buttons — only for phased sports (football family), and only
+    // phases actually present in the selected games (possession stamp in usedTagIds).
+    const phasedSport = [...pickerSports].find(s => phasesForSport(s));
+    const possTagId = (name: string) => tags.find((t: any) => t.category === 'possession' && t.name === name)?.id as string | undefined;
+    const quickPhases = phasedSport
+      ? (phasesForSport(phasedSport) || [])
+          .map(p => ({ label: p.label, tagId: possTagId(p.possessionTag) }))
+          .filter((q): q is { label: string; tagId: string } => !!q.tagId && usedTagIds.has(q.tagId))
+      : [];
     const highlightSelected = !!highlightTagId && currentGroup.includes(highlightTagId);
     const poeSelected = !!poeTagId && currentGroup.includes(poeTagId);
     // Over-stacked = a group that can't realistically land on one play: 3+ action
@@ -836,6 +863,20 @@ export default function ExportScreen() {
           </View>
         </View>
 
+        {/* QUICK EXPORT: one tap = every clip stamped with a phase, in game order.
+            Only rendered for phased sports, only phases present in the selected games. */}
+        {quickPhases.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>QUICK EXPORT</Text>
+            <View style={styles.tagGrid}>
+              {quickPhases.map(q => (
+                <TouchableOpacity key={q.tagId} style={styles.quickExportBtn} onPress={() => runQuickExport(q.tagId)}>
+                  <Text style={styles.quickExportBtnText}>All {q.label.toLowerCase()}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
         {/* SLICE 1: only tags actually applied in the selected games. */}
         {categoryDefs.map(cat => {
           const catTags = tags.filter(t => t.category === cat.key && usedTagIds.has(t.id));
@@ -880,7 +921,7 @@ export default function ExportScreen() {
 
         <TouchableOpacity
           style={[styles.nextBtn, (tagGroups.length === 0 && currentGroup.length === 0) && styles.disabledBtn]}
-          onPress={loadClips}
+          onPress={() => loadClips()}
         >
           <Text style={styles.nextBtnText}>{loading ? 'Loading...' : 'Next: Review Clips →'}</Text>
         </TouchableOpacity>
@@ -1137,6 +1178,8 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 12, fontWeight: '700', color: colors.textMuted, marginBottom: 8, letterSpacing: 0.5 },
   tagGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   tagBtn: { backgroundColor: colors.surface, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.border },
+  quickExportBtn: { backgroundColor: colors.amber, borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: colors.amber },
+  quickExportBtnText: { fontSize: 14, color: '#1a1a1a', fontWeight: '800' },
   tagBtnSelected: { backgroundColor: colors.brand, borderColor: colors.brand },
   tagBtnDimmed: { opacity: 0.3 },
   emptyTagsHint: { color: colors.textMuted, fontSize: 13, lineHeight: 19, marginTop: 4, marginBottom: 8 },
