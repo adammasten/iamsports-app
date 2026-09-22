@@ -265,11 +265,11 @@ export default function TaggingStudioWeb() {
       setSpecial({ highlight, poe, goodPlay });
       setPeriodTags(periods);
       setPossessionTags(possessions);
-      // Flag football: default to the Offense phase so a per-phase board shows immediately
-      // (pre-migration those categories are empty → the board falls back to the 5-col view).
-      if (isFlagFootball(tagSport)) {
-        setActivePossession(prev => prev ?? possessions.find(p => p.name === 'Offense')?.id ?? null);
-      }
+      // Every sport defaults to the Offense phase so a clip is never saved without a
+      // possession stamp (Adam, 2026-09-22). Flag additionally uses it to pick the
+      // per-phase board; other sports only stamp — their columns don't change.
+      // `prev ??` means this only fills an empty slot, never overrides a coach mid-game.
+      setActivePossession(prev => prev ?? possessions.find(p => p.name === 'Offense')?.id ?? null);
     })();
     return () => { cancelled = true; };
   }, [teamId, tagSport]);

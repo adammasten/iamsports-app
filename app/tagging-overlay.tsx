@@ -502,11 +502,11 @@ export default function TaggingOverlayScreen() {
       const possOrder = ['Offense', 'Defense', 'Special Teams'];
       const possSorted = possessions.sort((a, b) => possOrder.indexOf(a.name) - possOrder.indexOf(b.name));
       setPossessionTags(possSorted);
-      // Flag football: default to the Offense phase so a per-phase board shows immediately
-      // (pre-migration those categories are empty → the board falls back to the 5-col view).
-      if (isFlagFootball(tagSport)) {
-        setActivePossession((prev: any) => prev ?? possSorted.find(p => p.name === 'Offense') ?? null);
-      }
+      // Every sport defaults to the Offense phase so a clip is never saved without a
+      // possession stamp (Adam, 2026-09-22). Flag additionally uses it to pick the
+      // per-phase board; other sports only stamp — their columns don't change.
+      // `prev ??` means this only fills an empty slot, never overrides a coach mid-game.
+      setActivePossession((prev: any) => prev ?? possSorted.find(p => p.name === 'Offense') ?? null);
     })();
     return () => { cancelled = true; };
   }, [tagTeamId, tagSport]);
