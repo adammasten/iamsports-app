@@ -142,13 +142,22 @@ export default function TagsScreen() {
 
   const renderCategory = (cat: TagCategory) => {
     const rows = tags[cat.key] ?? [];
+    // Players are owned by the roster: adding a player there fires ensure_player_tag,
+    // which creates the chip already linked to that kid. A chip made here instead
+    // would carry no player_id, so it tags clips but produces no lineup row and no
+    // player attribution. Hide + Add and long-press delete; hide/reorder still work.
+    const isRoster = cat.key === 'players';
     return (
       <View key={cat.key}>
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: cat.color }]}>{cat.label}</Text>
-          <TouchableOpacity onPress={() => { setAddingTo(cat.key); setNewTagName(''); setNewTagScope(activeTeam ? 'team' : 'global'); }}>
-            <Text style={[styles.addBtn, { color: cat.color }]}>+ Add</Text>
-          </TouchableOpacity>
+          {isRoster ? (
+            <Text style={styles.rosterNote}>from your roster</Text>
+          ) : (
+            <TouchableOpacity onPress={() => { setAddingTo(cat.key); setNewTagName(''); setNewTagScope(activeTeam ? 'team' : 'global'); }}>
+              <Text style={[styles.addBtn, { color: cat.color }]}>+ Add</Text>
+            </TouchableOpacity>
+          )}
         </View>
         {rows.map((tag, index) => {
           const isFirst = index === 0;
@@ -156,7 +165,7 @@ export default function TagsScreen() {
           const hidden = hiddenIds.has(tag.id);
           return (
             <View key={tag.id} style={[styles.tagRow, { backgroundColor: cat.bg }, hidden && styles.tagRowHidden]}>
-              <TouchableOpacity style={styles.tagBody} onLongPress={() => deleteTag(tag)} delayLongPress={400}>
+              <TouchableOpacity style={styles.tagBody} onLongPress={isRoster ? undefined : () => deleteTag(tag)} delayLongPress={400}>
                 <Text style={[styles.tagText, { color: cat.color }, hidden && styles.tagTextHidden]}>
                   {getScopeLabel(tag)} {tag.name}{hidden ? '  · hidden' : ''}
                 </Text>
@@ -272,6 +281,7 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 16 },
   sectionTitle: { fontSize: 16, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   addBtn: { fontSize: 14, fontWeight: '600' },
+  rosterNote: { fontSize: 12, color: '#888', fontStyle: 'italic' },
   tagRow: { flexDirection: 'row', alignItems: 'stretch', borderRadius: 8, marginBottom: 4, overflow: 'hidden' },
   tagRowHidden: { opacity: 0.5 },
   tagTextHidden: { textDecorationLine: 'line-through' },
