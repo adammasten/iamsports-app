@@ -1,5 +1,7 @@
 import ExpoModulesCore
 import Foundation
+import Network
+import UIKit
 
 // Background uploader (Phase 0b). An iOS background URLSession keeps file-backed PUT
 // tasks running while the app is backgrounded / the screen is locked.
@@ -10,8 +12,15 @@ import Foundation
 //
 // Multipart parts are staged as file-backed temp files and all enqueued up front (iOS
 // runs independent tasks in any order and rate-limits scheduling NEW work from the
-// background — so we enqueue everything while foregrounded). Still TODO: force-quit
-// resume + the handleEventsForBackgroundURLSession relaunch hook.
+// background — so we enqueue everything while foregrounded).
+//
+// RELAUNCH: when iOS terminates the app and later finishes background tasks, it
+// relaunches us and calls handleEventsForBackgroundURLSession. The subscriber at the
+// bottom of this file holds that completion handler and fires it once the session has
+// drained (urlSessionDidFinishEvents), which is what lets iOS keep giving us
+// background time. Recovering WHICH upload those tasks belonged to is JS's job — the
+// in-memory `jobs` map does not survive termination, so JS persists {key, uploadId}
+// and reconciles against the server's ListParts on next launch.
 
 struct UploadPart: Record {
   @Field var partNumber: Int = 0
@@ -32,6 +41,23 @@ public class BackgroundUploadModule: Module {
 
     AsyncFunction("ping") { () -> String in
       return "background-upload alive"
+    }
+
+    // Is the current path metered? NWPath.isExpensive is Apple's own definition of
+    // cellular / personal hotspot. Used to decide whether resuming a multi-GB upload
+    // on relaunch would quietly eat someone's data plan. No extra dependency.
+    AsyncFunction("isExpensiveNetwork") { () -> Bool in
+      return NetworkProbe.shared.isExpensive()
+    }
+
+    // Keep a staged upload source out of iCloud backup. The file lives in Documents so
+    // iOS cannot purge it mid-upload (Caches can be evicted under storage pressure),
+    // but a 15 GB game must not then try to sync to iCloud.
+    AsyncFunction("excludeFromBackup") { (fileUri: String) -> Bool in
+      var url = URL(fileURLWithPath: fileUri.replacingOccurrences(of: "file://", with: "").removingPercentEncoding ?? fileUri)
+      var values = URLResourceValues()
+      values.isExcludedFromBackup = true
+      do { try url.setResourceValues(values); return true } catch { return false }
     }
 
     // Single presigned PUT. Resolves once ENQUEUED; result via onComplete/onError.
@@ -87,6 +113,9 @@ final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTask
 
   private var session: URLSession!
   // taskIdentifier -> (uploadId, partNumber?). partNumber nil = single PUT.
+  // Held only between an iOS background relaunch and the session draining. Calling it
+  // is what tells iOS we're done; failing to call it costs us future background time.
+  private var backgroundCompletionHandler: (() -> Void)?
   private var taskCtx: [Int: (uploadId: String, partNumber: Int?)] = [:]
   private var jobs: [String: MultipartJob] = [:]
   private var responseBody: [Int: Data] = [:]
@@ -115,6 +144,17 @@ final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTask
   }
 
   // MARK: - Single PUT
+
+  func setBackgroundCompletionHandler(_ handler: @escaping () -> Void) {
+    lock.lock(); backgroundCompletionHandler = handler; lock.unlock()
+  }
+
+  // Session has delivered every pending background completion. Must be called on the
+  // main thread, per URLSession's documented contract.
+  func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+    lock.lock(); let handler = backgroundCompletionHandler; backgroundCompletionHandler = nil; lock.unlock()
+    DispatchQueue.main.async { handler?() }
+  }
 
   func startSingle(uploadId: String, fileUri: String, uploadUrl: String, headers: [String: String]) {
     guard let url = URL(string: uploadUrl) else {
@@ -332,5 +372,48 @@ final class BackgroundUploader: NSObject, URLSessionDataDelegate, URLSessionTask
 
     if emitDone { emit?("onComplete", ["uploadId": ctx.uploadId, "parts": payload]) }
     else if emitFail { emit?("onError", ["uploadId": ctx.uploadId, "error": "incomplete", "failedParts": failedList]) }
+  }
+}
+
+
+// NWPathMonitor wrapper. Started once; `isExpensive` is read synchronously from the
+// last observed path, so callers never block on the monitor's queue.
+final class NetworkProbe {
+  static let shared = NetworkProbe()
+  private let monitor = NWPathMonitor()
+  private let queue = DispatchQueue(label: "com.masten32.iamsports.netprobe")
+  private var expensive = false
+  private let lock = NSLock()
+
+  private init() {
+    monitor.pathUpdateHandler = { [weak self] path in
+      self?.lock.lock()
+      self?.expensive = path.isExpensive
+      self?.lock.unlock()
+    }
+    monitor.start(queue: queue)
+  }
+
+  func isExpensive() -> Bool {
+    lock.lock(); defer { lock.unlock() }
+    return expensive
+  }
+}
+
+// THE RELAUNCH HOOK. Without this, iOS relaunching the app to deliver background
+// URLSession completions has nowhere to hand its completion handler, and the system
+// stops granting us background time. Registered via expo-module.config.json's
+// `appDelegateSubscribers`, so no ios/ directory or config plugin is needed.
+public class BackgroundUploadAppDelegate: ExpoAppDelegateSubscriber {
+  public func application(
+    _ application: UIApplication,
+    handleEventsForBackgroundURLSession identifier: String,
+    completionHandler: @escaping () -> Void
+  ) -> Bool {
+    guard identifier == "com.masten32.iamsports.upload" else { return false }
+    // Touch `shared` so the session (and its delegate) is recreated after relaunch —
+    // otherwise the pending completions have nobody to deliver to.
+    BackgroundUploader.shared.setBackgroundCompletionHandler(completionHandler)
+    return true
   }
 }

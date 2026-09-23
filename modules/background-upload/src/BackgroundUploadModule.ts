@@ -26,6 +26,15 @@ declare class BackgroundUploadModuleType extends NativeModule<BackgroundUploadEv
   // presigned S3 UploadPart URL (from the multipart-upload Edge Function). onComplete
   // fires with `parts` (partNumber + ETag) — pass those to the 'complete' action.
   startMultipartUpload(uploadId: string, fileUri: string, partSize: number, parts: UploadPart[]): Promise<void>;
+
+  // Is the current network path metered (cellular / personal hotspot)? Apple's own
+  // NWPath.isExpensive. Used before auto-resuming a multi-GB upload so we don't quietly
+  // spend someone's data plan.
+  isExpensiveNetwork(): Promise<boolean>;
+
+  // Mark a staged upload source as excluded from iCloud backup. The source lives in
+  // Documents (Caches can be purged mid-upload), so it must not try to sync.
+  excludeFromBackup(fileUri: string): Promise<boolean>;
 }
 
 // requireOPTIONALNativeModule returns null when the native module isn't present —

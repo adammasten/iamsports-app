@@ -1,6 +1,10 @@
 import { useTeamContext } from '@/context';
 import { pendingFileSize, pickVideos, uploadVideoToBucket, type PendingFile } from '@/lib/native/video-upload';
 import { optimizeVideoInBackground } from '@/lib/native/optimize';
+import { isBackgroundUploadAllowed } from '@/lib/core/flags';
+import { startBackgroundMultipart } from '@/lib/native/background-upload';
+import { saveRecoveryRecord, stageSourceForDurableUpload } from '@/lib/native/upload-recovery';
+import BackgroundUpload from '@/modules/background-upload';
 import { requirePermission } from './permissionGuard';
 import {
   defaultUploadTitle, dateToYMD, deriveResult, EVENT_TYPES, gameTitle, makeVideoLabel, NEW_TOURNAMENT, SEASON_TERMS, SPORTS,
@@ -215,6 +219,12 @@ export default function UploadScreen() {
           `${r.succeeded.length} of ${total} uploaded${gameId ? ' to the game' : ''}. Failed: ${r.failed.join(', ')}. The successful videos were kept — re-add the failed ones from Film Room.`,
         );
       }
+      if (r.backgrounded > 0) {
+        webAlert(
+          'Uploading in the background',
+          `${r.backgrounded === 1 ? 'This video is' : `These ${r.backgrounded} videos are`} still transferring. You can lock your phone or use other apps — it keeps going, and it picks up where it left off if it gets interrupted. Film Room will show “Uploading…” until it finishes.`,
+        );
+      }
       setDone({
         count: r.succeeded.length, total, where: activeTeam ? activeTeam.name : 'Film Room', first: r.first,
         game: gameId ? { id: gameId, teamId: teamId || null, eventType, eventDate: evDate, sport: resolvedSport, seasonId } : null,
@@ -233,6 +243,7 @@ export default function UploadScreen() {
     startSortOrder: number,
   ) {
     const succeeded: string[] = [];
+    let backgrounded = 0;   // enqueued to the native uploader — still transferring, NOT finished
     const failed: string[] = [];
     let first: { videoId: string; url: string; label: string } | null = null;
     for (let i = 0; i < files.length; i++) {
@@ -265,6 +276,36 @@ export default function UploadScreen() {
         }).select('id').single();
         if (error || !v) throw new Error(error?.message ?? 'Failed to save video');
         vid = v.id;
+        // BACKGROUND UPLOADER (invariant 6): native iOS only, allowlisted account
+        // only, module present only. Everyone else — and ALL of web — keeps the
+        // foreground TUS path untouched. Same bucket, same key, same row contract, so
+        // nothing downstream can tell which uploader produced the object.
+        const f = files[i];
+        const useBackground =
+          Platform.OS === 'ios' && !!BackgroundUpload &&
+          isBackgroundUploadAllowed(userId) && !f.isWeb && !!f.uri;
+
+        if (useBackground) {
+          // Move the picker's CACHE copy somewhere iOS won't purge mid-upload. A move
+          // inside the app container is a rename — no second copy of a 15 GB game.
+          const durableUri = await stageSourceForDurableUpload(f.uri!, fileName);
+          const started = await startBackgroundMultipart({ key: fileName, fileUri: durableUri, fileSize: bytes });
+          // Persist BEFORE reporting progress: if the app dies one second later, this
+          // record is the only way back to the parts already in S3.
+          await saveRecoveryRecord({
+            key: started.key, uploadId: started.uploadId, fileUri: durableUri,
+            partSize: started.partSize, numParts: started.numParts,
+            videoId: v.id, startedAt: Date.now(),
+          });
+          console.log(`[upload] background multipart enqueued key=${started.key} uploadId=${started.uploadId} parts=${started.numParts}`);
+          // The row stays 'uploading'. It is finished by the native onComplete handler
+          // or, if the app dies first, by reconcileBackgroundUpload() on next launch.
+          backgrounded++;
+          succeeded.push(vidLabel);
+          if (!first) first = { videoId: v.id, url: fileName, label: vidLabel };
+          continue;
+        }
+
         await uploadVideoToBucket(fileName, files[i], setProgress, bytes);
         optimizeVideoInBackground(fileName);   // auto-optimize the fresh upload (faststart 720p; fire-and-forget)
         const { error: flipErr } = await supabase.from('videos')
@@ -284,7 +325,7 @@ export default function UploadScreen() {
         failed.push(vidLabel);
       }
     }
-    return { succeeded, failed, first };
+    return { succeeded, failed, first, backgrounded };
   }
 
   // Success-screen "Add more videos to this game" — reuses the picker + uploadBatch

@@ -2,6 +2,7 @@ import { TeamProvider, useTeamContext } from '@/context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePushRegistration } from '@/lib/native/push';
 import { reconcilePendingUploads } from '@/lib/native/upload-reconcile';
+import { installBackgroundUploadListeners, reconcileBackgroundUpload } from '@/lib/native/upload-recovery';
 import { reconcile as reconcileVideoCache } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
@@ -221,6 +222,17 @@ export default function RootLayout() {
     // Resolve videos left 'uploading' by a killed/backgrounded upload: size-verify
     // and flip to 'ready', or mark stale stragglers 'failed'. Self-guards on session.
     reconcilePendingUploads().catch(e => console.warn('[upload-reconcile] failed:', e));
+
+    // Background multipart recovery. Separate from reconcilePendingUploads on purpose:
+    // that one size-verifies raw bytes, this one asks the SERVER which parts landed and
+    // either finalizes an upload that completed while the app was dead, or re-sends only
+    // the missing parts. On a metered network it stops and reports 'needs-wifi' rather
+    // than quietly spending a coach's data plan.
+    const removeBgListeners = installBackgroundUploadListeners();
+    reconcileBackgroundUpload()
+      .then(r => { if (r.state !== 'none') console.log('[bg-recovery] outcome:', JSON.stringify(r)); })
+      .catch(e => console.warn('[bg-recovery] failed:', e));
+    return removeBgListeners;
   }, []);
 
   return (
