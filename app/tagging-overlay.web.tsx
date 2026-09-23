@@ -9,6 +9,7 @@ import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
+import { categoriesForSport, phasesForSport } from '@/lib/core/tag-categories';
 import {
   type Odk, type FbCtx, type FbSel, ODK_SHORT, isFlagFootball,
   FB_FORMATIONS, FB_PLAY_TYPES, FB_RESULT_OFF, FB_FRONTS, FB_COVERAGES, FB_RESULT_DEF, FB_ST_UNITS, FB_RESULT_ST,
@@ -80,7 +81,7 @@ export default function TaggingStudioWeb() {
 
   const [teamId, setTeamId] = useState<string | null>(null);
   const [sport, setSport] = useState<string | null>(null);
-  const [tags, setTags] = useState<Record<string, Tag[]>>({ players: [], offense: [], defense: [], plays: [] });
+  const [tags, setTags] = useState<Record<string, Tag[]>>({});
   const [special, setSpecial] = useState<{ highlight: string | null; poe: string | null; goodPlay: string | null }>({ highlight: null, poe: null, goodPlay: null });
   const [periodTags, setPeriodTags] = useState<Tag[]>([]);
   const [activePeriod, setActivePeriod] = useState<string | null>(null);
@@ -223,7 +224,7 @@ export default function TaggingStudioWeb() {
       // Global tags are sport-scoped (sport=null is universal, e.g. ★/POE);
       // team tags belong to the team regardless of sport. Mirrors the mobile tagger.
       const globalBranch = tagSport
-        ? `and(scope.eq.global,or(sport.is.null,sport.eq.${tagSport}))`
+        ? `and(scope.eq.global,or(sport.is.null,sport.ilike.${tagSport}))`
         : `scope.eq.global`;
       q = teamId
         ? q.or(`${globalBranch},and(scope.eq.team,team_id.eq.${teamId})`)
@@ -233,7 +234,10 @@ export default function TaggingStudioWeb() {
       // Exclude tags this team has hidden (special tags never appear in the hide UI).
       const hidden = teamId ? await loadHiddenTagIds(teamId).catch(() => new Set<string>()) : new Set<string>();
       if (cancelled) return;
-      const grouped: Record<string, Tag[]> = { players: [], offense: [], defense: [], plays: [], formation: [], play: [], result: [], off_formation: [], off_play: [], off_result: [], def_scheme: [], def_opp_play: [], def_our_play: [], def_result: [], st_play: [], st_result: [] };
+      // Bucket EVERY category returned. The fixed key literal that used to live here
+      // silently DROPPED unlisted categories, which is why adding a category meant
+      // editing this file. Which columns render is decided by the sport definition.
+      const grouped: Record<string, Tag[]> = {};
       let highlight: string | null = null, poe: string | null = null, goodPlay: string | null = null;
       const periods: Tag[] = [];
       const possessions: Tag[] = [];
@@ -245,7 +249,7 @@ export default function TaggingStudioWeb() {
         }
         else if (t.category === 'period') periods.push({ id: t.id, name: t.name, category: t.category });
         else if (t.category === 'possession') possessions.push({ id: t.id, name: t.name, category: t.category });
-        else if (grouped[t.category] && !hidden.has(t.id)) grouped[t.category].push({ id: t.id, name: t.name, category: t.category });
+        else if (!hidden.has(t.id)) (grouped[t.category] ??= []).push({ id: t.id, name: t.name, category: t.category });
       });
       const possOrder = ['Offense', 'Defense', 'Special Teams'];
       possessions.sort((a, b) => possOrder.indexOf(a.name) - possOrder.indexOf(b.name));
@@ -318,10 +322,10 @@ export default function TaggingStudioWeb() {
   // ── hotkey assignment (players → number row; events → letter pool) ──
   const hotkeys = useMemo(() => {
     const map: Record<string, string> = {};   // tagId → key
-    tags.players.forEach((t, i) => { if (i < 10) map[t.id] = String((i + 1) % 10); });
+    (tags.players ?? []).forEach((t, i) => { if (i < 10) map[t.id] = String((i + 1) % 10); });
     let ki = 0;
     (['offense', 'defense', 'plays'] as const).forEach(cat => {
-      tags[cat].forEach(t => { if (ki < EVENT_KEYS.length) map[t.id] = EVENT_KEYS[ki++]; });
+      (tags[cat] ?? []).forEach(t => { if (ki < EVENT_KEYS.length) map[t.id] = EVENT_KEYS[ki++]; });
     });
     return map;
   }, [tags]);
@@ -505,7 +509,7 @@ export default function TaggingStudioWeb() {
       if (k === 'I') { e.preventDefault(); markInNow(); return; }
       if (k === 'O') { e.preventDefault(); markOutNow(); return; }
       for (const cat of ['players', 'offense', 'defense', 'plays'] as const) {
-        const hit = tags[cat].find(t => hotkeys[t.id] === k);
+        const hit = (tags[cat] ?? []).find(t => hotkeys[t.id] === k);
         if (hit) { e.preventDefault(); tapTag(hit); return; }
       }
     };
@@ -655,26 +659,33 @@ export default function TaggingStudioWeb() {
   const possOptions = possessionTags.filter(p => isFootball || p.name !== 'Special Teams');
   const possShort = (name: string) => (name === 'Offense' ? 'OFF' : name === 'Defense' ? 'DEF' : 'SP');
 
-  // FLAG FOOTBALL: OFF/DEF/SP each swap in their OWN groupable columns. Falls back to the
-  // 5-col board if the picked phase has no tags yet (pre-migration window).
-  const FLAG_PHASE_COLS: Record<string, { key: string; label: string }[]> = {
-    Offense: [{ key: 'off_formation', label: 'Formation' }, { key: 'off_play', label: 'Play' }, { key: 'off_result', label: 'Result' }, { key: 'players', label: 'Players' }],
-    Defense: [{ key: 'def_scheme', label: 'Scheme' }, { key: 'def_opp_play', label: 'Their Play' }, { key: 'def_our_play', label: 'Our Play' }, { key: 'def_result', label: 'Result' }, { key: 'players', label: 'Players' }],
-    'Special Teams': [{ key: 'st_play', label: 'Play' }, { key: 'st_result', label: 'Result' }, { key: 'players', label: 'Players' }],
-  };
+  // Board columns come from the ONE shared sport definition (tag-categories.ts).
+  // A PHASED sport (football family) swaps in the active OFF/DEF/SP phase's columns;
+  // if that phase has no tags yet we fall back to the flat football board exactly as
+  // before, so it never renders blank.
+  // PLAYERS PLACEMENT IS UNCHANGED and deliberately differs from native: last on the
+  // phase board, FIRST on the flat board. That divergence is a separately-locked item.
+  const PLAYERS_COL = { key: 'players', label: 'Players' };
   const activePossName = possessionTags.find(p => p.id === activePossession)?.name;
-  const flagPhaseCols = (isFlag && activePossName && FLAG_PHASE_COLS[activePossName]) || null;
-  const flagPhaseHasTags = !!flagPhaseCols && flagPhaseCols.some(c => c.key !== 'players' && (tags[c.key]?.length ?? 0) > 0);
-  const useFlagPhaseBoard = isFlag && flagPhaseHasTags;
+  const sportPhases = phasesForSport(tagSport);
+  const activePhaseCode = sportPhases && activePossName
+    ? (sportPhases.find(p => p.possessionTag === activePossName)?.code ?? null)
+    : null;
+  const flagPhaseCols = activePhaseCode
+    ? categoriesForSport(tagSport, activePhaseCode).map(c => ({ key: c.key, label: c.label }))
+    : null;
+  const flagPhaseHasTags = !!flagPhaseCols && flagPhaseCols.some(c => (tags[c.key]?.length ?? 0) > 0);
+  const useFlagPhaseBoard = !!sportPhases && flagPhaseHasTags;
+  // Flat board (non-phased sport, or a phase with no tags yet).
+  const flatCols = (sportPhases ? categoriesForSport('football') : categoriesForSport(tagSport))
+    .map(c => ({ key: c.key, label: c.label }));
 
   // ── MOBILE BROWSER: immersive full-bleed layout mirroring the native app. Reuses
   //    every handler + the same top-bar arrangement; desktop layout (below) unchanged. ──
   if (isPhone) {
     const boardCols = useFlagPhaseBoard
-      ? flagPhaseCols!.map(c => ({ key: c.key, label: c.label }))
-      : isFootball
-        ? [{ key: 'players', label: 'Players' }, { key: 'formation', label: 'Formation' }, { key: 'play', label: 'Play' }, { key: 'defense', label: 'Defense' }, { key: 'result', label: 'Result' }]
-        : [{ key: 'players', label: 'Players' }, { key: 'offense', label: 'Offense' }, { key: 'defense', label: 'Defense' }, { key: 'plays', label: 'Plays' }];
+      ? [...flagPhaseCols!, PLAYERS_COL]
+      : [PLAYERS_COL, ...flatCols];
     return (
       <GestureHandlerRootView style={styles.mApp}>
         <VideoView player={player} style={{ position: 'absolute', top: 0, left: 0, width: winW, height: winH }} nativeControls={false} contentFit="contain" />
@@ -770,10 +781,8 @@ export default function TaggingStudioWeb() {
   // FS immersive board columns — the SAME set the non-FS desktop board shows below,
   // just floated over the video. Computed unconditionally (used only inside {isFS}).
   const boardCols = useFlagPhaseBoard
-    ? flagPhaseCols!.map(c => ({ key: c.key, label: c.label }))
-    : isFootball
-      ? [{ key: 'players', label: 'Players' }, { key: 'formation', label: 'Formation' }, { key: 'play', label: 'Play' }, { key: 'defense', label: 'Defense' }, { key: 'result', label: 'Result' }]
-      : [{ key: 'players', label: 'Players' }, { key: 'offense', label: 'Offense' }, { key: 'defense', label: 'Defense' }, { key: 'plays', label: 'Plays' }];
+    ? [...flagPhaseCols!, PLAYERS_COL]
+    : [PLAYERS_COL, ...flatCols];
 
   return (
     <GestureHandlerRootView style={styles.app}>

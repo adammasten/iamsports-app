@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { clipMatchesGroup } from '@/lib/core/clip-filtering';
-import { categoriesForSports, phasesForSport } from '@/lib/core/tag-categories';
+import { categoriesForSports } from '@/lib/core/tag-categories';
 import { generateReelThumbnailInBackground } from '@/lib/native/optimize';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
@@ -15,15 +15,6 @@ import Dropdown, { type DropdownOption } from './components/Dropdown';
 import FilterBar, { type FilterableItem } from './components/FilterBar';
 import { EVENT_TYPES } from '@/lib/core/upload-meta';
 import { colors } from '@/constants/theme';
-
-// Tag categories for the review-step reel tag picker. Matches the tagging
-// screens; colors read on export's light review background.
-const REEL_TAG_CATEGORIES = [
-  { key: 'offense', label: 'Offense', color: '#1a6fd4' },
-  { key: 'defense', label: 'Defense', color: '#c0392b' },
-  { key: 'plays', label: 'Plays', color: '#1e8449' },
-  { key: 'players', label: 'Players', color: '#7d3c98' },
-];
 
 // Step-1 game-picker filter options. Single-entry Type hides that dropdown
 // (games only); Sort drops "Longest" (games have no duration).
@@ -774,15 +765,16 @@ export default function ExportScreen() {
       ...categoriesForSports(pickerSports),
       { key: 'players', label: 'Players' },
     ];
-    // Quick-export phase buttons — only for phased sports (football family), and only
-    // phases actually present in the selected games (possession stamp in usedTagIds).
-    const phasedSport = [...pickerSports].find(s => phasesForSport(s));
-    const possTagId = (name: string) => tags.find((t: any) => t.category === 'possession' && t.name === name)?.id as string | undefined;
-    const quickPhases = phasedSport
-      ? (phasesForSport(phasedSport) || [])
-          .map(p => ({ label: p.label, tagId: possTagId(p.possessionTag) }))
-          .filter((q): q is { label: string; tagId: string } => !!q.tagId && usedTagIds.has(q.tagId))
-      : [];
+    // Quick-export buttons come from the possession stamps ACTUALLY USED in the
+    // selected games. Possession is written on every sport's clips, so this is no
+    // longer gated on the sport having an OFF/DEF/SP phase selector — basketball now
+    // gets All offense / All defense from data it already stamps. Flag is unchanged:
+    // the same three tags, ordered the same way. Honours the used-tags-only rule.
+    const POSSESSION_ORDER = ['Offense', 'Defense', 'Special Teams'];
+    const quickPhases = tags
+      .filter((t: any) => t.category === 'possession' && usedTagIds.has(t.id))
+      .sort((a: any, b: any) => POSSESSION_ORDER.indexOf(a.name) - POSSESSION_ORDER.indexOf(b.name))
+      .map((t: any) => ({ label: t.name as string, tagId: t.id as string }));
     const highlightSelected = !!highlightTagId && currentGroup.includes(highlightTagId);
     const poeSelected = !!poeTagId && currentGroup.includes(poeTagId);
     // Over-stacked = a group that can't realistically land on one play: 3+ action
@@ -942,6 +934,13 @@ export default function ExportScreen() {
   // football reel never shows basketball tags, and you never see another team's kids.
   const exportTeamIds = new Set(includedForScope.map(c => c.videoTeamId).filter(Boolean));
   const exportSports = new Set(includedForScope.map(c => (c.videoSport || '').trim().toLowerCase()).filter(Boolean));
+  // Reel-description categories from the shared sport definition, unioned over the
+  // sports actually being exported (so a flag reel offers OFF/DEF/SP categories, not
+  // the basketball four). Players appended last — roster-sourced, not in the definition.
+  const reelTagCategories = [
+    ...categoriesForSports(exportSports),
+    { key: 'players', label: 'Players', color: '#7d3c98' } as { key: string; label: string; color: string; phase?: string },
+  ];
   const reelTagRelevant = (t: any) => {
     if (t.category === 'players') return !!t.team_id && exportTeamIds.has(t.team_id);
     if (t.team_id) return exportTeamIds.has(t.team_id);          // team-specific play
@@ -1067,12 +1066,12 @@ export default function ExportScreen() {
             <View style={styles.card}>
               <Text style={styles.fieldLabel}>Tag this reel</Text>
               <Text style={styles.reelTagHint}>For sorting later — e.g. Defense, Press break. On top of the clips’ own tags.</Text>
-              {REEL_TAG_CATEGORIES.map(cat => {
+              {reelTagCategories.map(cat => {
                 const catTags = tags.filter((t: any) => t.category === cat.key && reelTagRelevant(t));
                 if (catTags.length === 0) return null;
                 return (
                   <View key={cat.key} style={styles.reelCatBlock}>
-                    <Text style={[styles.reelCatHeader, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
+                    <Text style={[styles.reelCatHeader, { color: cat.color }]}>{cat.phase ? `${cat.phase} · ${cat.label.toUpperCase()}` : cat.label.toUpperCase()}</Text>
                     <View style={styles.reelChipsWrap}>
                       {catTags.map((t: any) => {
                         const on = reelDescTags.has(t.id);

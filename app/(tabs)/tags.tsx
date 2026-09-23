@@ -39,7 +39,7 @@ export default function TagsScreen() {
     // match this team's sport — so a football team manages football tags, not
     // basketball ones. Team tags belong to the team regardless of sport.
     const globalBranch = activeTeam?.sport
-      ? `and(scope.eq.global,or(sport.is.null,sport.eq.${activeTeam.sport}))`
+      ? `and(scope.eq.global,or(sport.is.null,sport.ilike.${activeTeam.sport}))`
       : `scope.eq.global`;
     if (activeTeam) {
       query = query.or(`${globalBranch},and(scope.eq.team,team_id.eq.${activeTeam.id})`);

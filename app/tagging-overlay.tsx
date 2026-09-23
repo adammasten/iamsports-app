@@ -8,6 +8,7 @@ import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import { isFlagFootball } from '@/lib/core/football';
+import { categoriesForSport, phasesForSport } from '@/lib/core/tag-categories';
 import ClipPill from './components/ClipPill';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
@@ -23,14 +24,11 @@ import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-g
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// Mirrors app/(tabs)/tags.tsx, app/export.tsx, app/edit-reel.tsx — per CLAUDE.md,
-// the category list is a hardcoded literal across multiple files. Keep in sync.
-const CATEGORIES = [
-  { key: 'offense', label: 'Offense', color: '#1a6fd4', bg: '#e8f0fe' },
-  { key: 'defense', label: 'Defense', color: '#c0392b', bg: '#fde8e8' },
-  { key: 'plays',   label: 'Plays',   color: '#1e8449', bg: '#e8f8ed' },
-  { key: 'players', label: 'Players', color: '#7d3c98', bg: '#f5eef8' },
-];
+// Board categories come from the ONE shared sport definition
+// (lib/core/tag-categories.ts) — this file keeps no category list of its own.
+// Players is the sole exception: it is roster-sourced, not part of the sport
+// definition, so each surface appends it in its own position (last, here).
+const PLAYERS_COL = { key: 'players', label: 'Players', color: '#7d3c98', bg: '#f5eef8' };
 
 // Right-edge control strip (Tags/Video toggle + ★/POE) width; the tag region
 // reserves this so fullscreen tags never cover it.
@@ -54,8 +52,8 @@ const PLAYBACK_SPEEDS = [1, 1.2, 1.5, 2];
 const speedLabel = (r: number) => `${r}×`;
 
 // Converts a #RRGGBB hex string to rgba(...) with the given alpha. Used for
-// translucent chip backgrounds/borders without polluting the CATEGORIES literal
-// (which mirrors the portrait UI's shape — see CLAUDE.md).
+// translucent chip backgrounds/borders without polluting the shared category
+// definition's colors (see CLAUDE.md).
 function colorWithAlpha(hex: string, alpha: number) {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -123,7 +121,7 @@ export default function TaggingOverlayScreen() {
   const [fbDown, setFbDown] = useState(1);
   const [fbDist, setFbDist] = useState(10);
   const [fbDrive, setFbDrive] = useState(1);
-  const [tags, setTags] = useState<Record<string, any[]>>({ offense: [], defense: [], plays: [], players: [], special_teams: [], formation: [], play: [], result: [], off_formation: [], off_play: [], off_result: [], def_scheme: [], def_opp_play: [], def_our_play: [], def_result: [], st_play: [], st_result: [] });
+  const [tags, setTags] = useState<Record<string, any[]>>({});
   // Special-category tags ('★ Highlight', 'POE') are looked up by name and
   // surfaced only via dedicated buttons in markGroup — never rendered in the
   // category columns. The ★ and POE buttons are just tag toggles in disguise.
@@ -446,8 +444,13 @@ export default function TaggingOverlayScreen() {
       // otherwise it must match this content's sport, so a football team never
       // sees basketball tags. Team tags belong to the team regardless of sport —
       // keep that branch EXACTLY as-is (getting it wrong leaks tags across teams).
+      // `ilike` (no wildcards) = case-INSENSITIVE exact match. teams.sport/videos.sport
+      // are free text and have drifted in case ('Basketball' vs 'basketball'), and an
+      // `eq` filter silently returned ZERO sport tags for the mis-cased ones while the
+      // code's own sport predicates matched case-insensitively. Verified against live:
+      // ilike returns identical counts to eq for every correctly-cased sport.
       const globalBranch = tagSport
-        ? `and(scope.eq.global,or(sport.is.null,sport.eq.${tagSport}))`
+        ? `and(scope.eq.global,or(sport.is.null,sport.ilike.${tagSport}))`
         : `scope.eq.global`;
       if (tagTeamId) {
         query = query.or(`${globalBranch},and(scope.eq.team,team_id.eq.${tagTeamId})`);
@@ -464,7 +467,11 @@ export default function TaggingOverlayScreen() {
       // functional and never appear in the hide UI, so they're unaffected).
       const hidden = tagTeamId ? await loadHiddenTagIds(tagTeamId).catch(() => new Set<string>()) : new Set<string>();
       if (cancelled) return;
-      const grouped: Record<string, any[]> = { offense: [], defense: [], plays: [], players: [], special_teams: [], formation: [], play: [], result: [], off_formation: [], off_play: [], off_result: [], def_scheme: [], def_opp_play: [], def_our_play: [], def_result: [], st_play: [], st_result: [] };
+      // Bucket EVERY category the query returned. A fixed key literal used to live
+      // here and silently DROPPED any tag whose category wasn't listed, which is why a
+      // new category had to be coded into this file by hand. Which columns actually
+      // render is decided by the sport definition below, not by this bucket.
+      const grouped: Record<string, any[]> = {};
       let highlightId: string | null = null;
       let poeId: string | null = null;
       let goodPlayId: string | null = null;
@@ -479,8 +486,8 @@ export default function TaggingOverlayScreen() {
           periods.push(t);
         } else if (t.category === 'possession') {
           possessions.push(t);
-        } else if (grouped[t.category] && !hidden.has(t.id)) {
-          grouped[t.category].push(t);
+        } else if (!hidden.has(t.id)) {
+          (grouped[t.category] ??= []).push(t);
         }
       });
       // Names-hidden tagger (a non-member hired to tag): RLS hides the kids' NAMES,
@@ -790,44 +797,21 @@ export default function TaggingOverlayScreen() {
   const iPadNonFootball = isTablet && !isFootball;
   const possOptions = possessionTags.filter(p => isFootball || p.name !== 'Special Teams');
   const possShort = (name: string) => (name === 'Offense' ? 'OFF' : name === 'Defense' ? 'DEF' : 'SP');
-  // Non-flag football keeps the 5 GROUPABLE columns; every other sport keeps
-  // Offense · Defense · Plays · Players. (Flag overrides below.)
-  const FB_CATEGORIES = [
-    { key: 'formation', label: 'Formation', color: '#1a6fd4', bg: '#e8f0fe' },
-    { key: 'play',      label: 'Play',      color: '#1e8449', bg: '#e8f8ed' },
-    { key: 'defense',   label: 'Defense',   color: '#c0392b', bg: '#fde8e8' },
-    { key: 'result',    label: 'Result',    color: '#6c5ce7', bg: '#eeecfb' },
-    { key: 'players',   label: 'Players',   color: '#7d3c98', bg: '#f5eef8' },
-  ];
-  // FLAG FOOTBALL ONLY: OFF/DEF/SP each swap in their OWN columns (phase-prefixed
-  // categories). Every column is still groupable. If the picked phase has no tags yet
-  // (pre-migration window), fall back to the 5-col FB board so the tagger never goes blank.
-  const FLAG_PHASE_COLS: Record<string, { key: string; label: string; color: string; bg: string }[]> = {
-    Offense: [
-      { key: 'off_formation', label: 'Formation', color: '#1a6fd4', bg: '#e8f0fe' },
-      { key: 'off_play',      label: 'Play',      color: '#1e8449', bg: '#e8f8ed' },
-      { key: 'off_result',    label: 'Result',    color: '#6c5ce7', bg: '#eeecfb' },
-      { key: 'players',       label: 'Players',   color: '#7d3c98', bg: '#f5eef8' },
-    ],
-    Defense: [
-      { key: 'def_scheme',   label: 'Scheme',     color: '#c0392b', bg: '#fde8e8' },
-      { key: 'def_opp_play', label: 'Their Play', color: '#1a6fd4', bg: '#e8f0fe' },
-      { key: 'def_our_play', label: 'Our Play',   color: '#1e8449', bg: '#e8f8ed' },
-      { key: 'def_result',   label: 'Result',     color: '#6c5ce7', bg: '#eeecfb' },
-      { key: 'players',      label: 'Players',    color: '#7d3c98', bg: '#f5eef8' },
-    ],
-    'Special Teams': [
-      { key: 'st_play',   label: 'Play',    color: '#1e8449', bg: '#e8f8ed' },
-      { key: 'st_result', label: 'Result',  color: '#6c5ce7', bg: '#eeecfb' },
-      { key: 'players',   label: 'Players', color: '#7d3c98', bg: '#f5eef8' },
-    ],
-  };
-  let visibleCategories = isFootball ? FB_CATEGORIES : CATEGORIES;
-  if (isFlag) {
-    const phaseCols = activePossession ? FLAG_PHASE_COLS[activePossession.name] : null;
-    const phaseHasTags = !!phaseCols && phaseCols.some(c => c.key !== 'players' && (tags[c.key]?.length ?? 0) > 0);
-    visibleCategories = phaseHasTags ? phaseCols! : FB_CATEGORIES;
-  }
+  // Board columns come from the ONE shared sport definition (tag-categories.ts).
+  // Players is appended LAST on native — roster-sourced, not part of the definition.
+  // A PHASED sport (football family) shows the active OFF/DEF/SP phase's columns; if
+  // that phase has no tags yet the board falls back to the flat football columns,
+  // exactly as before, so it can never render blank.
+  const sportPhases = phasesForSport(tagSport);
+  const activePhaseCode = sportPhases && activePossession
+    ? (sportPhases.find(p => p.possessionTag === activePossession.name)?.code ?? null)
+    : null;
+  const phaseCols = activePhaseCode ? categoriesForSport(tagSport, activePhaseCode) : null;
+  const phaseHasTags = !!phaseCols && phaseCols.some(c => (tags[c.key]?.length ?? 0) > 0);
+  const baseCols = sportPhases
+    ? (phaseHasTags ? phaseCols! : categoriesForSport('football'))
+    : categoriesForSport(tagSport);
+  const visibleCategories = [...baseCols, PLAYERS_COL];
 
   // Clip-pill free band: below the top bar, above min(board top, scrubber top), between the
   // two rails — computed from LIVE measurements only. Null (→ pill hidden) when any rect is
@@ -1158,7 +1142,7 @@ export default function TaggingOverlayScreen() {
               <Text style={[styles.colHeader, isTablet && styles.colHeaderBig, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
               <ScrollView showsVerticalScrollIndicator={false}>
                 <View style={styles.chipsWrap}>
-                  {tags[cat.key].map(tag => {
+                  {(tags[cat.key] ?? []).map(tag => {
                     const selected = building.includes(tag.id);
                     return (
                       <TouchableOpacity
