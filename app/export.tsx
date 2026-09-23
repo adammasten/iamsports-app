@@ -3,6 +3,8 @@ import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { clipMatchesGroup } from '@/lib/core/clip-filtering';
 import { categoriesForSports } from '@/lib/core/tag-categories';
+import { mayReelClip, toEligibilityTags } from '@/lib/core/highlight-eligibility';
+import { reserveReel, finalizeReel, discardReel, ReelNotAllowedError } from '@/lib/core/render-reel';
 import { generateReelThumbnailInBackground } from '@/lib/native/optimize';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
@@ -107,7 +109,18 @@ export default function ExportScreen() {
   const [reelTeamId, setReelTeamId] = useState('');
   const [reelDescTags, setReelDescTags] = useState<Set<string>>(new Set());
 
-  const { userTeams } = useTeamContext();
+  const { userTeams, userId, userKids } = useTeamContext();
+  // Reel eligibility context (see lib/core/highlight-eligibility.ts). A coach on a
+  // clip's team is unrestricted; everyone else gets their own personal clips plus
+  // coach clips where their linked player made the play. The DB enforces the same
+  // rule on the highlight_reels insert — this only keeps the UI honest.
+  const eligibilityCtx = useMemo(() => ({
+    userId: userId ?? null,
+    coachTeamIds: new Set<string>(
+      (userTeams || []).filter((t: any) => ['admin', 'head_coach', 'coach'].includes(t.role)).map((t: any) => t.team_id),
+    ),
+    linkedPlayerIds: new Set<string>((userKids || []).map((k: any) => k.player_id)),
+  }), [userId, userTeams, userKids]);
   const reelTeamOptions = useMemo<DropdownOption[]>(() => {
     const seen = new Map<string, string>();
     userTeams.forEach(t => { if (!seen.has(t.team_id)) seen.set(t.team_id, t.name); });
@@ -176,62 +189,21 @@ export default function ExportScreen() {
     }
   }
 
-  // After a render finishes, persist the export as a highlight_reels row so it
-  // becomes a findable reel. Best-effort: never throws, never blocks the
-  // camera-roll save or success UI. team_id is null for now (reels are
-  // creator-owned; team association is derived later from source clips).
-  async function saveReelRecord(videoUrl: string, includedClipObjects: any[], name?: string, teamId?: string | null, descTagIds?: string[]) {
+  // The reel ROW is created up-front by reserveReel() (that insert is the
+  // authorization gate) and completed by finalizeReel(). All that is left here is
+  // the decoration: the poster thumbnail and the source clips' tags. Both are
+  // best-effort — neither may throw or undo an already-finished reel.
+  async function attachReelExtras(reelId: string, includedClipObjects: any[], descTagIds?: string[]) {
     try {
-      if (includedClipObjects.length === 0) return;
-
-      // created_by_user_id is REQUIRED — the RLS creator branch depends on it.
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        console.warn('[reel] No session user — skipping highlight_reels insert');
-        return;
-      }
-
-      // Use the name passed from the review-step field; fall back to the
-      // auto-name when empty/undefined (e.g. callers without a name field).
-      const finalName = (name && name.trim()) ? name.trim() : defaultReelName(includedClipObjects);
-      const durationSeconds = includedClipObjects.reduce(
-        (sum, c) => sum + Math.max(0, (c.end_time ?? 0) - (c.start_time ?? 0)),
-        0,
-      );
-
-      const { data: inserted, error } = await supabase.from('highlight_reels').insert({
-        created_by_user_id: user.id,
-        team_id: teamId || null,
-        name: finalName,
-        storage_path: deriveStoragePath(videoUrl),
-        source_clip_ids: includedClipObjects.map(c => c.id),
-        duration_seconds: durationSeconds,
-        overlay_mode: 'clean',
-        status: 'ready',
-      }).select('id').single();
-      if (error || !inserted?.id) {
-        console.warn('[reel] highlight_reels insert failed:', error?.message || 'no id returned');
-        return;
-      }
-
-      // Kick off the reel's poster thumbnail (fire-and-forget, best-effort).
-      generateReelThumbnailInBackground(inserted.id);
-
-      // Auto-attach: copy the distinct tags from the source clips onto the reel.
-      // Tags are already in memory (c.tagIds) — no extra query. Best-effort: a
-      // tag-copy failure must never throw or break the (already-saved) reel.
-      try {
-        const tagIds = [...new Set([...includedClipObjects.flatMap((c: any) => c.tagIds || []), ...(descTagIds || [])])];
-        if (tagIds.length > 0) {
-          const rows = tagIds.map(tag_id => ({ reel_id: inserted.id, tag_id }));
-          const { error: tagErr } = await supabase.from('reel_tags').insert(rows);
-          if (tagErr) console.warn('[reel] reel_tags insert failed:', tagErr.message);
-        }
-      } catch (e: any) {
-        console.warn('[reel] reel_tags insert threw:', e?.message || e);
+      generateReelThumbnailInBackground(reelId);
+      const tagIds = [...new Set([...includedClipObjects.flatMap((c: any) => c.tagIds || []), ...(descTagIds || [])])];
+      if (tagIds.length > 0) {
+        const rows = tagIds.map(tag_id => ({ reel_id: reelId, tag_id }));
+        const { error: tagErr } = await supabase.from('reel_tags').insert(rows);
+        if (tagErr) console.warn('[reel] reel_tags insert failed:', tagErr.message);
       }
     } catch (e: any) {
-      console.warn('[reel] highlight_reels insert threw:', e?.message || e);
+      console.warn('[reel] attachReelExtras threw:', e?.message || e);
     }
   }
 
@@ -514,7 +486,7 @@ export default function ExportScreen() {
     // ~80 round-trips into one.
     const { data: clipData, error: clipErr } = await supabase
       .from('clips')
-      .select('*, clip_tags ( tag_id, bundle_number )')
+      .select('*, clip_tags ( tag_id, bundle_number, tags ( category, player_id, tag_polarity ) )')
       .in('video_id', videoIds);
     if (clipErr) { webAlert('Couldn’t load clips', clipErr.message); setLoading(false); return; }
 
@@ -552,10 +524,18 @@ export default function ExportScreen() {
       };
     });
 
+    // Reel-eligibility gate: drop clips this user may not put in a reel before any
+    // matching happens. Coaches are unaffected (the rule short-circuits for them).
+    const eligibleClips = clipsWithTags.filter((clip: any) => mayReelClip(
+      { teamId: clip.team_id ?? null, origin: clip.origin ?? null,
+        createdByUserId: clip.created_by_user_id ?? null, tags: toEligibilityTags(clip.clip_tags) },
+      eligibilityCtx,
+    ));
+
     // Match clips to groups using bundle-aware AND logic
     const matchedClips: any[] = [];
     allGroups.forEach((group, groupIndex) => {
-      const groupClips = clipsWithTags.filter(clip => clipMatchesGroup(clip, group));
+      const groupClips = eligibleClips.filter(clip => clipMatchesGroup(clip, group));
       groupClips.forEach(clip => {
         matchedClips.push({ ...clip, groupIndex, groupTags: group });
       });
@@ -638,7 +618,21 @@ export default function ExportScreen() {
       }));
     console.log('[export] includedClips count:', includedClips.length, 'first clip:', includedClips[0]);
 
+    let reelId: string | null = null;
     try {
+      // AUTHORIZE FIRST. highlight_reels' WITH CHECK runs may_reel_clip() over these
+      // ids; an ineligible clip stops the export before Railway is ever called. The
+      // row is reserved at status='rendering' with a null storage_path, so it can
+      // never be mistaken for a finished reel.
+      const durationSeconds = includedClipObjects.reduce(
+        (sum: number, c: any) => sum + Math.max(0, (c.end_time ?? 0) - (c.start_time ?? 0)), 0);
+      reelId = await reserveReel({
+        clipIds: includedClipObjects.map((c: any) => c.id),
+        name: (reelName && reelName.trim()) ? reelName.trim() : defaultReelName(includedClipObjects),
+        teamId: reelTeamId ?? null,
+        durationSeconds,
+      });
+
       console.log('[export] POSTing to Railway', `${SERVER_URL}/export`, 'clips:', includedClips.length);
       const response = await fetch(`${SERVER_URL}/export`, {
         method: 'POST',
@@ -647,7 +641,12 @@ export default function ExportScreen() {
       });
 
       const data = await response.json();
-      if (!response.ok) { console.log('[export] server rejected:', response.status, data); webAlert('Export failed', data.error || 'Something went wrong'); setExporting(false); return; }
+      if (!response.ok) {
+        console.log('[export] server rejected:', response.status, data);
+        webAlert('Export failed', data.error || 'Something went wrong');
+        if (reelId) { await discardReel(reelId); reelId = null; }
+        setExporting(false); return;
+      }
 
       // Persist before polling so a backgrounded app can resume this job.
       await saveActiveJob(data.jobId);
@@ -655,9 +654,11 @@ export default function ExportScreen() {
       setExportStatus('Processing clips...');
       const videoUrl = await pollJob(data.jobId);
 
-      // Persist the export as a reel (best-effort — must not block the save).
-      // Always saves to My Work; the camera-roll save is user-gated below.
-      await saveReelRecord(videoUrl, includedClipObjects, reelName, reelTeamId, [...reelDescTags]);
+      // Finish the reservation made above — guarded on status='rendering', so a retry
+      // can never produce a second completed record for the same reel.
+      await finalizeReel(reelId, { storagePath: deriveStoragePath(videoUrl), durationSeconds });
+      await attachReelExtras(reelId, includedClipObjects, [...reelDescTags]);
+      reelId = null; // finalized — must not be discarded below
 
       if (saveToCameraRoll) {
         await saveExportToLibrary(videoUrl);
@@ -666,7 +667,14 @@ export default function ExportScreen() {
       }
     } catch (e: any) {
       console.log('[export] FAILED:', e);
-      webAlert('Export error', e.message);
+      if (e instanceof ReelNotAllowedError) {
+        webAlert('Not available', 'Some of those clips aren’t available for a reel. Pick clips where your player made the play.');
+      } else {
+        webAlert('Export error', e.message);
+      }
+    } finally {
+      // A reservation whose render never produced a file must not linger.
+      if (reelId) { await discardReel(reelId); }
     }
     setExporting(false);
     setExportStatus('');

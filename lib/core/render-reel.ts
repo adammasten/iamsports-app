@@ -44,6 +44,87 @@ export async function renderReel(
   }
 }
 
+// ── RESERVE → RENDER → FINALIZE ──────────────────────────────────────────────
+// The reel row is created BEFORE the render so the database, not the UI, decides
+// whether these clips may be reeled: highlight_reels' WITH CHECK runs
+// may_reel_clip() over source_clip_ids and REJECTS the insert otherwise. A render
+// that never starts cannot leak a clip a parent was not entitled to.
+//
+// The row is reserved at status='rendering' with storage_path NULL, so it is never
+// mistakable for a finished reel, and reel listings filter to status='ready'.
+// Callers MUST finish with finalizeReel() on success or discardReel() on failure.
+
+export class ReelNotAllowedError extends Error {
+  constructor(message?: string) {
+    super(message ?? 'Some of those clips aren’t available for a highlight.');
+    this.name = 'ReelNotAllowedError';
+  }
+}
+
+// Reserve the reel and authorize its clips. Returns the new reel id.
+// Throws ReelNotAllowedError when the server rejects the clip set.
+export async function reserveReel(params: {
+  clipIds: string[];
+  name: string;
+  teamId?: string | null;
+  durationSeconds?: number | null;
+}): Promise<string> {
+  const { clipIds, name, teamId, durationSeconds } = params;
+  if (clipIds.length === 0) throw new Error('No clips to render.');
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('You’re signed out — sign in and try again.');
+
+  const { data: inserted, error } = await supabase.from('highlight_reels').insert({
+    created_by_user_id: user.id,
+    team_id: teamId || null,
+    name,
+    storage_path: null,
+    source_clip_ids: clipIds,
+    duration_seconds: durationSeconds ?? null,
+    overlay_mode: 'clean',
+    status: 'rendering',
+  }).select('id').single();
+
+  // A WITH CHECK violation is how the positive-only rule is enforced. Surface it
+  // as a clear product message rather than a raw Postgres error.
+  if (error || !inserted?.id) {
+    const code = (error as any)?.code;
+    if (code === '42501' || /row-level security/i.test(error?.message ?? '')) {
+      throw new ReelNotAllowedError();
+    }
+    throw new Error(error?.message || 'Could not start the reel.');
+  }
+  return inserted.id;
+}
+
+// Mark a reserved reel finished. Guarded on status='rendering' so a retry cannot
+// produce a second completed record for the same reservation.
+export async function finalizeReel(
+  reelId: string,
+  fields: { storagePath: string; durationSeconds?: number | null },
+): Promise<void> {
+  const { error } = await supabase.from('highlight_reels')
+    .update({
+      storage_path: fields.storagePath,
+      duration_seconds: fields.durationSeconds ?? null,
+      status: 'ready',
+    })
+    .eq('id', reelId)
+    .eq('status', 'rendering');
+  if (error) throw error;
+}
+
+// Remove a reservation whose render never produced a file, so the Film Room never
+// shows a reel that does not exist. Best-effort: a cleanup failure must not mask
+// the original render error (and the status='ready' listing filter hides it anyway).
+export async function discardReel(reelId: string): Promise<void> {
+  try {
+    await supabase.from('highlight_reels').delete().eq('id', reelId).eq('status', 'rendering');
+  } catch {
+    /* listings filter on status='ready', so a stray reservation stays invisible */
+  }
+}
+
 // Persist a finished reel as a highlight_reels row (+ copy the source clips' tags
 // onto it, best-effort) so it becomes a findable reel in My Work. Returns the new
 // reel id, or null if it couldn't be saved.

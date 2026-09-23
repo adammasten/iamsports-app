@@ -301,6 +301,7 @@ export async function loadContentFeed(
     const { data, error } = await supabase
       .from('highlight_reels')
       .select('id, name, storage_path, thumbnail_path, duration_seconds, created_at, team_id')
+      .eq('status', 'ready')   // never surface an unfinished/abandoned reservation
       .or(rParts.join(','))
       .order('created_at', { ascending: false })
       .limit(FEED_FETCH_LIMIT);

@@ -348,6 +348,7 @@ export default function MyWorkScreen() {
           .from('highlight_reels')
           .select('id, name, storage_path, thumbnail_path, duration_seconds, created_at')
           .eq('created_by_user_id', userId)
+          .eq('status', 'ready')   // never surface an unfinished/abandoned reservation
           .is('deleted_at', null)
           .order('created_at', { ascending: false }),
       ));

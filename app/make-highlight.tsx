@@ -5,7 +5,9 @@
 // "Make a highlight" bar.
 import { useTeamContext } from '@/context';
 import { isActionCategory } from '@/lib/core/tag-categories';
-import { deriveStoragePath, renderReel, saveHighlightReel, type RenderClip } from '@/lib/core/render-reel';
+import { deriveStoragePath, renderReel, reserveReel, finalizeReel, discardReel,
+         ReelNotAllowedError, type RenderClip } from '@/lib/core/render-reel';
+import { mayReelClip, toEligibilityTags } from '@/lib/core/highlight-eligibility';
 import { goBackOrHome } from '@/lib/nav';
 import { downloadMedia } from '@/lib/native/download-media';
 import { supabase } from '@/supabase';
@@ -53,7 +55,7 @@ function nearDup(a: Clip, b: Clip): boolean {
 
 export default function MakeHighlightScreen() {
   const insets = useSafeAreaInsets();
-  const { userKids } = useTeamContext();
+  const { userKids, userId } = useTeamContext();
   const params = useLocalSearchParams();
   const paramKid = Array.isArray(params.playerId) ? params.playerId[0] : params.playerId;
 
@@ -93,7 +95,7 @@ export default function MakeHighlightScreen() {
       if (videoIds.length === 0) { if (!cancelled) { setClips([]); setLoading(false); } return; }
 
       const { data: cs } = await supabase.from('clips')
-        .select('id, start_time, end_time, is_starred, video_id, clip_tags ( bundle_number, tags ( name, category, player_id, tag_polarity ) )')
+        .select('id, start_time, end_time, is_starred, video_id, team_id, origin, created_by_user_id, clip_tags ( bundle_number, tags ( name, category, player_id, tag_polarity ) )')
         .in('video_id', videoIds);
 
       // Resolve player names (best-effort — a parent may only see some).
@@ -111,9 +113,25 @@ export default function MakeHighlightScreen() {
         const allTags = ctags.map((ct: any) => ct.tags).filter(Boolean);
         const involvesKid = allTags.some((t: any) => t.category === 'players' && t.player_id === kidId);
         if (!involvesKid) return;
-        const posTags: TagRef[] = allTags.filter((t: any) => t.tag_polarity === 'positive').map((t: any) => ({ name: t.name, category: t.category }));
+        // Eligibility is BUNDLE-AWARE and scoped to THIS kid: the positive action must
+        // sit in a bundle this kid is in. A positive in another player's bundle, or a
+        // clip-level (bundle 0) team result such as Touchdown, no longer qualifies —
+        // and is_starred is no longer a bypass. Mirrors may_reel_clip() in the DB,
+        // which is what actually gates the reel insert.
+        const eligible = mayReelClip(
+          { teamId: c.team_id ?? null, origin: c.origin ?? null, createdByUserId: c.created_by_user_id ?? null,
+            tags: toEligibilityTags(ctags) },
+          { userId, coachTeamIds: new Set<string>(), linkedPlayerIds: new Set([kidId]) },
+        );
+        if (!eligible) return;
+        // Shown on the card: only the positives that are actually this kid's.
+        const myBundles = new Set<number>(
+          ctags.filter((ct: any) => (ct.bundle_number ?? 0) > 0 && ct.tags?.category === 'players' && ct.tags?.player_id === kidId)
+               .map((ct: any) => ct.bundle_number as number));
+        const posTags: TagRef[] = ctags
+          .filter((ct: any) => myBundles.has(ct.bundle_number ?? -1) && ct.tags?.tag_polarity === 'positive' && ct.tags?.category !== 'players')
+          .map((ct: any) => ({ name: ct.tags.name, category: ct.tags.category }));
         const starred = c.is_starred === true;
-        if (posTags.length === 0 && !starred) return;
         const v = vinfo.get(c.video_id); if (!v) return;
         const m = gmeta.get(v.gameId); if (!m) return;
 
@@ -142,7 +160,9 @@ export default function MakeHighlightScreen() {
       if (!cancelled) { setClips(out); setLoading(false); }
     })();
     return () => { cancelled = true; };
-  }, [kidId]);
+    // userId feeds the personal-clip branch of the eligibility rule, so a session
+    // change must re-evaluate which clips qualify.
+  }, [kidId, userId]);
 
   const sports = useMemo(() => {
     const m = new Map<string, string>(); clips.forEach((c) => { if (!m.has(c.sportKey)) m.set(c.sportKey, c.sportLabel); });
@@ -214,13 +234,31 @@ export default function MakeHighlightScreen() {
     const list = reviewList ?? selectedClips;
     if (list.length === 0) return;
     setRendering(true); setProgress(0); setProgressLabel('Starting…');
+    let reelId: string | null = null;
     try {
       const renderClips: RenderClip[] = list.map((c) => ({ url: c.url, start_time: c.start, end_time: c.end }));
+      // Reserve first: highlight_reels' WITH CHECK runs may_reel_clip() over these
+      // ids, so an ineligible clip stops the render before Railway is ever called.
+      const durationSeconds = list.reduce((sum, c) => sum + Math.max(0, (c.end ?? 0) - (c.start ?? 0)), 0);
+      reelId = await reserveReel({
+        clipIds: list.map((c) => c.id), name: `${kidName}'s highlights`, durationSeconds,
+      });
       const url = await renderReel(renderClips, { fileName: `${kidName}-highlights.mp4`, onProgress: (p, l) => { setProgress(p); if (l) setProgressLabel(l); } });
-      await saveHighlightReel({ videoUrl: url, clips: list.map((c) => ({ id: c.id, start_time: c.start, end_time: c.end })), name: `${kidName}'s highlights` });
+      await finalizeReel(reelId, { storagePath: deriveStoragePath(url), durationSeconds });
+      reelId = null; // finalized — must not be discarded below
       setDoneReel({ storagePath: deriveStoragePath(url) });
-    } catch (e: any) { webAlert('Highlight failed', e?.message || 'Something went wrong making the reel.'); }
-    finally { setRendering(false); }
+    } catch (e: any) {
+      if (e instanceof ReelNotAllowedError) {
+        webAlert('Not available', 'Some of those clips aren’t available for a highlight. Pick clips where your player made the play.');
+      } else {
+        webAlert('Highlight failed', e?.message || 'Something went wrong making the reel.');
+      }
+    }
+    finally {
+      // A reservation that never finished must not linger as a fileless reel.
+      if (reelId) { await discardReel(reelId); }
+      setRendering(false);
+    }
   }
   async function download() {
     if (!doneReel) return; setDownloading(true);
