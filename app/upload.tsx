@@ -2,8 +2,7 @@ import { useTeamContext } from '@/context';
 import { pendingFileSize, pickVideos, uploadVideoToBucket, type PendingFile } from '@/lib/native/video-upload';
 import { optimizeVideoInBackground } from '@/lib/native/optimize';
 import { isBackgroundUploadAllowed } from '@/lib/core/flags';
-import { startBackgroundMultipart } from '@/lib/native/background-upload';
-import { saveRecoveryRecord, stageSourceForDurableUpload } from '@/lib/native/upload-recovery';
+import { beginBackgroundUpload } from '@/lib/native/upload-recovery';
 import BackgroundUpload from '@/modules/background-upload';
 import { requirePermission } from './permissionGuard';
 import {
@@ -286,18 +285,13 @@ export default function UploadScreen() {
           isBackgroundUploadAllowed(userId) && !f.isWeb && !!f.uri;
 
         if (useBackground) {
-          // Move the picker's CACHE copy somewhere iOS won't purge mid-upload. A move
-          // inside the app container is a rename — no second copy of a 15 GB game.
-          const durableUri = await stageSourceForDurableUpload(f.uri!, fileName);
-          const started = await startBackgroundMultipart({ key: fileName, fileUri: durableUri, fileSize: bytes });
-          // Persist BEFORE reporting progress: if the app dies one second later, this
-          // record is the only way back to the parts already in S3.
-          await saveRecoveryRecord({
-            key: started.key, uploadId: started.uploadId, fileUri: durableUri,
-            partSize: started.partSize, numParts: started.numParts,
-            videoId: v.id, startedAt: Date.now(),
+          // Creates the multipart FIRST, then stages the source, then enqueues —
+          // and unwinds staging if anything after it fails, so a failed start can
+          // never strand a game-sized file on the device. See beginBackgroundUpload.
+          const started = await beginBackgroundUpload({
+            key: fileName, fileUri: f.uri!, fileSize: bytes, videoId: v.id,
           });
-          console.log(`[upload] background multipart enqueued key=${started.key} uploadId=${started.uploadId} parts=${started.numParts}`);
+          console.log(`[upload] background multipart enqueued key=${fileName} uploadId=${started.uploadId} parts=${started.numParts}`);
           // The row stays 'uploading'. It is finished by the native onComplete handler
           // or, if the app dies first, by reconcileBackgroundUpload() on next launch.
           backgrounded++;
@@ -315,7 +309,10 @@ export default function UploadScreen() {
         if (flipErr) console.warn('[upload] ready-flip failed, leaving for reconcile:', flipErr.message);
         succeeded.push(vidLabel);
         if (!first) first = { videoId: v.id, url: fileName, label: vidLabel };
-      } catch {
+      } catch (e: any) {
+        // Log the REAL reason. This catch used to swallow the error entirely, which is
+        // how `S3_CONFIGURATION_MISSING` reached the user as "nothing was saved".
+        console.error(`[upload] ${vidLabel} failed:`, e?.message ?? e);
         // Mark a created-but-unfinished row 'failed' (visible + deletable in Film
         // Room). Invariant 5: surface, don't silently drop.
         if (vid) {

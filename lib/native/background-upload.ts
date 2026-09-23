@@ -19,7 +19,25 @@ const SIGN_BATCH = 64;
 
 async function callFn(body: Record<string, unknown>): Promise<any> {
   const { data, error } = await supabase.functions.invoke('multipart-upload', { body });
-  if (error) throw new Error(error.message);
+  if (error) {
+    // supabase-js collapses ANY non-2xx into "Edge Function returned a non-2xx status
+    // code" and hides the response body — which is where the useful part lives. That is
+    // how a precise S3_CONFIGURATION_MISSING became "nothing was saved" on screen. Read
+    // the body back off the error's Response so the server's own code survives.
+    let detail = '';
+    try {
+      const res: Response | undefined = (error as any)?.context;
+      if (res && typeof res.json === 'function') {
+        const parsed = await res.clone().json();
+        detail = parsed?.code
+          ? `${parsed.code}${parsed.error ? ` — ${parsed.error}` : ''}`
+          : (parsed?.error ?? '');
+      }
+    } catch { /* body unreadable — fall back to the generic message */ }
+    const msg = `multipart-upload failed: ${detail || error.message}`;
+    console.error(`[multipart-upload] ${msg}`);
+    throw new Error(msg);
+  }
   if (data?.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
   return data;
 }

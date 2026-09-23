@@ -56,7 +56,25 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
+// Names only — NEVER values. A missing credential must fail here with something a
+// developer can act on, not 40 lines later as an opaque AWS SDK error. This exact gap
+// cost a debugging session: the background uploader had never once worked because
+// these two secrets were never set, and every failure surfaced as "nothing was saved".
+const REQUIRED_S3_ENV = ['S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'] as const;
+
+export function missingS3Config(): string[] {
+  return REQUIRED_S3_ENV.filter((name) => {
+    const v = Deno.env.get(name);
+    return !v || v.trim() === '';
+  });
+}
+
 function s3Client() {
+  const missing = missingS3Config();
+  if (missing.length > 0) {
+    // Names only. Throwing here keeps one error shape for every action.
+    throw new Error(`S3_CONFIGURATION_MISSING: Missing required server configuration: ${missing.join(', ')}`);
+  }
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;               // https://<ref>.supabase.co
   const ref = new URL(supabaseUrl).hostname.split('.')[0];
   const endpoint = Deno.env.get('S3_ENDPOINT')
@@ -113,12 +131,42 @@ Deno.serve(async (req) => {
     const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '').trim();
     if (!jwt) return json({ error: 'Not authenticated' }, 401);
 
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { data: who, error: whoErr } = await admin.auth.getUser(jwt);
-    if (whoErr || !who?.user) return json({ error: 'Invalid session' }, 401);
-
     const body = await req.json().catch(() => ({}));
     const action = body?.action;
+
+    // The service role key is accepted ONLY for 'preflight' (a release smoke test that
+    // creates and immediately aborts a throwaway multipart). Anyone holding that key can
+    // already do anything, so this grants no new power — but every real upload action
+    // still requires a genuine user session.
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const isServiceCaller = action === 'preflight' && jwt === serviceKey;
+
+    if (!isServiceCaller) {
+      const admin = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey);
+      const { data: who, error: whoErr } = await admin.auth.getUser(jwt);
+      if (whoErr || !who?.user) return json({ error: 'Invalid session' }, 401);
+    }
+
+    // --- preflight: can this deployment actually authenticate to S3? ---
+    // Creates a multipart upload under a throwaway key and aborts it immediately, so
+    // no object and no orphaned upload is left behind. Never echoes credentials.
+    if (action === 'preflight') {
+      const missing = missingS3Config();
+      if (missing.length > 0) {
+        return json({ ok: false, code: 'S3_CONFIGURATION_MISSING', missing, bucket: BUCKET }, 200);
+      }
+      const probeKey = `preflight-temp/${crypto.randomUUID()}.probe`;
+      try {
+        const s3probe = s3Client();
+        const created = await s3probe.send(new CreateMultipartUploadCommand({ Bucket: BUCKET, Key: probeKey }));
+        await s3probe.send(new AbortMultipartUploadCommand({ Bucket: BUCKET, Key: probeKey, UploadId: created.UploadId! }));
+        return json({ ok: true, code: 'S3_OK', bucket: BUCKET, created: !!created.UploadId, aborted: true });
+      } catch (e) {
+        return json({ ok: false, code: 'S3_AUTH_FAILED', bucket: BUCKET,
+                      error: String((e as Error)?.message ?? e) }, 200);
+      }
+    }
+
     const s3 = s3Client();
 
     // --- create: start the multipart upload; parts are signed on demand via 'sign'. ---
@@ -189,6 +237,11 @@ Deno.serve(async (req) => {
 
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
-    return json({ error: String((e as Error)?.message ?? e) }, 500);
+    const message = String((e as Error)?.message ?? e);
+    // Log server-side so a failure is visible even when the client only sees a status.
+    // Message text only — no credential values are ever included in these errors.
+    console.error('[multipart-upload] failed:', message);
+    const code = message.startsWith('S3_CONFIGURATION_MISSING') ? 'S3_CONFIGURATION_MISSING' : undefined;
+    return json({ error: message, code }, 500);
   }
 });

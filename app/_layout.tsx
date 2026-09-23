@@ -2,7 +2,7 @@ import { TeamProvider, useTeamContext } from '@/context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { usePushRegistration } from '@/lib/native/push';
 import { reconcilePendingUploads } from '@/lib/native/upload-reconcile';
-import { installBackgroundUploadListeners, reconcileBackgroundUpload } from '@/lib/native/upload-recovery';
+import { cleanupOrphanedStagedFiles, installBackgroundUploadListeners, reconcileBackgroundUpload } from '@/lib/native/upload-recovery';
 import { reconcile as reconcileVideoCache } from '@/lib/native/video-cache';
 import { supabase } from '@/supabase';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
@@ -229,6 +229,12 @@ export default function RootLayout() {
     // the missing parts. On a metered network it stops and reports 'needs-wifi' rather
     // than quietly spending a coach's data plan.
     const removeBgListeners = installBackgroundUploadListeners();
+    // Orphans first: a staged source with no recovery record is dead weight from a
+    // failed start, and at game sizes that is gigabytes. Runs before reconciliation so
+    // it can never race the record it checks against.
+    cleanupOrphanedStagedFiles()
+      .then(r => { if (r.removed > 0) console.log(`[bg-recovery] reclaimed ${(r.bytes / 1073741824).toFixed(2)} GB from ${r.removed} orphan(s)`); })
+      .catch(e => console.warn('[bg-recovery] orphan cleanup failed:', e));
     reconcileBackgroundUpload()
       .then(r => { if (r.state !== 'none') console.log('[bg-recovery] outcome:', JSON.stringify(r)); })
       .catch(e => console.warn('[bg-recovery] failed:', e));

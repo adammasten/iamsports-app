@@ -13,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import BackgroundUpload from '@/modules/background-upload';
 import { supabase } from '@/supabase';
-import { completeMultipart, listParts, signParts, abortMultipart } from './background-upload';
+import { completeMultipart, listParts, signParts, abortMultipart, createMultipart } from './background-upload';
 import { optimizeVideoInBackground } from './optimize';
 
 const RECORD_KEY = 'bgupload:active';
@@ -185,4 +185,88 @@ export function installBackgroundUploadListeners(): () => void {
   ];
 
   return () => { for (const s of subs) { try { s.remove(); } catch { /* noop */ } } };
+}
+
+// ── Starting an upload, in an order that cannot leak ───────────────────────────
+// ORDER MATTERS. The first version staged the file (a 5.7 GB move into Documents)
+// BEFORE asking the server to create the multipart upload. When create failed — which
+// it did every time, because the S3 secrets were never set — the staged file was left
+// behind with no recovery record to track it, so nothing ever cleaned it up. Two failed
+// attempts stranded ~11.4 GB on the device, invisibly.
+//
+// Now: create first (cheap, and the thing most likely to fail), stage only once the
+// server has committed, and unwind the staging if anything after it goes wrong.
+export async function beginBackgroundUpload(opts: {
+  key: string; fileUri: string; fileSize: number; videoId: string; partSizeMB?: number;
+}): Promise<{ uploadId: string; numParts: number; partSize: number; fileUri: string }> {
+  const { key, fileUri, fileSize, videoId, partSizeMB } = opts;
+  if (!BackgroundUpload) throw new Error('Background upload needs a dev/TestFlight build (native module unavailable here).');
+
+  // 1. Server first. Nothing has been moved yet, so a failure here costs nothing.
+  const created = await createMultipart(key, fileSize, partSizeMB);
+
+  // 2. Only now make the source durable.
+  let durableUri = fileUri;
+  try {
+    durableUri = await stageSourceForDurableUpload(fileUri, key);
+  } catch (e) {
+    try { await abortMultipart(key, created.uploadId); } catch { /* best effort */ }
+    throw e;
+  }
+
+  // 3. Sign + hand to the native uploader, and persist the record. Any failure past
+  //    staging unwinds BOTH the staged file and the server-side multipart.
+  try {
+    const partNumbers = Array.from({ length: created.numParts }, (_, i) => i + 1);
+    const parts = await signParts(key, created.uploadId, partNumbers);
+    await saveRecoveryRecord({
+      key, uploadId: created.uploadId, fileUri: durableUri,
+      partSize: created.partSize, numParts: created.numParts, videoId, startedAt: Date.now(),
+    });
+    await BackgroundUpload.startMultipartUpload(key, durableUri, created.partSize, parts);
+    return { uploadId: created.uploadId, numParts: created.numParts, partSize: created.partSize, fileUri: durableUri };
+  } catch (e) {
+    await deleteStagedSource(durableUri);
+    await clearRecoveryRecord();
+    try { await abortMultipart(key, created.uploadId); } catch { /* best effort */ }
+    throw e;
+  }
+}
+
+// ── Orphan cleanup ─────────────────────────────────────────────────────────────
+// A staged source is only legitimate while a recovery record points at it. Anything
+// else in bg-uploads/ is dead weight from a failed start — and at game sizes that is
+// gigabytes. Runs at launch, before reconciliation, and never touches the file the
+// active record names.
+export async function cleanupOrphanedStagedFiles(): Promise<{ removed: number; bytes: number }> {
+  const dir = `${FileSystem.documentDirectory}bg-uploads/`;
+  const info = await FileSystem.getInfoAsync(dir).catch(() => null);
+  if (!info?.exists) return { removed: 0, bytes: 0 };
+
+  const rec = await loadRecoveryRecord();
+  const keep = rec?.fileUri ?? null;
+
+  let names: string[] = [];
+  try { names = await FileSystem.readDirectoryAsync(dir); }
+  catch (e) { console.warn('[bg-recovery] could not list staged files:', e); return { removed: 0, bytes: 0 }; }
+
+  let removed = 0, bytes = 0;
+  for (const name of names) {
+    const uri = `${dir}${name}`;
+    if (keep && (keep === uri || keep.endsWith(`/${name}`))) {
+      console.log(`[bg-recovery] keeping staged source for active upload: ${name}`);
+      continue;
+    }
+    const fi = await FileSystem.getInfoAsync(uri).catch(() => null);
+    const size = fi?.exists && 'size' in fi ? Number((fi as any).size ?? 0) : 0;
+    try {
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+      removed++; bytes += size;
+      console.log(`[bg-recovery] removed orphaned staged file ${name} (${(size / 1048576).toFixed(0)} MB)`);
+    } catch (e) { console.warn(`[bg-recovery] could not remove ${name}:`, e); }
+  }
+  if (removed > 0) {
+    console.log(`[bg-recovery] reclaimed ${(bytes / 1073741824).toFixed(2)} GB from ${removed} orphaned staged file(s)`);
+  }
+  return { removed, bytes };
 }
