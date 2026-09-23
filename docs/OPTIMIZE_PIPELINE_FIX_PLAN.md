@@ -146,3 +146,104 @@ stop an old job's completion clobbering a newer reprocess.
 - `docs/OPTIMIZE_PIPELINE_DIAGNOSIS.md` — the brief sent to the external AIs (contains the F1 error)
 - `docs/BACKEND_HEALTH_DASHBOARD.md` — manual health checks ("run the backend health checks")
 - `docs/video-ai-responses/{gemini,chatgpt,perplexity}-optimize-pipeline.md` — the three full reviews
+
+---
+
+## 8. 2026-09-22 — THREE root causes, not one (shipped + verified)
+
+The original diagnosis assumed one cause (a lost fire-and-forget kickoff). Live testing
+found **three independent causes** of "uploaded but unplayable," and two were silent ffmpeg
+failures that nobody could see — the job error came back empty and the in-memory job record
+died with the container.
+
+| # | Cause | Evidence | Status |
+|---|---|---|---|
+| 1 | **Lost kickoff** — the single client `fetch` never lands | V Steelers succeeded on an identical retry | Open — needs the sweep (step 2) |
+| 2 | **Portrait video → odd width** | `[libx264] width not divisible by 2 (405x720)` on a 62 MB vertical upload | **FIXED** `cbea544` |
+| 3 | **Multi audio track → no decoder** | `Decoder (codec none) not found for input stream #0:2` on a June upload | **FIXED** `ace2514` |
+
+**Cause 2 detail.** `scale=1280:720:force_original_aspect_ratio=decrease` fits a 9:16 frame to
+405x720; libx264 + yuv420p rejects odd dimensions. **Every vertically-shot video failed,
+deterministically.** Fix: a second `scale=trunc(iw/2)*2:trunc(ih/2)*2`. Chose `trunc` over
+`force_divisible_by=2` because that needs ffmpeg >= 4.4 and the Railway version isn't
+verifiable from the repo — if it were older, every optimize would break. Not padded (unlike
+`/export` and `/concat-game`, which pad to a fixed 1280x720 canvas): padding would bake black
+bars into a vertical video. Only `processOptimize` had a bare scale; thumbnails already use
+`scale=640:-2`, where `-2` means "round to even".
+
+**Cause 3 detail.** `-map 0:a?` maps **every** audio stream, though the comment above it
+claimed "keeps first video + audio". A file with a second, undecodable track killed the whole
+transcode. Fix: `-map 0:a:0?`.
+
+### Shipped this session (Railway, `~/iamsports-server/index.js`)
+- `6f933c9` idempotency + crash-safety (Guard A in-flight dedupe, Guard B already-done
+  pre-check, crash guards on the 4 long workers, TTL no longer evicts running jobs)
+- `4431e90` surface ffmpeg's own stdout in the job error — **this is what made causes 2 and 3
+  diagnosable at all**
+- `cbea544` portrait / odd-width fix
+- `ace2514` first-audio-track fix
+
+### Verified in production
+- Duplicate `/optimize` on one key → **same jobId + `deduped: true`**, one transcode (Guard A)
+- Re-fire on an optimized key → **"Skipped — already optimized"**, instant, no download (Guard B)
+- Portrait upload: 62,361,972 → 5,419,329 bytes, `original_url` set, thumbnail generated
+- June straggler (stuck since 2026-06-26): optimized, thumbnail generated
+- **Library census: 24 optimized, 0 raw-and-live.**
+
+### Still open
+- **1 row remains odd:** "Full Game" `d35160ee` — `url` already ends `-720` but `original_url`
+  is NULL. Not deleted, `ready`. Guard B does not protect it (it keys off `original_url`), so a
+  naive sweep would re-transcode it and overwrite `original_url` with the 720p key, losing the
+  master. **Needs Adam's eyeball before step 2 ships.**
+- **A failed optimize still leaves `upload_status='ready'`** — causes 2 and 3 were invisible for
+  months for exactly this reason. Step 3 (the status column) is what makes a failure visible.
+- The reel-render 404 hang (`lib/core/render-reel.ts:39`) — app code, rides the step-5 build.
+
+---
+
+## 9. 2026-09-22 — STEP 2 SHIPPED: the optimize sweep
+
+`migration_optimize_sweep.sql`, applied live as migration `optimize_sweep`.
+
+**No Edge Function.** `snack-reminders` established the house pattern — a `SECURITY DEFINER`
+SQL function called straight from `pg_cron` — so the sweep is one function plus one cron entry.
+Fewer moving parts than any of the three reviewers proposed.
+
+**What shipped**
+1. **Data repair** — `d35160ee` "Full Game" had `original_url` NULL while pointing at the SAME
+   storage object as `6131344d` "Vs. THP Championship! 1". Because Railway writes with
+   `.eq('url', key)`, re-optimizing that key would have matched **both rows** and destroyed the
+   healthy row's master reference. Filled in the blank rather than relying on a filename check.
+   (Still true and out of scope: two live rows share one storage object — deleting one could
+   break the other.)
+2. **Two additive columns** — `videos.optimize_attempts`, `videos.optimize_last_attempt_at`.
+   Without them a permanently-failing video (every portrait video, before this morning) is
+   retried every 5 minutes forever with no backoff, no give-up and no visibility. No installed
+   build reads them.
+3. **`public.sweep_stalled_optimizes()`** + cron `sweep-stalled-optimizes` every 5 minutes.
+
+**Design decisions**
+- **One row per tick.** Firing every eligible row would start N concurrent CPU-bound transcodes
+  on a single container — the reason `/optimize-all` is sequential.
+- **`for update skip locked`** so overlapping ticks can't grab the same row.
+- **30-minute backoff, max 5 attempts.** Then it stops and `optimize_attempts >= 5` is the
+  "needs a human" signal.
+- **The reply is deliberately ignored.** `pg_net` is async and its response storage is UNLOGGED;
+  success is proven by the row no longer matching the filter (Railway sets `original_url`).
+- **Safe against in-flight jobs** because Guard A (server `6f933c9`) returns the existing jobId
+  instead of starting a second transcode. This is exactly why step 1 shipped first.
+- **EXECUTE revoked** from `public`, `anon`, `authenticated` — cron-only plumbing.
+
+**Verified live**
+- 2 columns present; `d35160ee` repaired; cron active on `*/5 * * * *`
+- `select public.sweep_stalled_optimizes()` → **0** (nothing stalled; the library is healthy)
+- Filter returns **0 rows** against real data, and excludes the 3 failed/soft-deleted uploads
+- **Postgres → pg_net → Railway proven end to end:** `net.http_post` returned **HTTP 200** with
+  a jobId, and that job reported *"Skipped — already optimized"* — so the network path works
+  AND Guard B protected the target. The test video was unharmed.
+
+**What the sweep does and does not fix.** It heals a **lost kickoff** — the video gets picked up
+within ~30 min instead of never. It does **not** fix a video that fails deterministically
+(portrait, bad audio track): those burn 5 attempts and stop. Making that failure *visible* is
+step 3 (`optimize_status`), which is now the highest-value remaining work — `upload_status`
+still says `ready` on a video that can never play.
