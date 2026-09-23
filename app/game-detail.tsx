@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import SignedThumb from '@/components/content-card/SignedThumb';
 import { goBackOrHome } from '@/lib/nav';
 import { webAlert } from '@/lib/webAlert';
+import { videoPlaybackState, type VideoPlaybackState } from '@/lib/core/videoState';
 import { supabase } from '@/supabase';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -24,7 +25,7 @@ const C = {
   accentSoft: 'rgba(108,92,231,0.2)', danger: '#e2574a', plays: '#3ec46d',
 };
 
-type Vid = { id: string; label: string; url: string; thumbnailPath: string | null; taggingComplete: boolean; uploadStatus: 'uploading' | 'ready' | 'failed'; createdAt: string };
+type Vid = { id: string; label: string; url: string; thumbnailPath: string | null; taggingComplete: boolean; uploadStatus: 'uploading' | 'ready' | 'failed'; createdAt: string; playState: VideoPlaybackState };
 
 function fmtDate(iso: string | null): string | null {
   if (!iso) return null;
@@ -56,12 +57,12 @@ export default function GameDetailScreen() {
     if (!gameId) { setLoading(false); return; }
     const [{ data: g }, { data: vs }] = await Promise.all([
       supabase.from('games').select('title, game_date, team_score, opponent_score').eq('id', gameId).maybeSingle(),
-      supabase.from('videos').select('id, label, url, thumbnail_path, tagging_complete, upload_status, created_at').eq('game_id', gameId).order('sort_order'),
+      supabase.from('videos').select('id, label, url, thumbnail_path, tagging_complete, upload_status, created_at, original_url, optimize_attempts').eq('game_id', gameId).order('sort_order'),
     ]);
     if (g?.title) setTitle(g.title);
     const list: Vid[] = (vs ?? []).map((v: any) => ({
       id: v.id, label: v.label, url: v.url, thumbnailPath: v.thumbnail_path ?? null, taggingComplete: v.tagging_complete === true,
-      uploadStatus: v.upload_status, createdAt: v.created_at,
+      uploadStatus: v.upload_status, createdAt: v.created_at, playState: videoPlaybackState(v),
     }));
     setVideos(list);
     const parts = [fmtDate((g?.game_date as string) ?? null), resultStr(g?.team_score ?? null, g?.opponent_score ?? null), `${list.length} video${list.length === 1 ? '' : 's'}`].filter(Boolean);
@@ -119,7 +120,22 @@ export default function GameDetailScreen() {
     if (error) { webAlert('Error', error.message); load(); }
   }
 
+  // Clearing the counter makes the row eligible for the next sweep tick
+  // (sweep_stalled_optimizes gives up at MAX_OPTIMIZE_ATTEMPTS). It cannot start a
+  // duplicate transcode: Railway returns the in-flight job for a key already being
+  // optimized, and skips a key that is already done.
+  async function retryOptimize(v: Vid) {
+    setSheetVid(null);
+    const { error } = await supabase.from('videos')
+      .update({ optimize_attempts: 0, optimize_last_attempt_at: null }).eq('id', v.id);
+    if (error) { webAlert('Error', error.message); return; }
+    load();
+  }
+
   const sheetActions = (v: Vid) => [
+    ...(v.playState === 'failed'
+      ? [{ icon: 'refresh-outline', label: 'Retry processing', onPress: () => retryOptimize(v) }]
+      : []),
     { icon: 'play', label: 'Watch', onPress: () => { setSheetVid(null); openPlayer(v); } },
     { icon: 'pricetag-outline', label: 'Tag video', onPress: () => { setSheetVid(null); openTagger(v); } },
     { icon: 'sparkles-outline', label: 'View clips', onPress: () => { setSheetVid(null); viewClips(v); } },
@@ -167,7 +183,9 @@ export default function GameDetailScreen() {
                   <Text style={styles.name} numberOfLines={1}>{v.label}</Text>
                   {mode === 'tag'
                     ? <Text style={[styles.meta, { color: v.taggingComplete ? C.plays : C.dim }]}>{v.taggingComplete ? '✓ Tagged' : 'Not tagged yet'}</Text>
-                    : <Text style={styles.meta}>{v.uploadStatus === 'uploading' ? 'Uploading…' : v.uploadStatus === 'failed' ? 'Upload didn’t finish' : `Uploaded ${fmtDate(v.createdAt) ?? ''}`}</Text>}
+                    : v.uploadStatus === 'ready' && v.playState !== 'ready'
+                      ? <Text style={[styles.meta, { color: v.playState === 'failed' ? '#f2a3a3' : C.dim }]}>{v.playState === 'failed' ? 'Couldn’t prepare · tap ⋯ to retry' : 'Preparing video for playback…'}</Text>
+                      : <Text style={styles.meta}>{v.uploadStatus === 'uploading' ? 'Uploading…' : v.uploadStatus === 'failed' ? 'Upload didn’t finish' : `Uploaded ${fmtDate(v.createdAt) ?? ''}`}</Text>}
                 </View>
                 <TouchableOpacity
                   style={[styles.rowAction, mode === 'tag' && styles.rowActionTag]}

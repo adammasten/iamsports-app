@@ -12,6 +12,7 @@ import { getCachedPathSync } from '@/lib/native/video-cache';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { videoPlaybackState, videoStateLabel, type VideoPlaybackState } from '@/lib/core/videoState';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,7 +20,7 @@ import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-g
 import { runOnJS } from 'react-native-reanimated';
 
 const C = { accent: '#6c5ce7' };
-type Vid = { id: string; label: string; url: string };
+type Vid = { id: string; label: string; url: string; state?: VideoPlaybackState };
 
 function fmt(s: number): string {
   if (!isFinite(s) || s < 0) s = 0;
@@ -48,6 +49,9 @@ export default function GamePlayerScreen() {
   const [webFs, setWebFs] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(startIndex);
   const [videoReady, setVideoReady] = useState(false);
+  // Not-yet-playable state for the CURRENT video (raw upload still being optimized,
+  // or optimize gave up). Null = normal playback path.
+  const [prepState, setPrepState] = useState<VideoPlaybackState | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [controls, setControls] = useState(true);
   const [barWidth, setBarWidth] = useState(0);
@@ -82,8 +86,8 @@ export default function GamePlayerScreen() {
         const rows = ((data ?? []) as any[]).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
         setVideos(rows.filter(r => r.storage_path).map(r => ({ id: r.video_id, label: r.title, url: r.storage_path })));
       } else if (gameId) {
-        const { data } = await supabase.from('videos').select('id, label, url, upload_status').eq('game_id', gameId).eq('upload_status', 'ready').order('sort_order');
-        setVideos((data ?? []).map((v: any) => ({ id: v.id, label: v.label, url: v.url })));
+        const { data } = await supabase.from('videos').select('id, label, url, upload_status, original_url, optimize_attempts').eq('game_id', gameId).eq('upload_status', 'ready').order('sort_order');
+        setVideos((data ?? []).map((v: any) => ({ id: v.id, label: v.label, url: v.url, state: videoPlaybackState(v) })));
       }
     })();
   }, [gameId, shareId]);
@@ -107,6 +111,11 @@ export default function GamePlayerScreen() {
   const loadCurrent = useCallback(async (preferCache: boolean) => {
     const v = videosRef.current[currentIndex];
     if (!v) return;
+    // The optimized streaming copy doesn't exist yet (or optimize gave up). Handing
+    // the player the raw upload is what produces the blank/broken frame — a browser
+    // won't stream a non-faststart file. Show the state instead.
+    if (v.state && v.state !== 'ready') { setPrepState(v.state); setVideoReady(false); return; }
+    setPrepState(null);
     const cached = preferCache ? getCachedPathSync(v.id) : null;
     const src = cached ?? await getSignedVideoUrl(v.url, { forceRefresh: true });
     if (!mounted.current) return;
@@ -220,8 +229,13 @@ export default function GamePlayerScreen() {
 
       {/* Loading / error overlay */}
       {!videoReady && (
-        <Pressable style={styles.loading} onPress={loadError ? retryNow : undefined}>
-          {loadError ? (
+        <Pressable style={styles.loading} onPress={loadError && !prepState ? retryNow : undefined}>
+          {prepState ? (
+            <>
+              <Ionicons name={prepState === 'failed' ? 'alert-circle-outline' : 'hourglass-outline'} size={40} color="#fff" />
+              <Text style={styles.loadingText}>{videoStateLabel(prepState)}</Text>
+            </>
+          ) : loadError ? (
             <>
               <Ionicons name="alert-circle-outline" size={40} color="#fff" />
               <Text style={styles.loadingText}>Couldn&apos;t load this video. Tap to retry.</Text>
