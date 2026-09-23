@@ -9,6 +9,7 @@ import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import { isFlagFootball } from '@/lib/core/football';
 import { categoriesForSport, phasesForSport } from '@/lib/core/tag-categories';
+import { buildTagScopeFilter } from '@/lib/core/tag-scope';
 import ClipPill from './components/ClipPill';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
@@ -302,6 +303,24 @@ export default function TaggingOverlayScreen() {
   // Sport that scopes the tag palette: this video's sport, else the video team's
   // (or active team's) sport. null = unknown → show all global tags (safe default).
   const tagSport = videoSport ?? activeTeam?.sport ?? null;
+  // Format belongs to the team that OWNS this video. A coach can be sitting on
+  // Team A while tagging Team B's film, so activeTeam.format must NOT bleed across —
+  // we only reuse it when the ids actually match, otherwise we look Team B up.
+  // FAILS OPEN: any failure (missing team, query error, no format) resolves to null,
+  // which means the full sport vocabulary. Vocabulary is never hidden by a failed lookup.
+  const [tagTeamFormat, setTagTeamFormat] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!tagTeamId) { setTagTeamFormat(null); return; }
+      if (activeTeam?.id === tagTeamId) { setTagTeamFormat(activeTeam.format ?? null); return; }
+      try {
+        const { data, error } = await supabase.from('teams').select('format').eq('id', tagTeamId).maybeSingle();
+        if (!cancelled) setTagTeamFormat(error ? null : ((data as any)?.format ?? null));
+      } catch { if (!cancelled) setTagTeamFormat(null); }
+    })();
+    return () => { cancelled = true; };
+  }, [tagTeamId, activeTeam?.id, activeTeam?.format]);
 
   // F.4 tag mode. 'compact' (default) = tag region above bottom controls.
   // 'fullscreen' = tag region also covers the video area between top bar and
@@ -444,20 +463,11 @@ export default function TaggingOverlayScreen() {
       // otherwise it must match this content's sport, so a football team never
       // sees basketball tags. Team tags belong to the team regardless of sport —
       // keep that branch EXACTLY as-is (getting it wrong leaks tags across teams).
-      // `ilike` (no wildcards) = case-INSENSITIVE exact match. teams.sport/videos.sport
-      // are free text and have drifted in case ('Basketball' vs 'basketball'), and an
-      // `eq` filter silently returned ZERO sport tags for the mis-cased ones while the
-      // code's own sport predicates matched case-insensitively. Verified against live:
-      // ilike returns identical counts to eq for every correctly-cased sport.
-      const globalBranch = tagSport
-        ? `and(scope.eq.global,or(sport.is.null,sport.ilike.${tagSport}))`
-        : `scope.eq.global`;
-      if (tagTeamId) {
-        query = query.or(`${globalBranch},and(scope.eq.team,team_id.eq.${tagTeamId})`);
-      } else {
-        query = query.or(globalBranch);
-      }
-      const { data, error } = await query;
+      // Scoping lives in ONE place — lib/core/tag-scope.ts — shared with the web
+      // tagger and My Tags. Team tags are never sport- or format-filtered there.
+      const { data, error } = await query.or(buildTagScopeFilter({
+        sport: tagSport, teamId: tagTeamId, format: tagTeamFormat,
+      }));
       if (cancelled) return;
       if (error) {
         Alert.alert('Error', error.message);
@@ -516,7 +526,7 @@ export default function TaggingOverlayScreen() {
       setActivePossession((prev: any) => prev ?? possSorted.find(p => p.name === 'Offense') ?? null);
     })();
     return () => { cancelled = true; };
-  }, [tagTeamId, tagSport]);
+  }, [tagTeamId, tagSport, tagTeamFormat]);
 
   function toggleTag(tagId: string) {
     setBuilding(prev => prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]);

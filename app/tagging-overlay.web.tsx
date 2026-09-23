@@ -10,6 +10,7 @@ import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import { categoriesForSport, phasesForSport } from '@/lib/core/tag-categories';
+import { buildTagScopeFilter } from '@/lib/core/tag-scope';
 import {
   type Odk, type FbCtx, type FbSel, ODK_SHORT, isFlagFootball,
   FB_FORMATIONS, FB_PLAY_TYPES, FB_RESULT_OFF, FB_FRONTS, FB_COVERAGES, FB_RESULT_DEF, FB_ST_UNITS, FB_RESULT_ST,
@@ -201,6 +202,23 @@ export default function TaggingStudioWeb() {
   }, [videoId]);
 
   const tagSport = sport ?? activeTeam?.sport ?? null;
+  // Format belongs to the team that OWNS this video, which may not be the active
+  // team — a coach can sit on Team A while tagging Team B's film, and Team A's
+  // format must not bleed across. FAILS OPEN: any failure resolves to null, i.e.
+  // the full sport vocabulary. Vocabulary is never hidden by a failed lookup.
+  const [teamFormat, setTeamFormat] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!teamId) { setTeamFormat(null); return; }
+      if (activeTeam?.id === teamId) { setTeamFormat(activeTeam.format ?? null); return; }
+      try {
+        const { data, error } = await supabase.from('teams').select('format').eq('id', teamId).maybeSingle();
+        if (!cancelled) setTeamFormat(error ? null : ((data as any)?.format ?? null));
+      } catch { if (!cancelled) setTeamFormat(null); }
+    })();
+    return () => { cancelled = true; };
+  }, [teamId, activeTeam?.id, activeTeam?.format]);
   const isFootball = isFootballSport(tagSport);   // football uses the 5-column groupable board
   const isFlag = isFlagFootball(tagSport);   // (kept for the retired football board's dead code)
   // RETIRED: the single-select football/flag board. Every sport now uses the groupable
@@ -220,16 +238,10 @@ export default function TaggingStudioWeb() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      let q = supabase.from('tags').select('*').order('sort_order');
-      // Global tags are sport-scoped (sport=null is universal, e.g. ★/POE);
-      // team tags belong to the team regardless of sport. Mirrors the mobile tagger.
-      const globalBranch = tagSport
-        ? `and(scope.eq.global,or(sport.is.null,sport.ilike.${tagSport}))`
-        : `scope.eq.global`;
-      q = teamId
-        ? q.or(`${globalBranch},and(scope.eq.team,team_id.eq.${teamId})`)
-        : q.or(globalBranch);
-      const { data } = await q;
+      // Scoping lives in ONE place — lib/core/tag-scope.ts — shared with the native
+      // tagger and My Tags. Team tags are never sport- or format-filtered there.
+      const { data } = await supabase.from('tags').select('*').order('sort_order')
+        .or(buildTagScopeFilter({ sport: tagSport, teamId, format: teamFormat }));
       if (cancelled) return;
       // Exclude tags this team has hidden (special tags never appear in the hide UI).
       const hidden = teamId ? await loadHiddenTagIds(teamId).catch(() => new Set<string>()) : new Set<string>();
@@ -276,7 +288,7 @@ export default function TaggingStudioWeb() {
       setActivePossession(prev => prev ?? possessions.find(p => p.name === 'Offense')?.id ?? null);
     })();
     return () => { cancelled = true; };
-  }, [teamId, tagSport]);
+  }, [teamId, tagSport, teamFormat]);
 
   const loadClips = useCallback(async () => {
     const { data } = await supabase

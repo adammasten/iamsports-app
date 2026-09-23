@@ -127,6 +127,30 @@ export function isActionCategory(category: string | null | undefined): boolean {
   return !!category && BOARD_CATEGORY_KEYS.has(category);
 }
 
+// Phase code for a category key, when the key belongs to a phased sport's board.
+// Lets a consumer rebuild a PickerCategory for a category it met in DATA rather
+// than in a sport definition (see pickerCategoryForKey).
+const PHASE_BY_CATEGORY: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const d of Object.values(SPORT_TAGS)) {
+    if (!d.phases) continue;
+    for (const p of d.phases) for (const c of d.categoriesByPhase[p.code] ?? []) if (!m[c.key]) m[c.key] = p.code;
+  }
+  return m;
+})();
+
+// Resolve a category key met in DATA (e.g. a historical tag whose category is no
+// longer offered by the team's current format) into a properly-labelled picker
+// category. Returns `known: false` when the key is in no sport definition at all —
+// the caller must still RENDER it (never hide a used historical tag) but should
+// report it rather than silently inventing presentation.
+export function pickerCategoryForKey(key: string): PickerCategory & { known: boolean } {
+  const known = !!ALL_CATEGORIES[key];
+  const base = categoryDescriptor(key);
+  const phase = PHASE_BY_CATEGORY[key];
+  return { ...base, ...(phase ? { phase } : {}), known };
+}
+
 // A category as surfaced in a CROSS-SPORT picker (Export, and FilterBar in 0b
 // item 2): the category descriptor plus, for a phased sport, its phase code
 // (OFF/DEF/SP) so the picker can label "OFF · Result" vs "DEF · Result".

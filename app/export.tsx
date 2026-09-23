@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { clipMatchesGroup } from '@/lib/core/clip-filtering';
-import { categoriesForSports } from '@/lib/core/tag-categories';
+import { categoriesForSports, pickerCategoryForKey } from '@/lib/core/tag-categories';
 import { mayReelClip, toEligibilityTags } from '@/lib/core/highlight-eligibility';
 import { reserveReel, finalizeReel, discardReel, ReelNotAllowedError } from '@/lib/core/render-reel';
 import { generateReelThumbnailInBackground } from '@/lib/native/optimize';
@@ -26,6 +26,10 @@ const GAME_SORT_OPTIONS: DropdownOption[] = [
   { value: 'oldest', label: 'Oldest' },
   { value: 'az', label: 'A–Z' },
 ];
+
+// Stamp categories are surfaced by dedicated controls (★/POE buttons, the quick
+// exports, period), never as board sections — so they stay out of the picker.
+const STAMP_CATEGORY_KEYS = new Set(['possession', 'period', 'special']);
 
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
 const ACTIVE_JOB_KEY = 'iamsports.active_export_job';
@@ -769,8 +773,31 @@ export default function ExportScreen() {
     selectedGames.forEach(gid => (gamesById.get(gid)?.videos || []).forEach((v: any) => {
       if (v.sport) pickerSports.add(String(v.sport).trim().toLowerCase());
     }));
+    // HISTORICAL SAFETY. The picker is the UNION of (a) the categories the selected
+    // games' sports define today and (b) the categories of tags ACTUALLY USED in
+    // those games. Without (b), a tag the team's current format no longer offers —
+    // Special Teams on a team that has moved to 5v5, say — would have no section to
+    // render in, and an old clip tagged with it would become undiscoverable even
+    // though the tag is still on the clip. Format controls what is offered for NEW
+    // tagging; it must never erase history.
+    //
+    // Historical categories are resolved through the shared registry, so they keep
+    // their real label and phase ('SP · PLAY', not a raw `st_play` heading). A key
+    // in no sport definition is still RENDERED (never hide a used tag) but reported.
+    const currentDefs = categoriesForSports(pickerSports);
+    const definedKeys = new Set(currentDefs.map(c => c.key));
+    const usedCategoryKeys = new Set<string>();
+    tags.forEach((t: any) => { if (usedTagIds.has(t.id)) usedCategoryKeys.add(t.category); });
+    const historicalDefs = [...usedCategoryKeys]
+      .filter(k => !definedKeys.has(k) && !STAMP_CATEGORY_KEYS.has(k) && k !== 'players')
+      .map(k => pickerCategoryForKey(k))
+      .filter(c => {
+        if (!c.known) console.warn('[export] used historical category has no shared definition:', c.key);
+        return true;   // render it regardless — a used tag must stay discoverable
+      });
     const categoryDefs: { key: string; label: string; phase?: string }[] = [
-      ...categoriesForSports(pickerSports),
+      ...currentDefs,
+      ...historicalDefs,
       { key: 'players', label: 'Players' },
     ];
     // Quick-export buttons come from the possession stamps ACTUALLY USED in the

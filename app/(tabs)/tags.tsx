@@ -2,6 +2,7 @@ import { useTeamContext } from '@/context';
 import { categoriesForSport, categoryDescriptor, phasesForSport, type TagCategory } from '@/lib/core/tag-categories';
 import { hideTag, loadHiddenTagIds, unhideTag } from '@/lib/core/hiddenTags';
 import { computeSortOrderUpdates } from '@/lib/core/tag-reorder';
+import { buildTagScopeFilter } from '@/lib/core/tag-scope';
 import { supabase } from '@/supabase';
 import { confirm } from '@/lib/confirm';
 import { router } from 'expo-router';
@@ -34,19 +35,15 @@ export default function TagsScreen() {
     loadHiddenTagIds(activeTeam?.id).then(setHiddenIds).catch(() => setHiddenIds(new Set()));
     // V3 tag scope is global | team only. Global tags are visible to every
     // team; team tags are visible only when activeTeam is set and matches.
-    let query = supabase.from('tags').select('*').order('sort_order');
-    // Global tags are sport-scoped: sport=null is universal, otherwise it must
-    // match this team's sport — so a football team manages football tags, not
-    // basketball ones. Team tags belong to the team regardless of sport.
-    const globalBranch = activeTeam?.sport
-      ? `and(scope.eq.global,or(sport.is.null,sport.ilike.${activeTeam.sport}))`
-      : `scope.eq.global`;
-    if (activeTeam) {
-      query = query.or(`${globalBranch},and(scope.eq.team,team_id.eq.${activeTeam.id})`);
-    } else {
-      query = query.or(globalBranch);
-    }
-    const { data } = await query;
+    // Scoping (sport + format for global tags; team tags always kept) lives in ONE
+    // place — lib/core/tag-scope.ts — shared with both taggers. A null format means
+    // the full sport vocabulary, so this is unchanged for every team today.
+    const { data } = await supabase.from('tags').select('*').order('sort_order')
+      .or(buildTagScopeFilter({
+        sport: activeTeam?.sport ?? null,
+        teamId: activeTeam?.id ?? null,
+        format: activeTeam?.format ?? null,
+      }));
     if (!data) return;
     // Bucket EVERY category present (no dropping) so the sport's phase categories
     // and any legacy/mis-filed categories all surface. Stamp categories
