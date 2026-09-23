@@ -3,7 +3,7 @@ import { TeamLogo } from '@/components/team-logo';
 import { SkeletonCards } from '@/components/skeleton-cards';
 import { DebugPanel } from '@/components/debug-panel';
 import { loadContentFeed, type ContentFeedDebug, type FeedItem } from '@/lib/core/homeFeed';
-import { SPORTS } from '@/lib/core/upload-meta';
+import { SPORTS, formatsForSport } from '@/lib/core/upload-meta';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
@@ -71,6 +71,9 @@ export default function SelectTeamScreen() {
   const [showNewTeam, setShowNewTeam] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamSport, setNewTeamSport] = useState('Basketball');
+  // Sport variant (5v5 / 7v7 / 11v11). null = legacy: the sport's full vocabulary.
+  // Only the football family offers formats; every other sport hides the control.
+  const [newTeamFormat, setNewTeamFormat] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [showNewKid, setShowNewKid] = useState(false);
   const [newKidName, setNewKidName] = useState('');
@@ -242,7 +245,7 @@ export default function SelectTeamScreen() {
 
     const { data: team, error: teamError } = await supabase
       .from('teams')
-      .insert({ name: newTeamName.trim(), sport: newTeamSport.trim(), created_by_user_id: userId })
+      .insert({ name: newTeamName.trim(), sport: newTeamSport.trim(), format: newTeamFormat, created_by_user_id: userId })
       .select()
       .single();
     if (teamError || !team) {
@@ -336,7 +339,20 @@ export default function SelectTeamScreen() {
         />
         <Text style={styles.formLabel}>Sport</Text>
         <View style={{ marginBottom: 12 }}>
-          <Dropdown value={newTeamSport} options={SPORT_OPTIONS} onSelect={setNewTeamSport} placeholder="Sport" />
+          <Dropdown
+            value={newTeamSport}
+            options={SPORT_OPTIONS}
+            onSelect={(v) => { setNewTeamSport(v); setNewTeamFormat(null); }}
+            placeholder="Sport"
+          />
+          {formatsForSport(newTeamSport).length > 0 ? (
+            <Dropdown
+              value={newTeamFormat ?? ''}
+              options={formatsForSport(newTeamSport).map(f => ({ value: f.value, label: f.label }))}
+              onSelect={setNewTeamFormat}
+              placeholder="Format (optional)"
+            />
+          ) : null}
         </View>
         <TouchableOpacity
           style={[styles.saveBtn, (!newTeamName.trim() || creating) && { opacity: 0.5 }]}

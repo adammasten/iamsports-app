@@ -3,6 +3,7 @@
 // UPDATE via RLS). Reached from the Schedule header when a single team is active.
 import { COACH_ROLES, useTeamContext } from '@/context';
 import { ACCENT_PALETTE } from '@/lib/core/schedule';
+import { formatsForSport } from '@/lib/core/upload-meta';
 import { goBackOrHome } from '@/lib/nav';
 import { supabase } from '@/supabase';
 import { webAlert } from '@/lib/webAlert';
@@ -20,18 +21,21 @@ export default function TeamSettingsScreen() {
   const [snackGames, setSnackGames] = useState(true);
   const [snackPractices, setSnackPractices] = useState(false);
   const [parentFilm, setParentFilm] = useState(true);
+  // Sport variant (5v5 / 7v7 / 11v11). null = legacy: the sport's full vocabulary.
+  const [format, setFormat] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!activeTeam) { setLoading(false); return; }
     setLoading(true);
     const { data, error } = await supabase.from('teams')
-      .select('accent_color, snacks_enabled_games, snacks_enabled_practices, parent_film_visible')
+      .select('accent_color, snacks_enabled_games, snacks_enabled_practices, parent_film_visible, format')
       .eq('id', activeTeam.id).maybeSingle();
     if (!error && data) {
       setAccent((data as any).accent_color ?? null);
       setSnackGames((data as any).snacks_enabled_games ?? true);
       setSnackPractices((data as any).snacks_enabled_practices ?? false);
       setParentFilm((data as any).parent_film_visible ?? true);
+      setFormat((data as any).format ?? null);
     }
     setLoading(false);
   }, [activeTeam]);
@@ -53,6 +57,8 @@ export default function TeamSettingsScreen() {
   const toggleGames = (v: boolean) => { setSnackGames(v); save({ snacks_enabled_games: v }, () => setSnackGames(!v)); };
   const togglePractices = (v: boolean) => { setSnackPractices(v); save({ snacks_enabled_practices: v }, () => setSnackPractices(!v)); };
   const toggleParentFilm = (v: boolean) => { setParentFilm(v); save({ parent_film_visible: v }, () => setParentFilm(!v)); };
+  // Tapping the chip you're already on clears the format back to null (legacy).
+  const pickFormat = (v: string) => { const prev = format; const next = format === v ? null : v; setFormat(next); save({ format: next }, () => setFormat(prev)); };
 
   const Frame = ({ children }: { children: React.ReactNode }) => (
     <View style={[styles.root, { paddingTop: insets.top + 12 }]}>
@@ -72,6 +78,24 @@ export default function TeamSettingsScreen() {
       <Text style={styles.title}>Team settings</Text>
       {loading ? <ActivityIndicator color="#ff6a2c" style={{ marginTop: 30 }} /> : (
         <ScrollView contentContainerStyle={{ paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+          {/* Format — only for sports that have variants (the football family today).
+              Choosing one narrows what the tagger OFFERS for new tagging; it never
+              changes what historical clips mean. Unset = the full vocabulary. */}
+          {formatsForSport(activeTeam.sport).length > 0 ? (
+            <>
+              <Text style={styles.section}>Format</Text>
+              <Text style={styles.hint}>How many players per side. Leave unset to keep the full {activeTeam.sport} vocabulary.</Text>
+              <View style={styles.swatches}>
+                {formatsForSport(activeTeam.sport).map(f => (
+                  <TouchableOpacity key={f.value} onPress={() => pickFormat(f.value)} accessibilityLabel={`Set format ${f.label}`}
+                    style={[styles.formatChip, format === f.value && styles.formatChipOn]}>
+                    <Text style={[styles.formatChipText, format === f.value && styles.formatChipTextOn]}>{f.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : null}
+
           {/* Accent color */}
           <Text style={styles.section}>Team color</Text>
           <Text style={styles.hint}>Marks this team on schedule cards. Only you and other coaches can change it.</Text>
@@ -128,6 +152,10 @@ const styles = StyleSheet.create({
 
   swatches: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   swatch: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'transparent' },
+  formatChip: { paddingHorizontal: 18, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#d8d8d8', backgroundColor: '#fff' },
+  formatChipOn: { borderColor: '#ff6a2c', backgroundColor: '#fff1ea' },
+  formatChipText: { fontSize: 15, fontWeight: '600', color: '#555' },
+  formatChipTextOn: { color: '#ff6a2c' },
   swatchOn: { borderColor: '#fff' },
   check: { color: '#fff', fontSize: 18, fontWeight: '900' },
 

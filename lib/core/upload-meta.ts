@@ -30,6 +30,30 @@ export const SPORTS: { value: string; label: string }[] = [
   { value: 'Other', label: 'Other' },
 ];
 
+// FORMAT — the variant of a sport a team plays. Kept SEPARATE from sport, so a team
+// is ('Flag Football', '5v5'), never the sport string 'Flag Football 5v5' (which would
+// break every exact-match sport comparison and strand historical content).
+//
+// NULL format always means LEGACY / FULL behavior: a team with no format is offered
+// its sport's whole vocabulary, exactly as before formats existed. Nothing may treat
+// a missing format as an error.
+//
+// This is the ONE definition of which formats a sport offers — no screen keeps its own.
+export const FORMATS: { value: string; label: string }[] = [
+  { value: '5v5', label: '5-on-5' },
+  { value: '7v7', label: '7-on-7' },
+  { value: '11v11', label: '11-on-11' },
+];
+
+// Which formats a sport may pick from. Only the football family has formats today;
+// every other sport returns [] and shows no format control at all.
+export function formatsForSport(sport: string | null | undefined): { value: string; label: string }[] {
+  const s = (sport ?? '').trim().toLowerCase();
+  if (s === 'flag football') return FORMATS.filter(f => f.value === '5v5' || f.value === '7v7');
+  if (s === 'football') return FORMATS.filter(f => f.value === '11v11');
+  return [];   // 7-on-7 is its own sport here, and non-football sports have no formats
+}
+
 // The football family — Football, 7-on-7, and Flag all diagram on a field and tag
 // with the ODK breakdown, so they route through the same football code paths.
 // Compared case-insensitively (teams.sport is 'Football', a play doc's is 'football').
