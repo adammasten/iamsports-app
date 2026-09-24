@@ -28,6 +28,7 @@ import FilterBar, { type FilterableItem } from './components/FilterBar';
 import ContentCard, { type CardAction } from '@/components/content-card/ContentCard';
 import { confirm } from '@/lib/confirm';
 import { webAlert } from '@/lib/webAlert';
+import { isVideoPlayable } from '@/lib/core/videoState';
 import WebTopNav from './components/WebTopNav';
 import BottomNav from './components/BottomNav';
 import { deriveShareStatus } from '@/lib/core/shareStatus';
@@ -76,7 +77,7 @@ type Postable = { contentType: 'reel' | 'clip' | 'video' | 'game'; contentId: st
 // owner column on games. Each Game carries its videos pre-grouped so the inline
 // expand can render without a second query.
 type UploadStatus = 'uploading' | 'ready' | 'failed';
-type GameVideo = { id: string; label: string; url: string; sortOrder: number; taggingComplete: boolean; uploadStatus: UploadStatus; thumbnailPath?: string | null };
+type GameVideo = { id: string; label: string; url: string; sortOrder: number; taggingComplete: boolean; uploadStatus: UploadStatus; thumbnailPath?: string | null; playable?: boolean };
 
 // A "Saved to My Film" bookmark, resolved for display via resolve_shared_content.
 type SavedEntry = {
@@ -412,7 +413,7 @@ export default function MyWorkScreen() {
   //   • game_id set, games present → grouped by game_id into the games Map.
   async function loadGames() {
     if (!userId) { setGames([]); setLooseVideos([]); return; }
-    const VIDEO_COLS = 'id, label, url, thumbnail_path, sort_order, game_id, created_at, tagging_complete, event_type, upload_status, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))';
+    const VIDEO_COLS = 'id, label, url, thumbnail_path, sort_order, game_id, created_at, tagging_complete, event_type, upload_status, original_url, optimize_attempts, clips (count), games (id, title, opponent, game_date, team_id, created_at, season_id, tournament_id, seasons (name), tournaments (name))';
 
     // A) Footage I uploaded (my loose clips + my games).
     const mineRes = await supabase.from('videos').select(VIDEO_COLS)
@@ -471,7 +472,7 @@ export default function MyWorkScreen() {
         };
         byId.set(row.game_id, game);
       }
-      game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true, uploadStatus: row.upload_status, thumbnailPath: row.thumbnail_path ?? null });
+      game.videos.push({ id: row.id, label: row.label, url: row.url, sortOrder: row.sort_order, taggingComplete: row.tagging_complete === true, uploadStatus: row.upload_status, thumbnailPath: row.thumbnail_path ?? null, playable: isVideoPlayable(row) });
       // clips(count) embeds as [{ count: N }] on the video row; accumulate per game.
       game.clipCount += row.clips?.[0]?.count ?? 0;
       // First video that carries an event type sets the game's (game.tsx uploads
@@ -1455,7 +1456,19 @@ export default function MyWorkScreen() {
                 // Family game = my kid is in it, but I didn't upload it (coach film).
                 // Parents get read-safe actions only — never rename/edit/delete/share.
                 const family = game.myKidGame === true;
-                const baseMeta = dateStr ? `${dateStr} · ${videoCount}` : videoCount;
+                // Smallest honest signal that work is still happening. A card that looks
+                // finished while 5.7 GB is still moving is the same lie as upload_status
+                // ='ready' on a raw file, just in the UI. 'uploading' covers the native
+                // background transfer; a landed-but-unoptimized video is still being
+                // prepared by Railway and cannot play yet.
+                const uploadingCount = game.videos.filter(v => v.uploadStatus === 'uploading').length;
+                const preparingCount = game.videos.filter(v => v.uploadStatus === 'ready' && !v.playable).length;
+                const workMeta = uploadingCount > 0
+                  ? 'Uploading in background…'
+                  : preparingCount > 0 ? 'Preparing video for playback…' : null;
+                const baseMeta = workMeta
+                  ? (dateStr ? `${dateStr} · ${workMeta}` : workMeta)
+                  : (dateStr ? `${dateStr} · ${videoCount}` : videoCount);
                 return (
                     <View key={`game:${game.id}`} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
                     <ContentCard

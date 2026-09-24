@@ -196,10 +196,17 @@ export function installBackgroundUploadListeners(): () => void {
 //
 // Now: create first (cheap, and the thing most likely to fail), stage only once the
 // server has committed, and unwind the staging if anything after it goes wrong.
+export const BACKGROUND_PART_SIZE_MB = 32;
+
 export async function beginBackgroundUpload(opts: {
   key: string; fileUri: string; fileSize: number; videoId: string; partSizeMB?: number;
 }): Promise<{ uploadId: string; numParts: number; partSize: number; fileUri: string }> {
-  const { key, fileUri, fileSize, videoId, partSizeMB } = opts;
+  const { key, fileUri, fileSize, videoId } = opts;
+  // Stated explicitly rather than relying on the server default, so the part size does
+  // not silently depend on which Edge Function version is deployed. Recovery never
+  // recomputes this — it replays created.partSize from the persisted record, so resumed
+  // parts always land on exactly the original byte boundaries.
+  const partSizeMB = opts.partSizeMB ?? BACKGROUND_PART_SIZE_MB;
   if (!BackgroundUpload) throw new Error('Background upload needs a dev/TestFlight build (native module unavailable here).');
 
   // 1. Server first. Nothing has been moved yet, so a failure here costs nothing.

@@ -44,7 +44,13 @@ import {
 import { getSignedUrl } from 'https://esm.sh/@aws-sdk/s3-request-presigner@3';
 
 const BUCKET = 'Videos';
-const DEFAULT_PART = 128 * 1024 * 1024; // 128 MiB (>= S3's 5 MiB floor; ~120 parts @ 15 GB)
+// 32 MiB, reduced from 128 MiB on 2026-09-23. There is no resume WITHIN a part: if a
+// 128 MiB part died at 90% on weak cellular, all of it was re-sent. A real-world test
+// (locked phone, Wi-Fi -> cellular, moving car) landed only 3 of 45 parts in 80 minutes
+// because parts kept aborting before they could finish. 32 MiB completes far more often
+// on a marginal link and costs 32 MiB, not 128, when one is lost.
+// Part counts stay sane: 15 GB -> ~480 parts, 20 GB -> ~640, well under S3's 10,000.
+const DEFAULT_PART = 32 * 1024 * 1024;
 const PART_URL_TTL = 60 * 60 * 12;      // 12 h per 'sign' call; the module refreshes on a 403.
 const MAX_SIGN_BATCH = 64;              // cap URLs per 'sign' call (a rolling window is small)
 

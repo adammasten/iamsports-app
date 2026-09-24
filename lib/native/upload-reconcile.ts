@@ -1,4 +1,5 @@
 import { supabase } from '@/supabase';
+import { loadRecoveryRecord } from './upload-recovery';
 import { getSignedVideoUrl } from './video-url';
 
 // Resolve videos left in 'uploading' by an upload that was killed or backgrounded
@@ -41,6 +42,19 @@ export async function reconcilePendingUploads(): Promise<{ ready: number; failed
   const uid = session?.user?.id;
   if (!uid) return { ready: 0, failed: 0 };
 
+  // OWNERSHIP. A background multipart upload legitimately sits in 'uploading' for a
+  // long time — there is no Storage object to HEAD until every part lands, so the
+  // completeness check below cannot see it and the staleness check would declare it
+  // dead. That is exactly what happened on 2026-09-23: an upload that had survived 80
+  // minutes locked and roaming was marked 'failed' by THIS function the moment the app
+  // was opened, destroying work the uploader could still have finished.
+  //
+  // The persisted recovery record is the ownership signal. If it names a video, the
+  // background uploader owns that row and the legacy path must not touch it — the
+  // native onComplete handler or reconcileBackgroundUpload() will resolve it.
+  const bgRecord = await loadRecoveryRecord();
+  const bgOwnedVideoId = bgRecord?.videoId ?? null;
+
   const { data: rows, error } = await supabase
     .from('videos')
     .select('id, url, upload_bytes, created_at')
@@ -55,6 +69,10 @@ export async function reconcilePendingUploads(): Promise<{ ready: number; failed
   let ready = 0;
   let failed = 0;
   for (const r of rows) {
+    if (bgOwnedVideoId && r.id === bgOwnedVideoId) {
+      console.log(`[upload-reconcile] skipping ${r.id} — owned by an active background upload`);
+      continue;
+    }
     // Verify completeness by size. No expected size (legacy row) -> can't verify,
     // so fall through to the age check rather than guessing 'ready'.
     let complete = false;
