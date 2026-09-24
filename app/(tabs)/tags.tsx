@@ -2,7 +2,7 @@ import { useTeamContext } from '@/context';
 import { categoriesForSport, categoryDescriptor, phasesForSport, type TagCategory } from '@/lib/core/tag-categories';
 import { hideTag, loadHiddenTagIds, unhideTag } from '@/lib/core/hiddenTags';
 import { computeSortOrderUpdates } from '@/lib/core/tag-reorder';
-import { buildTagScopeFilter } from '@/lib/core/tag-scope';
+import { applyTagScope } from '@/lib/core/tag-scope';
 import { supabase } from '@/supabase';
 import { confirm } from '@/lib/confirm';
 import { router } from 'expo-router';
@@ -38,12 +38,14 @@ export default function TagsScreen() {
     // Scoping (sport + format for global tags; team tags always kept) lives in ONE
     // place — lib/core/tag-scope.ts — shared with both taggers. A null format means
     // the full sport vocabulary, so this is unchanged for every team today.
-    const { data } = await supabase.from('tags').select('*').order('sort_order')
-      .or(buildTagScopeFilter({
+    const { data } = await applyTagScope(
+      supabase.from('tags').select('*').order('sort_order'),
+      {
         sport: activeTeam?.sport ?? null,
         teamId: activeTeam?.id ?? null,
         format: activeTeam?.format ?? null,
-      }));
+      },
+    );
     if (!data) return;
     // Bucket EVERY category present (no dropping) so the sport's phase categories
     // and any legacy/mis-filed categories all surface. Stamp categories

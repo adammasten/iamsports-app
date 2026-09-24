@@ -9,7 +9,7 @@ import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import { isFlagFootball } from '@/lib/core/football';
 import { categoriesForSport, phasesForSport } from '@/lib/core/tag-categories';
-import { buildTagScopeFilter } from '@/lib/core/tag-scope';
+import { applyTagScope } from '@/lib/core/tag-scope';
 import ClipPill from './components/ClipPill';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
@@ -465,9 +465,9 @@ export default function TaggingOverlayScreen() {
       // keep that branch EXACTLY as-is (getting it wrong leaks tags across teams).
       // Scoping lives in ONE place — lib/core/tag-scope.ts — shared with the web
       // tagger and My Tags. Team tags are never sport- or format-filtered there.
-      const { data, error } = await query.or(buildTagScopeFilter({
+      const { data, error } = await applyTagScope(query, {
         sport: tagSport, teamId: tagTeamId, format: tagTeamFormat,
-      }));
+      });
       if (cancelled) return;
       if (error) {
         Alert.alert('Error', error.message);

@@ -10,7 +10,7 @@ import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import { categoriesForSport, phasesForSport } from '@/lib/core/tag-categories';
-import { buildTagScopeFilter } from '@/lib/core/tag-scope';
+import { applyTagScope } from '@/lib/core/tag-scope';
 import {
   type Odk, type FbCtx, type FbSel, ODK_SHORT, isFlagFootball,
   FB_FORMATIONS, FB_PLAY_TYPES, FB_RESULT_OFF, FB_FRONTS, FB_COVERAGES, FB_RESULT_DEF, FB_ST_UNITS, FB_RESULT_ST,
@@ -240,8 +240,10 @@ export default function TaggingStudioWeb() {
     (async () => {
       // Scoping lives in ONE place — lib/core/tag-scope.ts — shared with the native
       // tagger and My Tags. Team tags are never sport- or format-filtered there.
-      const { data } = await supabase.from('tags').select('*').order('sort_order')
-        .or(buildTagScopeFilter({ sport: tagSport, teamId, format: teamFormat }));
+      const { data } = await applyTagScope(
+        supabase.from('tags').select('*').order('sort_order'),
+        { sport: tagSport, teamId, format: teamFormat },
+      );
       if (cancelled) return;
       // Exclude tags this team has hidden (special tags never appear in the hide UI).
       const hidden = teamId ? await loadHiddenTagIds(teamId).catch(() => new Set<string>()) : new Set<string>();

@@ -47,3 +47,23 @@ export function buildTagScopeFilter({ sport, teamId, format }: TagScope): string
     ? `${globalBranch},and(scope.eq.team,team_id.eq.${teamId})`
     : globalBranch;
 }
+
+
+// Apply the WHOLE vocabulary rule to a `tags` query: scope (sport + format for
+// globals, team tags always kept) AND retirement.
+//
+// Retirement has to be a separate predicate rather than part of the .or() string,
+// because it applies to BOTH branches — a retired team tag must stop being offered
+// just like a retired global one. Every vocabulary reader goes through here, so
+// "which tags may a coach pick from" is answered in exactly one place.
+//
+// Deliberately NOT used by Export or by the `.in('id', ...)` readers that render tag
+// names on existing clips: those must resolve every historical id, retired or not.
+// Format controls what is offered; retirement controls what is offered. Neither ever
+// changes what a historical clip means.
+export function applyTagScope<Q extends { or: (f: string) => Q; is: (col: string, val: null) => Q }>(
+  query: Q,
+  scope: TagScope,
+): Q {
+  return query.or(buildTagScopeFilter(scope)).is('retired_at', null);
+}
