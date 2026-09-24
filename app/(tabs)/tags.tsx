@@ -127,10 +127,12 @@ export default function TagsScreen() {
   // nothing is ever hidden (mis-filed tags, or football/7-on-7 tags that still
   // live in offense/defense/plays) — then Players last. For basketball this
   // resolves to offense/defense/plays/players, identical to before.
-  const phases = phasesForSport(activeTeam?.sport);
+  // Phases/categories are narrowed by the team's FORMAT (a 5v5 flag team is not
+  // offered Special Teams). A null format falls open to the full board.
+  const phases = phasesForSport(activeTeam?.sport, activeTeam?.format);
   const defSections: { phaseLabel: string | null; cats: TagCategory[] }[] = phases
     ? phases.map(p => ({ phaseLabel: p.label, cats: categoriesForSport(activeTeam?.sport, p.code) }))
-    : [{ phaseLabel: null, cats: categoriesForSport(activeTeam?.sport) }];
+    : [{ phaseLabel: null, cats: categoriesForSport(activeTeam?.sport, null, activeTeam?.format) }];
   const defKeys = new Set(defSections.flatMap(s => s.cats.map(c => c.key)));
   const extraCats: TagCategory[] = Object.keys(tags)
     .filter(k => (tags[k]?.length ?? 0) > 0 && !defKeys.has(k) && !STAMP_CATEGORIES.has(k))

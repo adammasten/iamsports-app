@@ -805,14 +805,22 @@ export default function TaggingOverlayScreen() {
   // iPad non-football sports inherit the flag top-bar shell (periods + OFF/DEF), replacing
   // the floating top-left clusters (which stay on phone). Football/7-on-7 = a later slice.
   const iPadNonFootball = isTablet && !isFootball;
-  const possOptions = possessionTags.filter(p => isFootball || p.name !== 'Special Teams');
+  // Narrowed by the OWNING team's format (5v5 flag has no Special Teams phase).
+  const sportPhases = phasesForSport(tagSport, tagTeamFormat);
+  // Phase chips must match the phases this sport+format actually offers, or a 5v5
+  // flag team would still see an SP button that opens an empty/fallback board. For a
+  // PHASED sport the phase list is authoritative; a flat sport keeps the previous
+  // rule exactly (so basketball, football and 7-on-7 are untouched).
+  const allowedPossessionNames = new Set((sportPhases ?? []).map(p => p.possessionTag));
+  const possOptions = possessionTags.filter(p => sportPhases
+    ? allowedPossessionNames.has(p.name)
+    : (isFootball || p.name !== 'Special Teams'));
   const possShort = (name: string) => (name === 'Offense' ? 'OFF' : name === 'Defense' ? 'DEF' : 'SP');
   // Board columns come from the ONE shared sport definition (tag-categories.ts).
   // Players is appended LAST on native — roster-sourced, not part of the definition.
   // A PHASED sport (football family) shows the active OFF/DEF/SP phase's columns; if
   // that phase has no tags yet the board falls back to the flat football columns,
   // exactly as before, so it can never render blank.
-  const sportPhases = phasesForSport(tagSport);
   const activePhaseCode = sportPhases && activePossession
     ? (sportPhases.find(p => p.possessionTag === activePossession.name)?.code ?? null)
     : null;

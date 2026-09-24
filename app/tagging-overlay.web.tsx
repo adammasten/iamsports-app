@@ -668,7 +668,16 @@ export default function TaggingStudioWeb() {
     .filter(Boolean) as Tag[];
 
   // Possession options: football gets OFF/DEF/SP; other sports get OFF/DEF only.
-  const possOptions = possessionTags.filter(p => isFootball || p.name !== 'Special Teams');
+  // Narrowed by the OWNING team's format (5v5 flag has no Special Teams phase).
+  const sportPhases = phasesForSport(tagSport, teamFormat);
+  // Phase chips must match the phases this sport+format actually offers, or a 5v5
+  // flag team would still see an SP button that opens an empty/fallback board. For a
+  // PHASED sport the phase list is authoritative; a flat sport keeps the previous
+  // rule exactly (so basketball, football and 7-on-7 are untouched).
+  const allowedPossessionNames = new Set((sportPhases ?? []).map(p => p.possessionTag));
+  const possOptions = possessionTags.filter(p => sportPhases
+    ? allowedPossessionNames.has(p.name)
+    : (isFootball || p.name !== 'Special Teams'));
   const possShort = (name: string) => (name === 'Offense' ? 'OFF' : name === 'Defense' ? 'DEF' : 'SP');
 
   // Board columns come from the ONE shared sport definition (tag-categories.ts).
@@ -679,7 +688,6 @@ export default function TaggingStudioWeb() {
   // phase board, FIRST on the flat board. That divergence is a separately-locked item.
   const PLAYERS_COL = { key: 'players', label: 'Players' };
   const activePossName = possessionTags.find(p => p.id === activePossession)?.name;
-  const sportPhases = phasesForSport(tagSport);
   const activePhaseCode = sportPhases && activePossName
     ? (sportPhases.find(p => p.possessionTag === activePossName)?.code ?? null)
     : null;

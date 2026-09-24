@@ -23,7 +23,16 @@ export type SportPhase = { code: string; label: string; possessionTag: string };
 
 type SportDef =
   | { phases: null; categories: TagCategory[] }
-  | { phases: SportPhase[]; categoriesByPhase: Record<string, TagCategory[]> };
+  | {
+      phases: SportPhase[];
+      categoriesByPhase: Record<string, TagCategory[]>;
+      /**
+       * Phases a given FORMAT offers, when it is fewer than all of them. A format
+       * that isn't listed (or a null format) gets every phase — formats always fail
+       * open to the full board.
+       */
+      phasesByFormat?: Record<string, string[]>;
+    };
 
 // Shared column palette (verbatim from the native tagger constants).
 const BLUE = (key: string, label: string): TagCategory => ({ key, label, color: '#1a6fd4', bg: '#e8f0fe' });
@@ -73,6 +82,11 @@ export const SPORT_TAGS: Record<string, SportDef> = {
       DEF: [RED('def_scheme', 'Scheme'), BLUE('def_opp_play', 'Their Play'), GREEN('def_our_play', 'Our Play'), PURPLE('def_result', 'Result')],
       SP: [GREEN('st_play', 'Play'), PURPLE('st_result', 'Result')],
     },
+    // Most 5v5 flag leagues have no kicking game, so 5v5 is not offered the Special
+    // Teams phase for NEW tagging. The SP tags themselves are untouched and remain
+    // fully exportable wherever a historical clip used one (see export's used-category
+    // union) -- format controls what is OFFERED, never what history means.
+    phasesByFormat: { '5v5': ['OFF', 'DEF'] },
   },
 };
 
@@ -81,21 +95,28 @@ function resolve(sport?: string | null): SportDef {
   return SPORT_TAGS[(sport ?? DEFAULT_SPORT).trim().toLowerCase()] ?? SPORT_TAGS[DEFAULT_SPORT];
 }
 
-// The phase selector for a sport, or null for a flat (phase-less) sport.
-export function phasesForSport(sport?: string | null): SportPhase[] | null {
+// The phase selector for a sport, or null for a flat (phase-less) sport. When a
+// format is supplied AND that format restricts the phase list, the list is narrowed;
+// any other format — and a null/unknown one — gets every phase (fails open).
+export function phasesForSport(sport?: string | null, format?: string | null): SportPhase[] | null {
   const d = resolve(sport);
-  return d.phases ?? null;
+  if (!d.phases) return null;
+  const allowed = format ? d.phasesByFormat?.[format] : undefined;
+  return allowed ? d.phases.filter(p => allowed.includes(p.code)) : d.phases;
 }
 
 // The categories for a sport. For a phased sport, pass a phase code to get just
 // that phase's columns; omit it to get every phase's columns in order (deduped).
-export function categoriesForSport(sport?: string | null, phaseCode?: string | null): TagCategory[] {
+export function categoriesForSport(sport?: string | null, phaseCode?: string | null, format?: string | null): TagCategory[] {
   const d = resolve(sport);
   if (d.phases) {
     if (phaseCode) return d.categoriesByPhase[phaseCode] ?? [];
     const seen = new Set<string>();
     const out: TagCategory[] = [];
-    for (const p of d.phases) for (const c of d.categoriesByPhase[p.code] ?? []) if (!seen.has(c.key)) { seen.add(c.key); out.push(c); }
+    // Union only the phases this format actually offers (all of them when unrestricted).
+    for (const p of phasesForSport(sport, format) ?? d.phases) {
+      for (const c of d.categoriesByPhase[p.code] ?? []) if (!seen.has(c.key)) { seen.add(c.key); out.push(c); }
+    }
     return out;
   }
   return d.categories;
