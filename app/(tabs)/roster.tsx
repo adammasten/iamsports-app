@@ -3,7 +3,7 @@ import { confirm } from '@/lib/confirm';
 import { supabase } from '@/supabase';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // The team Roster tab. Coaches manage the roster (hold spots, share the team
@@ -17,14 +17,6 @@ type RosterPlayer = {
   guardianCount: number;
   isMine: boolean;
   guardianCode: string | null;
-};
-
-// A possible-duplicate pair from suggest_duplicate_players, with per-side
-// guardians + attached content (footage/stats) so the chooser can show — and
-// recommend — the real, content-bearing profile to keep.
-type DupePair = {
-  keep_id: string; keep_name: string; keep_guardians: number; keep_content: number;
-  dup_id: string; dup_name: string; dup_guardians: number; dup_content: number;
 };
 
 // A person attached to a player (via parent_player_links) with their email +
@@ -53,10 +45,6 @@ export default function RosterScreen() {
   const [teamCode, setTeamCode] = useState<string | null>(null);
   const [coachCode, setCoachCode] = useState<string | null>(null);
   const [staff, setStaff] = useState<{ user_id: string; display_name: string; role: string }[]>([]);
-  const [dupes, setDupes] = useState<DupePair[]>([]);
-  // Merge chooser (cross-platform: Alert.alert's buttons are dead on web).
-  const [mergePair, setMergePair] = useState<DupePair | null>(null);
-  const [merging, setMerging] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState('');
@@ -123,70 +111,8 @@ export default function RosterScreen() {
       }))
       .sort((a, b) => a.name.localeCompare(b.name)));
 
-    // Coach-only: possible-duplicate suggestions (RPC is coach-gated; a non-coach
-    // just gets an error → empty list).
-    const { data: d } = await supabase.rpc('suggest_duplicate_players', { p_team_id: teamId });
-    setDupes((d as any[]) ?? []);
     setLoading(false);
   }, [activeTeam, userId]);
-
-  // Open the cross-platform chooser (works on web AND native, unlike a
-  // multi-button Alert.alert which silently no-ops on RN Web).
-  function mergeDupe(d: DupePair) {
-    setMergePair(d);
-  }
-  // After the coach picks which profile to keep, spell out — in plain words —
-  // exactly what happens before doing the irreversible merge: which player is
-  // absorbed, what moves, and that it can't be undone.
-  async function chooseKeep(keepSide: 'keep' | 'dup') {
-    const d = mergePair;
-    if (!d) return;
-    const keeper = keepSide === 'keep'
-      ? { id: d.keep_id, name: d.keep_name }
-      : { id: d.dup_id, name: d.dup_name };
-    const loser = keepSide === 'keep'
-      ? { id: d.dup_id, name: d.dup_name, g: d.dup_guardians, c: d.dup_content }
-      : { id: d.keep_id, name: d.keep_name, g: d.keep_guardians, c: d.keep_content };
-    const moves: string[] = [];
-    if (loser.c > 0) moves.push(`${loser.c} clip${loser.c === 1 ? '' : 's'} / stats`);
-    if (loser.g > 0) moves.push(`${loser.g} guardian${loser.g === 1 ? '' : 's'}`);
-    const movesLine = moves.length
-      ? `Everything on “${loser.name}” (${moves.join(' and ')}) moves onto “${keeper.name}”, then “${loser.name}” is removed.`
-      : `“${loser.name}” is empty, so it’s simply removed and “${keeper.name}” stays.`;
-    const ok = await confirm({
-      title: `Combine into “${keeper.name}”?`,
-      message: `${movesLine}\n\nThis can’t be undone.`,
-      confirmText: 'Combine',
-      destructive: true,
-    });
-    if (!ok) return;
-    doMerge(keeper.id, loser.id);
-  }
-
-  async function doMerge(keep: string, dup: string) {
-    setMerging(true);
-    const { error } = await supabase.rpc('merge_players', { p_keep: keep, p_dup: dup });
-    setMerging(false);
-    setMergePair(null);
-    if (error) { webAlert('Merge', error.message); return; }
-    load();
-  }
-
-  // One-line description of what a side has, so a coach can tell the real
-  // claimed profile from an empty placeholder.
-  function sideMeta(guardians: number, content: number): string {
-    const parts: string[] = [];
-    parts.push(guardians > 0 ? `Claimed · ${guardians} guardian${guardians === 1 ? '' : 's'}` : 'Placeholder · unclaimed');
-    parts.push(content > 0 ? `${content} clip${content === 1 ? '' : 's'} / stats attached` : 'No footage yet');
-    return parts.join(' · ');
-  }
-  // Recommend keeping the fuller profile: claimed beats unclaimed, then more
-  // content, then the longer (usually full) name. Returns 'keep' | 'dup'.
-  function recommendedKeep(d: DupePair): 'keep' | 'dup' {
-    const score = (g: number, c: number, name: string) => g * 1000 + c * 10 + name.trim().length;
-    return score(d.keep_guardians, d.keep_content, d.keep_name) >= score(d.dup_guardians, d.dup_content, d.dup_name)
-      ? 'keep' : 'dup';
-  }
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -449,19 +375,6 @@ export default function RosterScreen() {
         </View>
       )}
 
-      {isCoach && dupes.length > 0 && (
-        <View style={styles.dupeCard}>
-          <Text style={styles.dupeTitle}>Possible duplicates</Text>
-          <Text style={styles.dupeSub}>Same player added twice? Combine them into one — all footage, clips, guardians and stats end up on a single profile.</Text>
-          {dupes.map((d, i) => (
-            <TouchableOpacity key={i} style={styles.dupeRow} onPress={() => mergeDupe(d)}>
-              <Text style={styles.dupeText} numberOfLines={1}>{d.keep_name} · {d.dup_name}</Text>
-              <Text style={styles.dupeMerge}>Review →</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
       {loading ? (
         <ActivityIndicator style={{ marginTop: 28 }} color="#534AB7" />
       ) : (
@@ -578,65 +491,12 @@ export default function RosterScreen() {
         </>
       )}
 
-      {/* Merge chooser — cross-platform (web + native). Everything from both
-          combines onto the profile you keep; the choice only sets which
-          name/identity survives. Each side shows its guardians + content, and
-          the fuller one is recommended. */}
-      <Modal visible={!!mergePair} transparent animationType="fade" onRequestClose={() => setMergePair(null)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Merge duplicate players</Text>
-            <Text style={styles.modalBody}>
-              These look like the same player. Everything — footage, clips, guardians and stats — combines onto the one you keep. Nothing is lost; you’re just choosing which name and profile stays.
-            </Text>
-            {mergePair && (() => {
-              const rec = recommendedKeep(mergePair);
-              const Side = ({ side, name, guardians, content }: { side: 'keep' | 'dup'; name: string; guardians: number; content: number }) => (
-                <TouchableOpacity
-                  style={[styles.mergeOption, rec === side && styles.mergeOptionRec]}
-                  disabled={merging}
-                  onPress={() => chooseKeep(side)}
-                >
-                  <View style={styles.mergeOptionHead}>
-                    <Text style={styles.mergeOptionName} numberOfLines={1}>Keep “{name}”</Text>
-                    {rec === side && <Text style={styles.mergeRecTag}>Recommended</Text>}
-                  </View>
-                  <Text style={styles.mergeOptionMeta}>{sideMeta(guardians, content)}</Text>
-                </TouchableOpacity>
-              );
-              return (
-                <>
-                  <Side side="keep" name={mergePair.keep_name} guardians={mergePair.keep_guardians} content={mergePair.keep_content} />
-                  <Side side="dup" name={mergePair.dup_name} guardians={mergePair.dup_guardians} content={mergePair.dup_content} />
-                </>
-              );
-            })()}
-            <Text style={styles.modalHint}>Tip: keep the family’s claimed profile with the correct full name — usually the one marked Recommended.</Text>
-            <TouchableOpacity style={styles.modalBtn} disabled={merging} onPress={() => setMergePair(null)}>
-              <Text style={styles.modalBtnText}>{merging ? 'Merging…' : 'Not duplicates'}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', justifyContent: 'center', paddingHorizontal: 28 },
-  modalCard: { backgroundColor: '#16161a', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: '#2a2a32', gap: 10, maxWidth: 440, width: '100%', alignSelf: 'center' },
-  modalTitle: { color: '#f4f4f6', fontSize: 18, fontWeight: '800' },
-  modalBody: { color: '#b8bcc6', fontSize: 14, lineHeight: 20, marginBottom: 4 },
-  modalBtn: { paddingVertical: 13, borderRadius: 10, alignItems: 'center', backgroundColor: '#22222a' },
-  modalBtnText: { color: '#cfd2da', fontSize: 15, fontWeight: '700' },
-  modalHint: { color: '#8a8f9a', fontSize: 12.5, lineHeight: 18, marginTop: 2, marginBottom: 4 },
-  mergeOption: { backgroundColor: '#1d1d24', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#2f2f39' },
-  mergeOptionRec: { borderColor: '#6c63d6', backgroundColor: '#211f34' },
-  mergeOptionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  mergeOptionName: { color: '#f4f4f6', fontSize: 16, fontWeight: '800', flex: 1 },
-  mergeRecTag: { color: '#b9b1f0', fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
-  mergeOptionMeta: { color: '#9fa4af', fontSize: 13, marginTop: 4 },
   title: { fontSize: 22, fontWeight: '800', color: '#f4f4f6' },
   subtitle: { fontSize: 14, fontWeight: '600', color: '#9096a3', marginBottom: 16 },
   linkPlayersRow: { paddingVertical: 8, marginBottom: 8 },
@@ -693,10 +553,4 @@ const styles = StyleSheet.create({
   addRow: { marginTop: 16, paddingVertical: 14, borderRadius: 10, borderWidth: 1, borderColor: '#534AB7', borderStyle: 'dashed', alignItems: 'center' },
   addRowText: { color: '#8b7bff', fontWeight: '700', fontSize: 15 },
 
-  dupeCard: { backgroundColor: '#1f1a10', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#4a3a1a' },
-  dupeTitle: { color: '#e0a94a', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
-  dupeSub: { color: '#c9b892', fontSize: 12.5, lineHeight: 18, marginBottom: 10 },
-  dupeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
-  dupeText: { color: '#e8e8ea', fontSize: 15, fontWeight: '600', flex: 1 },
-  dupeMerge: { color: '#8b7bff', fontWeight: '800', fontSize: 14 },
 });
