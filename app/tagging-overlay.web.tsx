@@ -41,6 +41,13 @@ const CAT_COLOR: Record<string, string> = {
   off_formation: '#1a6fd4', off_play: '#1e8449', off_result: '#6c5ce7',
   def_scheme: '#c0392b', def_opp_play: '#1a6fd4', def_our_play: '#1e8449', def_result: '#6c5ce7',
   st_play: '#1e8449', st_result: '#6c5ce7',
+  // Taxonomy launch columns. Colors are the canonical values from
+  // lib/core/tag-categories.ts. off_player_action is green for every sport except
+  // baseball/softball, which declare it purple as a merged Result column; this map
+  // holds ONE color per key, so it takes the authority green — same as def_scheme,
+  // which is red here though baseball/softball declare it blue.
+  off_opp_look: '#c0392b', def_opp_formation: '#1a6fd4',
+  off_player_action: '#1e8449', st_player_action: '#1e8449',
 };
 // Event-tag hotkey pool (players use the number row). Reserved keys — space,
 // arrows, enter, backspace, and I/O (mark In/Out) — are never in here.
@@ -624,7 +631,7 @@ export default function TaggingStudioWeb() {
 
   const tagButton = (t: Tag, cat: string) => {
     const on = builtSet.has(t.id);
-    const col = CAT_COLOR[cat];
+    const col = CAT_COLOR[cat] ?? C.dim;
     return (
       <Pressable key={t.id} focusable={false} onPress={() => tapTag(t)} style={[styles.chip, { borderColor: on ? col : col + 'aa', backgroundColor: on ? col : col + '1c' }]}>
         {cat === 'players' && hotkeys[t.id] ? <Text style={[styles.chipKey, on && { color: '#1a1030' }]}>{hotkeys[t.id]}</Text> : null}
@@ -636,7 +643,7 @@ export default function TaggingStudioWeb() {
 
   const category = (key: string, title: string, grow?: boolean) => (
     <View style={[styles.catCol, grow && { flex: 1 }]}>
-      <View style={styles.catHead}><View style={[styles.cdot, { backgroundColor: CAT_COLOR[key] }]} /><Text style={[styles.catTitle, { color: CAT_COLOR[key] }]}>{title}</Text></View>
+      <View style={styles.catHead}><View style={[styles.cdot, { backgroundColor: CAT_COLOR[key] ?? C.dim }]} /><Text style={[styles.catTitle, { color: CAT_COLOR[key] ?? C.dim }]}>{title}</Text></View>
       <View style={styles.chipWrap}>{(tags[key] ?? []).map(t => tagButton(t, key))}</View>
     </View>
   );
@@ -773,7 +780,7 @@ export default function TaggingStudioWeb() {
           <ScrollView horizontal contentContainerStyle={styles.mBoardRow}>
             {boardCols.map(c => (
               <View key={c.key} style={styles.mCol}>
-                <Text style={[styles.mColHead, { color: CAT_COLOR[c.key] }]}>{c.label.toUpperCase()}</Text>
+                <Text style={[styles.mColHead, { color: CAT_COLOR[c.key] ?? C.dim }]}>{c.label.toUpperCase()}</Text>
                 <ScrollView style={{ maxHeight: mBoardFS ? Math.round(winH * 0.62) : 118 }} showsVerticalScrollIndicator={false}>
                   <View style={styles.mChipsWrap}>{(tags[c.key] ?? []).map(t => tagButton(t, c.key))}</View>
                 </ScrollView>
@@ -962,7 +969,7 @@ export default function TaggingStudioWeb() {
                 <ScrollView horizontal contentContainerStyle={styles.mBoardRow}>
                   {boardCols.map(c => (
                     <View key={c.key} style={styles.mCol}>
-                      <Text style={[styles.mColHead, { color: CAT_COLOR[c.key] }]}>{c.label.toUpperCase()}</Text>
+                      <Text style={[styles.mColHead, { color: CAT_COLOR[c.key] ?? C.dim }]}>{c.label.toUpperCase()}</Text>
                       <ScrollView style={{ maxHeight: mBoardFS ? Math.round(winH * 0.62) : 118 }} showsVerticalScrollIndicator={false}>
                         <View style={styles.mChipsWrap}>{(tags[c.key] ?? []).map(t => tagButton(t, c.key))}</View>
                       </ScrollView>
