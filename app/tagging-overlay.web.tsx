@@ -1257,6 +1257,22 @@ export default function TaggingStudioWeb() {
               <View style={styles.vdiv} />
               {category('result', 'Result', true)}
             </View>
+          ) : usesSharedPlayersPlacement(tagSport) ? (
+            // A FLAT sport that opts into the shared Players placement (volleyball): draw its
+            // OWN columns in the shared order, the same array the phone and fullscreen boards
+            // already use, so desktop stops showing the legacy generic columns (Adam,
+            // 2026-09-25). Anything that does not opt in falls through to the block below,
+            // which is untouched — `_default`, unknown sports, and a phased sport whose phase
+            // has no tags all keep their existing board exactly. Ordering only: same column
+            // component, same dividers, same styles.
+            <View style={styles.board}>
+              {flatColsWithPlayers.map((c, i) => (
+                <Fragment key={c.key}>
+                  {i > 0 ? <View style={styles.vdiv} /> : null}
+                  {category(c.key, c.label, true)}
+                </Fragment>
+              ))}
+            </View>
           ) : (
             <View style={styles.board}>
               {category('players', 'Players', true)}
