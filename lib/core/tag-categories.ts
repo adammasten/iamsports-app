@@ -121,7 +121,6 @@ export const SPORT_TAGS: Record<string, SportDef> = {
 
   baseball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   softball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
-  lacrosse: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   volleyball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
 
   // The board for content with NO sport (teamless personal footage) and for any sport
@@ -160,6 +159,44 @@ export const SPORT_TAGS: Record<string, SportDef> = {
         BLUE('def_opp_formation', 'Their Shape'),
         RED('def_scheme', 'Our Defensive Shape'),
         BLUE('def_opp_play', 'Their Play / Pattern'),
+        PURPLE('def_result', 'Their Result'),
+        GREEN('def_our_play', 'Our Player Action'),
+      ],
+    },
+  },
+
+  // LACROSSE — the launch board (Adam, 2026-09-25, Slice J). Phased OFF/DEF, no SP.
+  //
+  // Greenfield when this shipped (0 teams / videos / clips / tag uses), so it uses the
+  // football-family keys rather than the generic offense/defense/plays it was seeded into;
+  // migration 20260925_lacrosse_launch_taxonomy recategorised 38 rows and retired 5.
+  // Football owns every one of these keys' shared master labels, so lacrosse's wording
+  // ("Our Set", "Their Defense", "Our Scheme") is board-only.
+  //
+  // Both phases are SIX columns once Players is inserted, which the committed native
+  // horizontal strip handles. The player-action column is the TRAILING one on both phases,
+  // so `playersBefore: PLAYER_ACTION_KEYS` places Players 5th exactly as it does for the
+  // football family. `defaultVisiblePhase` shows the OFF columns before a phase is picked —
+  // DISPLAY ONLY, like Basketball and Soccer.
+  lacrosse: {
+    phases: [
+      { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
+      { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
+    ],
+    playersBefore: PLAYER_ACTION_KEYS,
+    defaultVisiblePhase: 'OFF',
+    categoriesByPhase: {
+      OFF: [
+        BLUE('off_formation', 'Our Set'),
+        RED('off_opp_look', 'Their Defense'),
+        GREEN('off_play', 'Our Play'),
+        PURPLE('off_result', 'Our Result'),
+        GREEN('off_player_action', 'Our Player Action'),
+      ],
+      DEF: [
+        BLUE('def_opp_formation', 'Their Set'),
+        RED('def_scheme', 'Our Scheme'),
+        BLUE('def_opp_play', 'Their Play'),
         PURPLE('def_result', 'Their Result'),
         GREEN('def_our_play', 'Our Player Action'),
       ],
