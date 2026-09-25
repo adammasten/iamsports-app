@@ -119,8 +119,6 @@ export const SPORT_TAGS: Record<string, SportDef> = {
     },
   },
 
-  baseball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
-  softball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   volleyball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
 
   // The board for content with NO sport (teamless personal footage) and for any sport
@@ -197,6 +195,80 @@ export const SPORT_TAGS: Record<string, SportDef> = {
         BLUE('def_opp_formation', 'Their Set'),
         RED('def_scheme', 'Our Scheme'),
         BLUE('def_opp_play', 'Their Play'),
+        PURPLE('def_result', 'Their Result'),
+        GREEN('def_our_play', 'Our Player Action'),
+      ],
+    },
+  },
+
+  // BASEBALL — the launch board (Adam, 2026-09-25, Slice K). Phased OFF/DEF, no SP.
+  //
+  // Greenfield when this shipped (0 teams / videos / clips / tag uses); migration
+  // 20260925_baseball_softball_launch_taxonomy recategorised its rows onto the
+  // football-family keys and retired the non-launch extras.
+  //
+  // OFF MERGES RESULT AND PLAYER ACTION on purpose. Every other sport has five players
+  // acting at once, so "what the play produced" and "what one player did" are different
+  // facts; here one player acts at a time, so a Single IS both the team's result and the
+  // batter's credit. Where the actor is the RUNNER (Stolen Base, Run Scored, Caught
+  // Stealing, Picked Off) the player bundle disambiguates them on the same clip. DEF keeps
+  // them separate because there the opponent produced the result while our pitcher or
+  // fielder did something else.
+  //
+  // `def_scheme` carries Pitch / Play: there is no Alignment column at launch (one chip is
+  // not worth a column), so this key is free and no new category key was introduced.
+  // OFF is 3 columns and DEF is 4, so the native horizontal strip is never involved.
+  baseball: {
+    phases: [
+      { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
+      { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
+    ],
+    playersBefore: PLAYER_ACTION_KEYS,
+    defaultVisiblePhase: 'OFF',
+    categoriesByPhase: {
+      OFF: [
+        GREEN('off_play', 'Our Play'),
+        PURPLE('off_player_action', 'Result / Player Action'),
+      ],
+      DEF: [
+        BLUE('def_scheme', 'Pitch / Play'),
+        PURPLE('def_result', 'Their Result'),
+        GREEN('def_our_play', 'Our Player Action'),
+      ],
+    },
+  },
+
+  // SOFTBALL — the launch board (Adam, 2026-09-25, Slice K). Phased OFF/DEF, no SP.
+  //
+  // Greenfield when this shipped (0 teams / videos / clips / tag uses); migration
+  // 20260925_baseball_softball_launch_taxonomy recategorised its rows onto the
+  // football-family keys and retired the non-launch extras.
+  //
+  // OFF MERGES RESULT AND PLAYER ACTION on purpose. Every other sport has five players
+  // acting at once, so "what the play produced" and "what one player did" are different
+  // facts; here one player acts at a time, so a Single IS both the team's result and the
+  // batter's credit. Where the actor is the RUNNER (Stolen Base, Run Scored, Caught
+  // Stealing, Picked Off) the player bundle disambiguates them on the same clip. DEF keeps
+  // them separate because there the opponent produced the result while our pitcher or
+  // fielder did something else.
+  //
+  // `def_scheme` carries Pitch / Play: there is no Alignment column at launch (one chip is
+  // not worth a column), so this key is free and no new category key was introduced.
+  // OFF is 3 columns and DEF is 4, so the native horizontal strip is never involved.
+  softball: {
+    phases: [
+      { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
+      { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
+    ],
+    playersBefore: PLAYER_ACTION_KEYS,
+    defaultVisiblePhase: 'OFF',
+    categoriesByPhase: {
+      OFF: [
+        GREEN('off_play', 'Our Play'),
+        PURPLE('off_player_action', 'Result / Player Action'),
+      ],
+      DEF: [
+        BLUE('def_scheme', 'Pitch / Play'),
         PURPLE('def_result', 'Their Result'),
         GREEN('def_our_play', 'Our Player Action'),
       ],
