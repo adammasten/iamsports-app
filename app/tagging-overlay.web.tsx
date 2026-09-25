@@ -283,11 +283,13 @@ export default function TaggingStudioWeb() {
       setSpecial({ highlight, poe, goodPlay });
       setPeriodTags(periods);
       setPossessionTags(possessions);
-      // Every sport defaults to the Offense phase so a clip is never saved without a
-      // possession stamp (Adam, 2026-09-22). Flag additionally uses it to pick the
-      // per-phase board; other sports only stamp — their columns don't change.
-      // `prev ??` means this only fills an empty slot, never overrides a coach mid-game.
-      setActivePossession(prev => prev ?? possessions.find(p => p.name === 'Offense')?.id ?? null);
+      // DELIBERATELY NO automatic possession selection (Adam, 2026-09-25). This used to do
+      // `setActivePossession(prev => prev ?? Offense)`, which meant a clip saved without the
+      // coach ever tapping OFF still got an Offense stamp — web wrote possession the coach
+      // never chose, unlike native. The OFF board still DISPLAYS by default; that is handled
+      // purely by displayPhaseForSport + the first-phase fallback below, which touch no state.
+      // activePossession now stays null until the coach taps a phase, and both save paths
+      // gate the possession row on it (`if (activePossession) rows.push(...)`).
     })();
     return () => { cancelled = true; };
   }, [teamId, tagSport, teamFormat]);
@@ -693,10 +695,12 @@ export default function TaggingStudioWeb() {
   const activePhaseCode = sportPhases && activePossName
     ? (sportPhases.find(p => p.possessionTag === activePossName)?.code ?? null)
     : null;
-  // A sport may declare a default visible phase (basketball) so the board opens on useful
-  // columns instead of the legacy fallback. DISPLAY ONLY — activePossession is untouched,
-  // so an unselected board still stamps no possession on save.
-  const displayPhaseCode = displayPhaseForSport(tagSport, activePhaseCode);
+  // Which phase's COLUMNS to draw. `displayPhaseForSport` supplies a sport's declared
+  // default (basketball / soccer / lacrosse / baseball / softball); the football family
+  // declares none, so web falls back to the sport's FIRST phase to keep showing exactly the
+  // board it showed before the automatic possession selection was removed. DISPLAY ONLY —
+  // neither branch writes activePossession, so nothing is stamped until the coach taps.
+  const displayPhaseCode = displayPhaseForSport(tagSport, activePhaseCode) ?? sportPhases?.[0]?.code ?? null;
   const flagPhaseCols = displayPhaseCode
     ? categoriesForSport(tagSport, displayPhaseCode).map(c => ({ key: c.key, label: c.label }))
     : null;
@@ -1228,9 +1232,12 @@ export default function TaggingStudioWeb() {
               </View>
             </>
           ) : useFlagPhaseBoard ? (
-            // FLAG: the picked phase's OWN columns (OFF/DEF/SP each different). All groupable.
+            // The picked phase's OWN columns (OFF/DEF/SP each different). All groupable.
+            // Uses phaseColsWithPlayers — the SAME shared placement the phone and fullscreen
+            // boards use — so desktop no longer drops the roster Players column (Adam,
+            // 2026-09-25). Ordering only: same column component, dividers and styles.
             <View style={styles.board}>
-              {flagPhaseCols!.map((c, i) => (
+              {phaseColsWithPlayers!.map((c, i) => (
                 <Fragment key={c.key}>
                   {i > 0 ? <View style={styles.vdiv} /> : null}
                   {category(c.key, c.label, true)}
