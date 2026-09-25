@@ -9,7 +9,7 @@ import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
-import { categoriesForSport, phasesForSport } from '@/lib/core/tag-categories';
+import { categoriesForSport, phasesForSport, playersBeforeFinalColumn, FALLBACK_FLAT_COLUMNS } from '@/lib/core/tag-categories';
 import { applyTagScope } from '@/lib/core/tag-scope';
 import {
   type Odk, type FbCtx, type FbSel, ODK_SHORT, isFlagFootball,
@@ -697,16 +697,25 @@ export default function TaggingStudioWeb() {
     ? categoriesForSport(tagSport, activePhaseCode).map(c => ({ key: c.key, label: c.label }))
     : null;
   const flagPhaseHasTags = !!flagPhaseCols && flagPhaseCols.some(c => (tags[c.key]?.length ?? 0) > 0);
+  // Phase columns WITH Players placed. Players stays last, exactly as before, unless
+  // the shared definition asks for Player to precede a trailing Player Action column
+  // (Football's launch order). ORDERING ONLY — computed once and reused by both the
+  // phone and desktop board branches below so the rule cannot drift between them.
+  const phaseColsWithPlayers = flagPhaseCols
+    ? (playersBeforeFinalColumn(tagSport, flagPhaseCols)
+        ? [...flagPhaseCols.slice(0, -1), PLAYERS_COL, flagPhaseCols[flagPhaseCols.length - 1]]
+        : [...flagPhaseCols, PLAYERS_COL])
+    : null;
   const useFlagPhaseBoard = !!sportPhases && flagPhaseHasTags;
   // Flat board (non-phased sport, or a phase with no tags yet).
-  const flatCols = (sportPhases ? categoriesForSport('football') : categoriesForSport(tagSport))
+  const flatCols = (sportPhases ? FALLBACK_FLAT_COLUMNS : categoriesForSport(tagSport))
     .map(c => ({ key: c.key, label: c.label }));
 
   // ── MOBILE BROWSER: immersive full-bleed layout mirroring the native app. Reuses
   //    every handler + the same top-bar arrangement; desktop layout (below) unchanged. ──
   if (isPhone) {
     const boardCols = useFlagPhaseBoard
-      ? [...flagPhaseCols!, PLAYERS_COL]
+      ? phaseColsWithPlayers!
       : [PLAYERS_COL, ...flatCols];
     return (
       <GestureHandlerRootView style={styles.mApp}>
@@ -803,7 +812,7 @@ export default function TaggingStudioWeb() {
   // FS immersive board columns — the SAME set the non-FS desktop board shows below,
   // just floated over the video. Computed unconditionally (used only inside {isFS}).
   const boardCols = useFlagPhaseBoard
-    ? [...flagPhaseCols!, PLAYERS_COL]
+    ? phaseColsWithPlayers!
     : [PLAYERS_COL, ...flatCols];
 
   return (

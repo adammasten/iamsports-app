@@ -32,6 +32,13 @@ type SportDef =
        * open to the full board.
        */
       phasesByFormat?: Record<string, string[]>;
+      /**
+       * Opt in to placing the roster-derived Players column immediately BEFORE a
+       * trailing player-action column instead of last. Football's launch taxonomy
+       * requires Player to precede Player Action. Only sports that set this are
+       * affected — every other board keeps Players last, exactly as today.
+       */
+      playersBeforeAction?: boolean;
     };
 
 // Shared column palette (verbatim from the native tagger constants).
@@ -57,13 +64,6 @@ export const SPORT_TAGS: Record<string, SportDef> = {
   softball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   lacrosse: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   volleyball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
-
-  // Football still renders the flat FB board — its OFF/DEF vocabulary does not exist
-  // yet (only 16 special_teams rows), so moving it onto phases is a later slice.
-  football: {
-    phases: null,
-    categories: [BLUE('formation', 'Formation'), GREEN('play', 'Play'), RED('defense', 'Defense'), PURPLE('result', 'Result')],
-  },
 
   // 7-on-7 is its OWN SPORT (not Football + a format, and not flag). It is pass-only:
   // no run game and no kicking game, so there is no Special Teams phase.
@@ -112,7 +112,66 @@ export const SPORT_TAGS: Record<string, SportDef> = {
     // union) -- format controls what is OFFERED, never what history means.
     phasesByFormat: { '5v5': ['OFF', 'DEF'] },
   },
+
+  // 11v11 Football — the launch taxonomy. Phased OFF/DEF/SP.
+  //
+  // DECLARED LAST DELIBERATELY. ALL_CATEGORIES resolves a shared category key's
+  // descriptor by FIRST declaration, and Football relabels several shared keys
+  // ("Our Formation", "Our Play", "Our Result", and def_our_play as "Our Player
+  // Action"). Declaring it earlier would override flag's and 7-on-7's labels in
+  // Export's historical picker and My Tags' extras. Board headers are unaffected by
+  // this ordering — the taggers read the per-sport list directly.
+  //
+  // OFF and DEF are SIX columns once Players is inserted, which the committed native
+  // horizontal-scroll path handles. `playersBeforeAction` puts Players immediately
+  // before the trailing Player Action column, as the launch order requires.
+  football: {
+    phases: [
+      { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
+      { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
+      { code: 'SP', label: 'Special Teams', possessionTag: 'Special Teams' },
+    ],
+    playersBeforeAction: true,
+    categoriesByPhase: {
+      OFF: [
+        BLUE('off_formation', 'Our Formation'),
+        RED('off_opp_look', 'Their Look'),
+        GREEN('off_play', 'Our Play'),
+        PURPLE('off_result', 'Our Result'),
+        GREEN('off_player_action', 'Our Player Action'),
+      ],
+      DEF: [
+        BLUE('def_opp_formation', 'Their Formation'),
+        RED('def_scheme', 'Our Scheme'),
+        BLUE('def_opp_play', 'Their Play'),
+        PURPLE('def_result', 'Their Result'),
+        GREEN('def_our_play', 'Our Player Action'),   // key preserved, label only
+      ],
+      SP: [
+        GREEN('st_play', 'Play'),
+        PURPLE('st_result', 'Result'),
+        GREEN('st_player_action', 'Our Player Action'),
+      ],
+    },
+  },
 };
+
+// THE PHASED-BOARD FALLBACK COLUMNS — frozen literal, do not derive.
+//
+// A phased sport (football family) renders the active OFF/DEF/SP phase's columns; when
+// NO phase is selected yet (the state every board opens in) or that phase has no tags,
+// both taggers fall back to these four columns so the board is never blank. Until
+// Football became phased that fallback was `categoriesForSport('football')` — the flat
+// football entry. Deriving it is no longer possible (Football has phases, and the union
+// of its phases is 13 columns), so the exact four columns the fallback has always
+// rendered are frozen here. Changing this changes what every flag / 7-on-7 / Football
+// board shows on open.
+export const FALLBACK_FLAT_COLUMNS: TagCategory[] = [
+  BLUE('formation', 'Formation'),
+  GREEN('play', 'Play'),
+  RED('defense', 'Defense'),
+  PURPLE('result', 'Result'),
+];
 
 const DEFAULT_SPORT = 'basketball';
 function resolve(sport?: string | null): SportDef {
@@ -146,13 +205,42 @@ export function categoriesForSport(sport?: string | null, phaseCode?: string | n
   return d.categories;
 }
 
+// Category keys that represent WHAT A SPECIFIC PLAYER DID (as opposed to a fact about
+// the play). Used only to decide Players-column placement — not by any matching logic.
+const PLAYER_ACTION_KEYS: ReadonlySet<string> = new Set([
+  'off_player_action', 'def_our_play', 'st_player_action',
+]);
+
+/**
+ * Should the roster-derived Players column be inserted immediately BEFORE the final
+ * category instead of appended last?
+ *
+ * True only when the sport opts in (`playersBeforeAction`) AND its last column really
+ * is a player-action category. Both conditions must hold, so no existing board can be
+ * reordered by accident: flag's def_our_play is third in its DEF phase, and 7-on-7
+ * does not opt in at all. Placement only — nothing about selection or bundles.
+ */
+export function playersBeforeFinalColumn(
+  sport?: string | null,
+  cats?: { key: string }[],
+): boolean {
+  const d = resolve(sport);
+  if (!('playersBeforeAction' in d) || !d.playersBeforeAction) return false;
+  const last = cats?.[cats.length - 1];
+  return !!last && PLAYER_ACTION_KEYS.has(last.key);
+}
+
 // Flat lookup of every category descriptor across all sports (by key).
+// The fallback columns are folded in LAST so that the legacy flat keys stay known
+// (they are no longer in any sport definition now that Football is phased) without ever
+// overriding a sport's own descriptor for a key it shares.
 const ALL_CATEGORIES: Record<string, TagCategory> = (() => {
   const m: Record<string, TagCategory> = {};
   for (const d of Object.values(SPORT_TAGS)) {
     const cats = d.phases ? Object.values(d.categoriesByPhase).flat() : d.categories;
     for (const c of cats) if (!m[c.key]) m[c.key] = c;
   }
+  for (const c of FALLBACK_FLAT_COLUMNS) if (!m[c.key]) m[c.key] = c;
   return m;
 })();
 
