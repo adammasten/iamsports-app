@@ -95,16 +95,45 @@ export const SPORT_TAGS: Record<string, SportDef> = {
   },
 
   // Flag football — OFF/DEF/SP each swap in their own phase-scoped columns.
+  //
+  // SLICE F (Adam, 2026-09-25): the launch board. Six columns on OFF and DEF, with the
+  // roster Players column immediately BEFORE the trailing player-action column, matching
+  // Football. The native tag board already scrolls horizontally at six columns
+  // (tagging-overlay.tsx) and the web board already min-width scrolls, so this is a
+  // definition change only — no tagger, geometry or style change.
+  //
+  // Flag is declared BEFORE football, so it owns the ALL_CATEGORIES descriptor for
+  // off_player_action / def_opp_formation / st_player_action. Their labels and colors are
+  // deliberately IDENTICAL to Football's declarations, so no cross-sport picker label
+  // moves. def_result is the one descriptor flag owns whose label changes here
+  // ('Result' -> 'Their Result'); every other key's picker label is owned by 7-on-7.
   'flag football': {
     phases: [
       { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
       { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
       { code: 'SP', label: 'Special Teams', possessionTag: 'Special Teams' },
     ],
+    playersBeforeAction: true,
     categoriesByPhase: {
-      OFF: [BLUE('off_formation', 'Formation'), GREEN('off_play', 'Play'), PURPLE('off_result', 'Result')],
-      DEF: [RED('def_scheme', 'Scheme'), BLUE('def_opp_play', 'Their Play'), GREEN('def_our_play', 'Our Play'), PURPLE('def_result', 'Result')],
-      SP: [GREEN('st_play', 'Play'), PURPLE('st_result', 'Result')],
+      OFF: [
+        BLUE('off_formation', 'Our Formation'),
+        RED('off_opp_look', 'Their Look'),      // the defensive look we are FACING
+        GREEN('off_play', 'Our Play'),
+        PURPLE('off_result', 'Our Result'),
+        GREEN('off_player_action', 'Our Player Action'),
+      ],
+      DEF: [
+        BLUE('def_opp_formation', 'Their Formation'),
+        RED('def_scheme', 'Our Scheme'),        // what WE play — distinct from Their Look
+        BLUE('def_opp_play', 'Their Play'),
+        PURPLE('def_result', 'Their Result'),
+        GREEN('def_our_play', 'Our Player Action'),   // key preserved, label only
+      ],
+      SP: [
+        GREEN('st_play', 'Play'),
+        PURPLE('st_result', 'Result'),
+        GREEN('st_player_action', 'Our Player Action'),
+      ],
     },
     // Most 5v5 flag leagues have no kicking game, so 5v5 is not offered the Special
     // Teams phase for NEW tagging. The SP tags themselves are untouched and remain
