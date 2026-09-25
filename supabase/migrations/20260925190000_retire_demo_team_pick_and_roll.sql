@@ -1,0 +1,22 @@
+-- SLICE H2 FOLLOW-UP (Adam, 2026-09-25): clear the one duplicate H2 created.
+--
+-- H2 added a GLOBAL basketball 'Pick & Roll' to Our Play (`plays`). Demo Warriors 14U
+-- already had its own team-scoped 'Pick & Roll' in the same category, so that team -- and
+-- only that team -- was offered the chip twice in one column. The team row has ZERO
+-- clip_tags uses, so retiring it removes the duplicate without touching any history.
+--
+-- retired_at ONLY. No delete, no clip_tags write, no category/name/polarity change, and
+-- the global Pick & Roll (3e9a3055-0f56-4519-a040-cd389c5f2763) is untouched.
+--
+-- Deliberately NOT touched: Demo Warriors' 'Steal', 'Block' and 'Assist' rows, which also
+-- duplicate a global. Those pre-date this taxonomy work and Adam has twice said to
+-- preserve them -- they are that coach's own vocabulary, and two of them carry uses.
+update tags set retired_at = now() where id = 'afa1c93c-3720-4430-8887-e95de92a0728';
+
+-- VERIFIED after apply (2026-09-25): exactly 1 row changed. Demo Warriors is offered a
+-- single 'Pick & Roll' (the global); no basketball team has ANY duplicate offered chip in
+-- Our Play. tags 794 (no insert/delete); clip_tags 1535 unchanged; basketball historical
+-- usage still 884; basketball retired 2 -> 3, all three team-scoped and all zero- or
+-- history-preserving; every other team, sport and category unchanged.
+--
+-- ROLLBACK: update tags set retired_at = null where id = 'afa1c93c-3720-4430-8887-e95de92a0728';
