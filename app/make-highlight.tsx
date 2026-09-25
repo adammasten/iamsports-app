@@ -95,7 +95,7 @@ export default function MakeHighlightScreen() {
       if (videoIds.length === 0) { if (!cancelled) { setClips([]); setLoading(false); } return; }
 
       const { data: cs } = await supabase.from('clips')
-        .select('id, start_time, end_time, is_starred, video_id, team_id, origin, created_by_user_id, clip_tags ( bundle_number, tags ( name, category, player_id, tag_polarity ) )')
+        .select('id, start_time, end_time, video_id, team_id, origin, created_by_user_id, clip_tags ( bundle_number, tags ( name, category, player_id, tag_polarity ) )')
         .in('video_id', videoIds);
 
       // Resolve player names (best-effort — a parent may only see some).
@@ -131,7 +131,12 @@ export default function MakeHighlightScreen() {
         const posTags: TagRef[] = ctags
           .filter((ct: any) => myBundles.has(ct.bundle_number ?? -1) && ct.tags?.tag_polarity === 'positive' && ct.tags?.category !== 'players')
           .map((ct: any) => ({ name: ct.tags.name, category: ct.tags.category }));
-        const starred = c.is_starred === true;
+        // ★ Highlight is a CLIP-LEVEL special stamp, written at bundle 0 (clips.is_starred
+        // stopped being written in aea2e01). Read from `ctags`, not `allTags`: allTags drops
+        // bundle_number, so it would also match a ★ sitting in a group. bundle_number is
+        // already in the select above — no extra read.
+        const starred = ctags.some((ct: any) =>
+          (ct.bundle_number ?? 0) === 0 && ct.tags?.category === 'special' && ct.tags?.name === '★ Highlight');
         const v = vinfo.get(c.video_id); if (!v) return;
         const m = gmeta.get(v.gameId); if (!m) return;
 

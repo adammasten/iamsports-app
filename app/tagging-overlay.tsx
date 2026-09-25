@@ -238,7 +238,7 @@ export default function TaggingOverlayScreen() {
     if (!videoId) return;
     const { data, error } = await supabase
       .from('clips')
-      .select('id, start_time, end_time, is_starred, is_point_of_emphasis, clip_tags ( id, bundle_number, tag_id, tags ( id, name, category ) )')
+      .select('id, start_time, end_time, clip_tags ( id, bundle_number, tag_id, tags ( id, name, category ) )')
       .eq('video_id', videoId)
       .order('start_time');
     if (error || !data) return;
@@ -256,14 +256,19 @@ export default function TaggingOverlayScreen() {
         const clipLevel = byBundle.get(0) || [];
         const groups = [...byBundle.keys()].filter(bn => bn >= 1).sort((a, b) => a - b).map(bn => byBundle.get(bn)!);
         const side = clipLevel.find(t => t.category === 'possession')?.name ?? null;
+        // ★/POE are special-category TAGS at bundle 0 (clips.is_starred /
+        // is_point_of_emphasis stopped being written in aea2e01), so they are read off
+        // clipLevel like goodPlay below — same query, no extra read.
+        const starred = clipLevel.some(t => t.category === 'special' && t.name === '★ Highlight');
+        const poe = clipLevel.some(t => t.category === 'special' && t.name === 'POE');
         const goodPlay = clipLevel.some(t => t.category === 'special' && t.name === 'Good Play');
         const tagCount = [...byBundle.values()].flat().filter(t => !STAMP.has(t.category)).length;
         return {
           id: c.id,
           start: c.start_time,
           end: c.end_time,
-          starred: !!c.is_starred,
-          poe: !!c.is_point_of_emphasis,
+          starred,
+          poe,
           goodPlay,
           side,
           clipLevel,
