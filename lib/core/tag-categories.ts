@@ -33,12 +33,24 @@ type SportDef =
        */
       phasesByFormat?: Record<string, string[]>;
       /**
-       * Opt in to placing the roster-derived Players column immediately BEFORE a
-       * trailing player-action column instead of last. Football's launch taxonomy
-       * requires Player to precede Player Action. Only sports that set this are
-       * affected — every other board keeps Players last, exactly as today.
+       * Where the roster-derived Players column goes: immediately BEFORE the first
+       * column whose key is listed here. A sport that lists nothing (and every flat
+       * sport) gets Players appended LAST, exactly as before.
+       *
+       * The football family lists its player-action keys, which are always the
+       * trailing column, so "before the first listed key" is the same position they
+       * have always rendered. Basketball lists `offense` / `defense`, which sit in the
+       * MIDDLE of its board, which is why this is a key list and not a boolean.
        */
-      playersBeforeAction?: boolean;
+      playersBefore?: readonly string[];
+      /**
+       * Which phase's COLUMNS to display when the coach has not picked a phase yet.
+       * DISPLAY ONLY: it never selects a possession, never stamps one on a clip, and
+       * never backfills history. Without it a phased board with no phase selected
+       * falls back to FALLBACK_FLAT_COLUMNS, which is still every other sport's
+       * behavior — basketball is the only sport that sets this.
+       */
+      defaultVisiblePhase?: string;
     };
 
 // Shared column palette (verbatim from the native tagger constants).
@@ -47,7 +59,13 @@ const RED = (key: string, label: string): TagCategory => ({ key, label, color: '
 const GREEN = (key: string, label: string): TagCategory => ({ key, label, color: '#1e8449', bg: '#e8f8ed' });
 const PURPLE = (key: string, label: string): TagCategory => ({ key, label, color: '#6c5ce7', bg: '#eeecfb' });
 
-// Flat trio shared by every non-football sport (basketball is the canonical one).
+// The football family's player-action keys — the column Players must precede on those
+// sports' boards. Used only for Players placement, never by any matching logic.
+const PLAYER_ACTION_KEYS: readonly string[] = [
+  'off_player_action', 'def_our_play', 'st_player_action',
+];
+
+// Flat trio shared by the non-basketball flat sports.
 const FLAT_OFF_DEF_PLAYS: TagCategory[] = [
   BLUE('offense', 'Offense'),
   RED('defense', 'Defense'),
@@ -77,7 +95,7 @@ export const SPORT_TAGS: Record<string, SportDef> = {
       { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
       { code: 'SP', label: 'Special Teams', possessionTag: 'Special Teams' },
     ],
-    playersBeforeAction: true,
+    playersBefore: PLAYER_ACTION_KEYS,
     categoriesByPhase: {
       OFF: [
         BLUE('off_formation', 'Our Formation'),
@@ -101,12 +119,51 @@ export const SPORT_TAGS: Record<string, SportDef> = {
     },
   },
 
-  basketball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   baseball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   soccer: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   softball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   lacrosse: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   volleyball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
+
+  // The board for content with NO sport (teamless personal footage) and for any sport
+  // string we do not recognise — see DEFAULT_SPORT. Byte-identical to what an unknown
+  // sport rendered before basketball became phased; it must stay flat for that reason.
+  _default: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
+
+  // BASKETBALL — the launch board (Adam, 2026-09-25, Slice H). Phased OFF/DEF, no SP.
+  //
+  // DECLARED AFTER THE FLAT SPORTS ON PURPOSE. It reuses the generic keys `offense`,
+  // `defense` and `plays` (which is what keeps 884 historical uses in place and gives
+  // Export zero orphaned sections), but it relabels them. Descriptors resolve by FIRST
+  // declaration, so declaring basketball here leaves baseball as the owner of the shared
+  // master labels 'Offense' / 'Defense' / 'Plays' — the headings Export uses for a
+  // historical/orphaned category. Basketball's own wording is board-only.
+  //
+  // `playersBefore` puts Players in the MIDDLE of both phases (3rd on OFF, 5th on DEF).
+  // `defaultVisiblePhase` shows the OFF columns before a phase is picked — display only.
+  basketball: {
+    phases: [
+      { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
+      { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
+    ],
+    playersBefore: ['offense', 'defense'],
+    defaultVisiblePhase: 'OFF',
+    categoriesByPhase: {
+      OFF: [
+        BLUE('off_formation', 'Our Set / Situation'),
+        GREEN('plays', 'Our Play'),
+        PURPLE('offense', 'Our Player Action'),
+        RED('off_opp_look', 'Their Defense'),
+      ],
+      DEF: [
+        BLUE('def_opp_formation', 'Their Set / Formation'),
+        RED('def_scheme', 'Our Defense'),
+        BLUE('def_opp_play', 'Their Play'),
+        PURPLE('def_result', 'Their Result'),
+        GREEN('defense', 'Our Player Action'),
+      ],
+    },
+  },
 
   // 7-on-7 is its OWN SPORT (not Football + a format, and not flag). It is pass-only:
   // no run game and no kicking game, so there is NO Special Teams phase — the 16
@@ -123,7 +180,7 @@ export const SPORT_TAGS: Record<string, SportDef> = {
       { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
       { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
     ],
-    playersBeforeAction: true,
+    playersBefore: PLAYER_ACTION_KEYS,
     categoriesByPhase: {
       OFF: [
         BLUE('off_formation', 'Our Formation'),
@@ -159,7 +216,7 @@ export const SPORT_TAGS: Record<string, SportDef> = {
       { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
       { code: 'SP', label: 'Special Teams', possessionTag: 'Special Teams' },
     ],
-    playersBeforeAction: true,
+    playersBefore: PLAYER_ACTION_KEYS,
     categoriesByPhase: {
       OFF: [
         BLUE('off_formation', 'Our Formation'),
@@ -207,7 +264,10 @@ export const FALLBACK_FLAT_COLUMNS: TagCategory[] = [
   PURPLE('result', 'Result'),
 ];
 
-const DEFAULT_SPORT = 'basketball';
+// Unknown or missing sport → the flat `_default` board. This used to be 'basketball';
+// it had to change when basketball became phased, or teamless/sport-less footage (and a
+// sport-less Export picker) would have inherited a phased basketball board.
+const DEFAULT_SPORT = '_default';
 function resolve(sport?: string | null): SportDef {
   return SPORT_TAGS[(sport ?? DEFAULT_SPORT).trim().toLowerCase()] ?? SPORT_TAGS[DEFAULT_SPORT];
 }
@@ -239,29 +299,44 @@ export function categoriesForSport(sport?: string | null, phaseCode?: string | n
   return d.categories;
 }
 
-// Category keys that represent WHAT A SPECIFIC PLAYER DID (as opposed to a fact about
-// the play). Used only to decide Players-column placement — not by any matching logic.
-const PLAYER_ACTION_KEYS: ReadonlySet<string> = new Set([
-  'off_player_action', 'def_our_play', 'st_player_action',
-]);
+/**
+ * THE ONE PLACE the roster-derived Players column is positioned. Both taggers call this
+ * instead of splicing the column themselves, so native and web cannot drift.
+ *
+ * Players is inserted immediately before the first column whose key the sport lists in
+ * `playersBefore`, and appended LAST when the sport lists nothing or lists nothing that
+ * this phase renders. Placement only — nothing about selection, bundles or saving.
+ *
+ * Football / Flag / 7-on-7 list their player-action keys, which are always the trailing
+ * column, so their rendered order is unchanged. Basketball lists `offense` / `defense`,
+ * which sit mid-board, so Players lands 3rd on OFF and 5th on DEF.
+ */
+export function withPlayersColumn<T extends { key: string }>(
+  sport: string | null | undefined,
+  cats: readonly T[],
+  playersCol: T,
+): T[] {
+  const d = resolve(sport);
+  const before = 'playersBefore' in d ? d.playersBefore : undefined;
+  const at = before?.length ? cats.findIndex(c => before.includes(c.key)) : -1;
+  return at < 0 ? [...cats, playersCol] : [...cats.slice(0, at), playersCol, ...cats.slice(at)];
+}
 
 /**
- * Should the roster-derived Players column be inserted immediately BEFORE the final
- * category instead of appended last?
+ * Which phase's COLUMNS a board should show. Returns the coach's selected phase when
+ * there is one, otherwise the sport's `defaultVisiblePhase` (basketball only), otherwise
+ * null — which is every other phased sport's existing no-phase behavior.
  *
- * True only when the sport opts in (`playersBeforeAction`) AND its last column really
- * is a player-action category. Both conditions must hold, so no existing board can be
- * reordered by accident: flag's def_our_play is third in its DEF phase, and 7-on-7
- * does not opt in at all. Placement only — nothing about selection or bundles.
+ * DISPLAY ONLY. Callers must keep passing their real selection to everything that WRITES
+ * (the possession stamp at save time), so an unselected board still saves no possession.
  */
-export function playersBeforeFinalColumn(
-  sport?: string | null,
-  cats?: { key: string }[],
-): boolean {
+export function displayPhaseForSport(
+  sport: string | null | undefined,
+  activePhaseCode: string | null,
+): string | null {
+  if (activePhaseCode) return activePhaseCode;
   const d = resolve(sport);
-  if (!('playersBeforeAction' in d) || !d.playersBeforeAction) return false;
-  const last = cats?.[cats.length - 1];
-  return !!last && PLAYER_ACTION_KEYS.has(last.key);
+  return ('defaultVisiblePhase' in d ? d.defaultVisiblePhase : undefined) ?? null;
 }
 
 // Flat lookup of every category descriptor across all sports (by key).

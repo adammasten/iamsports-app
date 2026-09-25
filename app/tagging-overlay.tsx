@@ -8,7 +8,7 @@ import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import { isFlagFootball } from '@/lib/core/football';
-import { categoriesForSport, phasesForSport, playersBeforeFinalColumn, FALLBACK_FLAT_COLUMNS } from '@/lib/core/tag-categories';
+import { categoriesForSport, phasesForSport, withPlayersColumn, displayPhaseForSport, FALLBACK_FLAT_COLUMNS } from '@/lib/core/tag-categories';
 import { applyTagScope } from '@/lib/core/tag-scope';
 import ClipPill from './components/ClipPill';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
@@ -824,19 +824,21 @@ export default function TaggingOverlayScreen() {
   const activePhaseCode = sportPhases && activePossession
     ? (sportPhases.find(p => p.possessionTag === activePossession.name)?.code ?? null)
     : null;
-  const phaseCols = activePhaseCode ? categoriesForSport(tagSport, activePhaseCode) : null;
+  // Which phase's COLUMNS to draw. A sport may declare a default visible phase
+  // (basketball) so the board opens on useful columns instead of the legacy fallback.
+  // DISPLAY ONLY — activePossession is untouched, so an unselected board still stamps
+  // no possession on save (see the save path, which reads activePossession).
+  const displayPhaseCode = displayPhaseForSport(tagSport, activePhaseCode);
+  const phaseCols = displayPhaseCode ? categoriesForSport(tagSport, displayPhaseCode) : null;
   const phaseHasTags = !!phaseCols && phaseCols.some(c => (tags[c.key]?.length ?? 0) > 0);
   const baseCols = sportPhases
     ? (phaseHasTags ? phaseCols! : FALLBACK_FLAT_COLUMNS)
     : categoriesForSport(tagSport);
-  // Players is appended LAST on every board, exactly as before — except where the
-  // shared definition asks for Player to precede a trailing Player Action column
-  // (Football's launch order). ORDERING ONLY: same columns, same widths, same styles,
-  // same selection behaviour. The rule lives in tag-categories.ts so neither tagger
-  // hardcodes a sport check.
-  const visibleCategories = playersBeforeFinalColumn(tagSport, baseCols)
-    ? [...baseCols.slice(0, -1), PLAYERS_COL, baseCols[baseCols.length - 1]]
-    : [...baseCols, PLAYERS_COL];
+  // Players placement is owned by the shared definition (tag-categories.ts) so native
+  // and web cannot drift: appended last on most boards, before the player-action column
+  // on the football family, mid-board on basketball. ORDERING ONLY — same columns, same
+  // widths, same styles, same selection behaviour, no sport check hardcoded here.
+  const visibleCategories = withPlayersColumn(tagSport, baseCols, PLAYERS_COL);
 
   // HORIZONTAL COLUMN STRIP (native, >=6 columns only).
   //
