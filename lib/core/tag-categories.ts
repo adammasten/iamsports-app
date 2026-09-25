@@ -22,7 +22,20 @@ export type TagCategory = { key: string; label: string; color: string; bg: strin
 export type SportPhase = { code: string; label: string; possessionTag: string };
 
 type SportDef =
-  | { phases: null; categories: TagCategory[] }
+  | {
+      phases: null;
+      categories: TagCategory[];
+      /**
+       * A FLAT sport may opt into the SHARED Players placement by listing the keys Players
+       * must precede — same meaning as on the phased variant below. Volleyball uses this to
+       * put Players mid-board on a non-phased board.
+       *
+       * A flat sport that OMITS this keeps the historical behavior on BOTH surfaces: Players
+       * appended last on native, and the legacy Players-FIRST arrangement on web. `_default`
+       * omits it deliberately, so sportless and unknown-sport boards are untouched.
+       */
+      playersBefore?: readonly string[];
+    }
   | {
       phases: SportPhase[];
       categoriesByPhase: Record<string, TagCategory[]>;
@@ -119,7 +132,29 @@ export const SPORT_TAGS: Record<string, SportDef> = {
     },
   },
 
-  volleyball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
+  // VOLLEYBALL — the launch board (Adam, 2026-09-25, Slice L). NON-PHASED on purpose:
+  // volleyball is rally-based, not possession-phase based, so there is no OFF/DEF toggle.
+  //
+  // Greenfield when this shipped (0 teams / videos / clips / tag uses); migration
+  // 20260925_volleyball_launch_taxonomy recategorised its 29 active rows onto the
+  // football-family keys and retired 2. Football owns every one of these keys' shared master
+  // labels, so volleyball's wording ("Rally Phase", "Our Play / System") is board-only, and
+  // `_default` inherits the generic Offense / Defense / Plays labels unchanged.
+  //
+  // `playersBefore` is what puts Players 4th of 5 rather than last — the first FLAT sport to
+  // use the shared placement rule. There is no Our Rotation column at launch: it was the only
+  // column that would have needed a brand-new category key, and volleyball has no rotation
+  // vocabulary to put in it. Five columns, so the native horizontal strip never engages.
+  volleyball: {
+    phases: null,
+    playersBefore: PLAYER_ACTION_KEYS,
+    categories: [
+      BLUE('off_formation', 'Rally Phase'),
+      GREEN('off_play', 'Our Play / System'),
+      PURPLE('off_result', 'Result'),
+      GREEN('off_player_action', 'Our Player Action'),
+    ],
+  },
 
   // The board for content with NO sport (teamless personal footage) and for any sport
   // string we do not recognise — see DEFAULT_SPORT. Byte-identical to what an unknown
@@ -465,6 +500,21 @@ export function withPlayersColumn<T extends { key: string }>(
   const before = 'playersBefore' in d ? d.playersBefore : undefined;
   const at = before?.length ? cats.findIndex(c => before.includes(c.key)) : -1;
   return at < 0 ? [...cats, playersCol] : [...cats.slice(0, at), playersCol, ...cats.slice(at)];
+}
+
+/**
+ * Does this sport's FLAT board use the shared Players placement?
+ *
+ * True ONLY for a flat definition that explicitly declares `playersBefore` (volleyball).
+ * False for every phased sport and for a flat sport that declares nothing (`_default`, and
+ * therefore every unknown sport), so their legacy web Players-FIRST board and native
+ * Players-last board are both left exactly as they are. The web tagger asks this instead of
+ * hardcoding a sport check.
+ */
+export function usesSharedPlayersPlacement(sport?: string | null): boolean {
+  const d = resolve(sport);
+  if (d.phases !== null) return false;
+  return !!('playersBefore' in d ? d.playersBefore?.length : 0);
 }
 
 /**

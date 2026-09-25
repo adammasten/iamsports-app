@@ -9,7 +9,7 @@ import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
-import { categoriesForSport, phasesForSport, withPlayersColumn, displayPhaseForSport, FALLBACK_FLAT_COLUMNS } from '@/lib/core/tag-categories';
+import { categoriesForSport, phasesForSport, withPlayersColumn, displayPhaseForSport, usesSharedPlayersPlacement, FALLBACK_FLAT_COLUMNS } from '@/lib/core/tag-categories';
 import { applyTagScope } from '@/lib/core/tag-scope';
 import {
   type Odk, type FbCtx, type FbSel, ODK_SHORT, isFlagFootball,
@@ -711,13 +711,21 @@ export default function TaggingStudioWeb() {
   // Flat board (non-phased sport, or a phase with no tags yet).
   const flatCols = (sportPhases ? FALLBACK_FLAT_COLUMNS : categoriesForSport(tagSport))
     .map(c => ({ key: c.key, label: c.label }));
+  // Players placement on the FLAT board. A flat sport that OPTS IN via `playersBefore`
+  // (volleyball) uses the shared rule, so native and web agree on its column order. Anything
+  // that does not opt in — `_default`, unknown sports, and a phased sport falling back to the
+  // legacy columns — keeps the historical Players-FIRST arrangement byte-identical.
+  // ORDERING ONLY: no style, width, geometry or scrolling change.
+  const flatColsWithPlayers = usesSharedPlayersPlacement(tagSport)
+    ? withPlayersColumn(tagSport, flatCols, PLAYERS_COL)
+    : [PLAYERS_COL, ...flatCols];
 
   // ── MOBILE BROWSER: immersive full-bleed layout mirroring the native app. Reuses
   //    every handler + the same top-bar arrangement; desktop layout (below) unchanged. ──
   if (isPhone) {
     const boardCols = useFlagPhaseBoard
       ? phaseColsWithPlayers!
-      : [PLAYERS_COL, ...flatCols];
+      : flatColsWithPlayers;
     return (
       <GestureHandlerRootView style={styles.mApp}>
         <VideoView player={player} style={{ position: 'absolute', top: 0, left: 0, width: winW, height: winH }} nativeControls={false} contentFit="contain" />
@@ -814,7 +822,7 @@ export default function TaggingStudioWeb() {
   // just floated over the video. Computed unconditionally (used only inside {isFS}).
   const boardCols = useFlagPhaseBoard
     ? phaseColsWithPlayers!
-    : [PLAYERS_COL, ...flatCols];
+    : flatColsWithPlayers;
 
   return (
     <GestureHandlerRootView style={styles.app}>
