@@ -1,0 +1,49 @@
+-- SLICE D (Adam, 2026-09-24): 7-on-7 taxonomy repair.
+-- APPLIED LIVE as migration 20260924010000_seven_on_seven_taxonomy_repair.
+--
+-- The standalone `7-on-7` sport was seeded into categories its board never rendered,
+-- leaving 57 of 66 tags unreachable. This recategorises all 50 usable rows IN PLACE
+-- (ids preserved), retires the 16 seeded in error, and adds the offensive Their Look
+-- vocabulary.
+--
+-- SAFE BY CONSTRUCTION: every one of the 66 rows has ZERO clip_tags references, and
+-- clip_tags is id-based while clipMatchesGroup never reads `category`. No id changes,
+-- no deletions, no clip_tags writes.
+--
+-- 7-on-7 remains its OWN SPORT: not Football + a format, not flag, no team-format logic.
+--
+-- 1. NEW CATEGORY KEY  off_opp_look = the defensive look the OFFENSE faces ("what do
+--    we run vs Cover 3?"). Distinct from def_scheme (what WE play on defense) -- a tag
+--    row has exactly one category, so the two contexts need separate rows.
+-- 2. RECATEGORISE 50 ROWS BY ID: defense->def_our_play (9); offense->off_result (9);
+--    offense routes->off_play (15); plays formations->off_formation (5); plays
+--    concepts->off_play (5); plays coverages->def_scheme (7).
+-- 3. RETIRE the 16 special_teams rows. A 7-on-7 game has no kicking game, so these can
+--    never be correct HERE. Zero historical usage. THIS DOES NOT DEPRECATE SPECIAL
+--    TEAMS GENERALLY -- Football keeps its own separate 16 rows untouched, and flag's
+--    are format-scoped to 7v7.
+-- 4. POLARITY, two corrections only: Tipped ball and Blanket coverage -> positive (in a
+--    defensive player-action column these are unambiguously good plays).
+--    'Undercut / Jump' DELIBERATELY STAYS NEUTRAL: a technique/read, not an outcome --
+--    jumping a route can produce a pick or get you burned, and making it positive would
+--    let an ambiguous play qualify a kid for a parent highlight.
+-- 5. ADD 7 off_opp_look rows (Man, Zone, Cover 1-4, Blitz), all neutral context.
+--
+-- NOT DONE BY DECISION: def_opp_play and def_result vocabulary. Those defensive
+-- vocabularies will be designed deliberately rather than mirrored from the route list,
+-- and the rendered definition omits both categories until they have content -- an empty
+-- column is worse than an absent one.
+--
+-- The exact statements as applied are recorded in the Supabase migration of the same
+-- name; this file documents intent and the verified outcome.
+--
+-- VERIFIED: 7-on-7 rows 66 -> 73 (+7); offered 50 + 7 = 57; retired 16; zero rows left
+-- in a non-rendered category; Tipped ball/Blanket coverage positive, Undercut / Jump
+-- still neutral; Football's 16 SP rows untouched (0 retired); tags 556 -> 563;
+-- clip_tags 1535 unchanged; all seven teams' offered vocabulary unchanged (no team
+-- plays 7-on-7); export/tag baseline byte-identical.
+--
+-- ROLLBACK (all by id, nothing destructive): restore the 50 original categories
+-- (defense/offense/plays), set retired_at = null on the 16 SP rows, restore Tipped
+-- ball and Blanket coverage to neutral, delete the 7 off_opp_look rows, and drop
+-- off_opp_look from tags_category_check.

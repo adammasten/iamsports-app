@@ -58,16 +58,40 @@ export const SPORT_TAGS: Record<string, SportDef> = {
   lacrosse: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   volleyball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
 
-  // Football & 7-on-7 currently render the flat FB board (no phase swap) — kept
-  // as-is here for a faithful transcription. Phase 2 moves them onto OFF/DEF/SP
-  // like flag (additive data migration first).
+  // Football still renders the flat FB board — its OFF/DEF vocabulary does not exist
+  // yet (only 16 special_teams rows), so moving it onto phases is a later slice.
   football: {
     phases: null,
     categories: [BLUE('formation', 'Formation'), GREEN('play', 'Play'), RED('defense', 'Defense'), PURPLE('result', 'Result')],
   },
+
+  // 7-on-7 is its OWN SPORT (not Football + a format, and not flag). It is pass-only:
+  // no run game and no kicking game, so there is no Special Teams phase.
+  //
+  // Its 66 seeded rows were recategorised in place — ids preserved — by migration
+  // 20260924_seven_on_seven_taxonomy_repair, which also retired the 16 special_teams
+  // rows that had been seeded here by mistake.
+  //
+  // DEF deliberately renders only Scheme + Our Play. `def_opp_play` and `def_result`
+  // are part of the intended taxonomy but have NO vocabulary yet, and an empty column
+  // is worse than an absent one — they appear when their tags are deliberately added.
   '7-on-7': {
-    phases: null,
-    categories: [BLUE('formation', 'Formation'), GREEN('play', 'Play'), RED('defense', 'Defense'), PURPLE('result', 'Result')],
+    phases: [
+      { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
+      { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
+    ],
+    categoriesByPhase: {
+      OFF: [
+        BLUE('off_formation', 'Formation'),
+        RED('off_opp_look', 'Their Look'),   // the defensive look we are FACING
+        GREEN('off_play', 'Play'),
+        PURPLE('off_result', 'Result'),
+      ],
+      DEF: [
+        RED('def_scheme', 'Scheme'),         // what WE play — distinct from Their Look
+        GREEN('def_our_play', 'Our Play'),
+      ],
+    },
   },
 
   // Flag football — OFF/DEF/SP each swap in their own phase-scoped columns.
