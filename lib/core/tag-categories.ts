@@ -120,7 +120,6 @@ export const SPORT_TAGS: Record<string, SportDef> = {
   },
 
   baseball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
-  soccer: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   softball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   lacrosse: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   volleyball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
@@ -129,6 +128,43 @@ export const SPORT_TAGS: Record<string, SportDef> = {
   // string we do not recognise — see DEFAULT_SPORT. Byte-identical to what an unknown
   // sport rendered before basketball became phased; it must stay flat for that reason.
   _default: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
+
+  // SOCCER — the launch board (Adam, 2026-09-25, Slice I). Phased OFF/DEF, no SP.
+  //
+  // Greenfield when this shipped (0 teams / videos / clips / tag uses), so it uses the
+  // football-family keys rather than the generic offense/defense/plays it was seeded into,
+  // and all 51 legacy rows were recategorised or retired by migration
+  // 20260925_soccer_launch_taxonomy. Football owns every one of these keys' shared master
+  // labels, so soccer's own wording ("Shape", "Pattern") is board-only.
+  //
+  // Both phases are SIX columns once Players is inserted, which the committed native
+  // horizontal strip handles. Players placement needs nothing new: soccer's trailing action
+  // keys are off_player_action / def_our_play, already members of PLAYER_ACTION_KEYS.
+  // `defaultVisiblePhase` shows the OFF columns before a phase is picked — DISPLAY ONLY.
+  soccer: {
+    phases: [
+      { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
+      { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
+    ],
+    playersBefore: PLAYER_ACTION_KEYS,
+    defaultVisiblePhase: 'OFF',
+    categoriesByPhase: {
+      OFF: [
+        BLUE('off_formation', 'Our Shape / Situation'),
+        GREEN('off_play', 'Our Play / Pattern'),
+        PURPLE('off_result', 'Our Result'),
+        GREEN('off_player_action', 'Our Player Action'),
+        RED('off_opp_look', 'Their Shape'),
+      ],
+      DEF: [
+        BLUE('def_opp_formation', 'Their Shape'),
+        RED('def_scheme', 'Our Defensive Shape'),
+        BLUE('def_opp_play', 'Their Play / Pattern'),
+        PURPLE('def_result', 'Their Result'),
+        GREEN('def_our_play', 'Our Player Action'),
+      ],
+    },
+  },
 
   // BASKETBALL — the launch board (Adam, 2026-09-25, Slice H). Phased OFF/DEF, no SP.
   //
