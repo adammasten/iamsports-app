@@ -58,6 +58,49 @@ const FLAT_OFF_DEF_PLAYS: TagCategory[] = [
 // "Basketball" vs "basketball"), resolved via the functions below, mirroring
 // periodsForSport().
 export const SPORT_TAGS: Record<string, SportDef> = {
+  // 11v11 Football — the launch taxonomy. Phased OFF/DEF/SP.
+  //
+  // DECLARED FIRST DELIBERATELY — Football is the NAMING AUTHORITY for the shared
+  // master labels (Adam, 2026-09-25). ALL_CATEGORIES resolves a shared category key's
+  // descriptor by FIRST declaration, and that descriptor is used ONLY where no sport
+  // supplies one: the heading Export puts on a historical/orphaned category, and My
+  // Tags' extras sections. Every sport's own board reads its own per-sport list, so
+  // this ordering changes no board, no color and no tag. Football owns the wording so
+  // a new sport inherits it by design instead of by typing order.
+  //
+  // OFF and DEF are SIX columns once Players is inserted, which the committed native
+  // horizontal-scroll path handles. `playersBeforeAction` puts Players immediately
+  // before the trailing Player Action column, as the launch order requires.
+  football: {
+    phases: [
+      { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
+      { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
+      { code: 'SP', label: 'Special Teams', possessionTag: 'Special Teams' },
+    ],
+    playersBeforeAction: true,
+    categoriesByPhase: {
+      OFF: [
+        BLUE('off_formation', 'Our Formation'),
+        RED('off_opp_look', 'Their Look'),
+        GREEN('off_play', 'Our Play'),
+        PURPLE('off_result', 'Our Result'),
+        GREEN('off_player_action', 'Our Player Action'),
+      ],
+      DEF: [
+        BLUE('def_opp_formation', 'Their Formation'),
+        RED('def_scheme', 'Our Scheme'),
+        BLUE('def_opp_play', 'Their Play'),
+        PURPLE('def_result', 'Their Result'),
+        GREEN('def_our_play', 'Our Player Action'),   // key preserved, label only
+      ],
+      SP: [
+        GREEN('st_play', 'Play'),
+        PURPLE('st_result', 'Result'),
+        GREEN('st_player_action', 'Our Player Action'),
+      ],
+    },
+  },
+
   basketball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   baseball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
   soccer: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
@@ -66,30 +109,35 @@ export const SPORT_TAGS: Record<string, SportDef> = {
   volleyball: { phases: null, categories: FLAT_OFF_DEF_PLAYS },
 
   // 7-on-7 is its OWN SPORT (not Football + a format, and not flag). It is pass-only:
-  // no run game and no kicking game, so there is no Special Teams phase.
+  // no run game and no kicking game, so there is NO Special Teams phase — the 16
+  // special_teams rows retired in the 7-on-7 repair migration stay retired, and no
+  // column here could render them.
   //
-  // Its 66 seeded rows were recategorised in place — ids preserved — by migration
-  // 20260924_seven_on_seven_taxonomy_repair, which also retired the 16 special_teams
-  // rows that had been seeded here by mistake.
-  //
-  // DEF deliberately renders only Scheme + Our Play. `def_opp_play` and `def_result`
-  // are part of the intended taxonomy but have NO vocabulary yet, and an empty column
-  // is worse than an absent one — they appear when their tags are deliberately added.
+  // SLICE G (Adam, 2026-09-25): the launch board. Six columns on OFF and DEF, Players
+  // immediately BEFORE the trailing player-action column, exactly like flag and Football.
+  // This sport says "Coverage" where the others say "Look" / "Scheme" — that is its own
+  // board wording and affects nothing else, because Football is the naming authority for
+  // the shared master labels (see the football entry).
   '7-on-7': {
     phases: [
       { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
       { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
     ],
+    playersBeforeAction: true,
     categoriesByPhase: {
       OFF: [
-        BLUE('off_formation', 'Formation'),
-        RED('off_opp_look', 'Their Look'),   // the defensive look we are FACING
-        GREEN('off_play', 'Play'),
-        PURPLE('off_result', 'Result'),
+        BLUE('off_formation', 'Our Formation'),
+        RED('off_opp_look', 'Their Coverage'),   // the coverage we are FACING
+        GREEN('off_play', 'Our Play'),
+        PURPLE('off_result', 'Our Result'),
+        GREEN('off_player_action', 'Our Player Action'),
       ],
       DEF: [
-        RED('def_scheme', 'Scheme'),         // what WE play — distinct from Their Look
-        GREEN('def_our_play', 'Our Play'),
+        BLUE('def_opp_formation', 'Their Formation'),
+        RED('def_scheme', 'Our Coverage'),       // what WE play — distinct from theirs
+        BLUE('def_opp_play', 'Their Play'),
+        PURPLE('def_result', 'Their Result'),
+        GREEN('def_our_play', 'Our Player Action'),   // key preserved, label only
       ],
     },
   },
@@ -102,11 +150,9 @@ export const SPORT_TAGS: Record<string, SportDef> = {
   // (tagging-overlay.tsx) and the web board already min-width scrolls, so this is a
   // definition change only — no tagger, geometry or style change.
   //
-  // Flag is declared BEFORE football, so it owns the ALL_CATEGORIES descriptor for
-  // off_player_action / def_opp_formation / st_player_action. Their labels and colors are
-  // deliberately IDENTICAL to Football's declarations, so no cross-sport picker label
-  // moves. def_result is the one descriptor flag owns whose label changes here
-  // ('Result' -> 'Their Result'); every other key's picker label is owned by 7-on-7.
+  // Flag's labels are deliberately IDENTICAL to Football's for every key the two share,
+  // so which of them is declared first cannot change a shared master label. Since Slice G
+  // Football is declared first and owns those descriptors outright.
   'flag football': {
     phases: [
       { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
@@ -142,47 +188,6 @@ export const SPORT_TAGS: Record<string, SportDef> = {
     phasesByFormat: { '5v5': ['OFF', 'DEF'] },
   },
 
-  // 11v11 Football — the launch taxonomy. Phased OFF/DEF/SP.
-  //
-  // DECLARED LAST DELIBERATELY. ALL_CATEGORIES resolves a shared category key's
-  // descriptor by FIRST declaration, and Football relabels several shared keys
-  // ("Our Formation", "Our Play", "Our Result", and def_our_play as "Our Player
-  // Action"). Declaring it earlier would override flag's and 7-on-7's labels in
-  // Export's historical picker and My Tags' extras. Board headers are unaffected by
-  // this ordering — the taggers read the per-sport list directly.
-  //
-  // OFF and DEF are SIX columns once Players is inserted, which the committed native
-  // horizontal-scroll path handles. `playersBeforeAction` puts Players immediately
-  // before the trailing Player Action column, as the launch order requires.
-  football: {
-    phases: [
-      { code: 'OFF', label: 'Offense', possessionTag: 'Offense' },
-      { code: 'DEF', label: 'Defense', possessionTag: 'Defense' },
-      { code: 'SP', label: 'Special Teams', possessionTag: 'Special Teams' },
-    ],
-    playersBeforeAction: true,
-    categoriesByPhase: {
-      OFF: [
-        BLUE('off_formation', 'Our Formation'),
-        RED('off_opp_look', 'Their Look'),
-        GREEN('off_play', 'Our Play'),
-        PURPLE('off_result', 'Our Result'),
-        GREEN('off_player_action', 'Our Player Action'),
-      ],
-      DEF: [
-        BLUE('def_opp_formation', 'Their Formation'),
-        RED('def_scheme', 'Our Scheme'),
-        BLUE('def_opp_play', 'Their Play'),
-        PURPLE('def_result', 'Their Result'),
-        GREEN('def_our_play', 'Our Player Action'),   // key preserved, label only
-      ],
-      SP: [
-        GREEN('st_play', 'Play'),
-        PURPLE('st_result', 'Result'),
-        GREEN('st_player_action', 'Our Player Action'),
-      ],
-    },
-  },
 };
 
 // THE PHASED-BOARD FALLBACK COLUMNS — frozen literal, do not derive.
