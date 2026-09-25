@@ -831,6 +831,65 @@ export default function TaggingOverlayScreen() {
     : categoriesForSport(tagSport);
   const visibleCategories = [...baseCols, PLAYERS_COL];
 
+  // HORIZONTAL COLUMN STRIP (native, >=6 columns only).
+  //
+  // <=5 columns: the ORIGINAL path, untouched — columns keep styles.tagColumn
+  // (flex:1) inside the same row container, with no ScrollView wrapper and no width
+  // set. Pixel-identical by construction, not by measurement.
+  //
+  // >=6 columns: flex children cannot overflow — they would simply shrink, which is
+  // exactly what must not happen. So each column is pinned to the width a FIVE-column
+  // board would occupy in this same available width, and the strip scrolls sideways.
+  // Columns 1-5 therefore match a normal 5-column board and column 6 sits off-screen.
+  // Deliberately count-based: 4- and 5-column boards are NOT normalised to a new width.
+  //
+  // Board width is already measured for the clip pill (pillRects.tagRegion), so this
+  // adds no new measurement. Before that first measurement lands we render the
+  // untouched flex path, which self-corrects on the next frame.
+  const TAG_COL_GAP = 8;   // must match styles.tagRegion / fullscreenTagRegion `gap`
+  const tagBoardW = pillRects.tagRegion?.w ?? 0;
+  const needsColumnScroll = visibleCategories.length > 5 && tagBoardW > 0;
+  const pinnedColW = needsColumnScroll ? (tagBoardW - TAG_COL_GAP * 4) / 5 : null;
+
+  // Columns are built once so the >=6 branch can wrap the SAME elements in a
+  // horizontal ScrollView without duplicating the tree (and without creating a
+  // component per render, which would remount every column and lose its scroll).
+  const tagColumnEls = visibleCategories.map(cat => (
+            <View key={cat.key} style={pinnedColW == null ? styles.tagColumn : { width: pinnedColW }}>
+              <Text style={[styles.colHeader, isTablet && styles.colHeaderBig, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={styles.chipsWrap}>
+                  {(tags[cat.key] ?? []).map(tag => {
+                    const selected = building.includes(tag.id);
+                    return (
+                      <TouchableOpacity
+                        key={tag.id}
+                        onPress={() => toggleTag(tag.id)}
+                        style={[
+                          styles.tagChip,
+                          isTablet && styles.tagChipBig,
+                          selected
+                            ? { backgroundColor: cat.color, borderColor: 'rgba(255,255,255,0.4)' }
+                            : { backgroundColor: 'rgba(255, 255, 255, 0.25)', borderColor: colorWithAlpha(cat.color, 0.6) },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.tagChipText,
+                            isTablet && styles.tagChipTextBig,
+                            selected ? { color: '#fff', fontWeight: '700' } : { color: cat.color },
+                          ]}
+                        >
+                          {tag.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            </View>
+  ));
+
   // Clip-pill free band: below the top bar, above min(board top, scrubber top), between the
   // two rails — computed from LIVE measurements only. Null (→ pill hidden) when any rect is
   // unmeasured or the band is under the compressed-pill minimum (220×40), e.g. fullscreen tagMode.
@@ -1155,41 +1214,16 @@ export default function TaggingOverlayScreen() {
           pointerEvents="box-none"
           onLayout={() => measurePill('tagRegion', pillTagRegionRef.current)}
         >
-          {visibleCategories.map(cat => (
-            <View key={cat.key} style={styles.tagColumn}>
-              <Text style={[styles.colHeader, isTablet && styles.colHeaderBig, { color: cat.color }]}>{cat.label.toUpperCase()}</Text>
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={styles.chipsWrap}>
-                  {(tags[cat.key] ?? []).map(tag => {
-                    const selected = building.includes(tag.id);
-                    return (
-                      <TouchableOpacity
-                        key={tag.id}
-                        onPress={() => toggleTag(tag.id)}
-                        style={[
-                          styles.tagChip,
-                          isTablet && styles.tagChipBig,
-                          selected
-                            ? { backgroundColor: cat.color, borderColor: 'rgba(255,255,255,0.4)' }
-                            : { backgroundColor: 'rgba(255, 255, 255, 0.25)', borderColor: colorWithAlpha(cat.color, 0.6) },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.tagChipText,
-                            isTablet && styles.tagChipTextBig,
-                            selected ? { color: '#fff', fontWeight: '700' } : { color: cat.color },
-                          ]}
-                        >
-                          {tag.name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            </View>
-          ))}
+          {needsColumnScroll ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ flex: 1 }}
+              contentContainerStyle={{ flexDirection: 'row', gap: TAG_COL_GAP }}
+            >
+              {tagColumnEls}
+            </ScrollView>
+          ) : tagColumnEls}
         </View>
         )}
 
