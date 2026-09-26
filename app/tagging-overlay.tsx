@@ -524,11 +524,13 @@ export default function TaggingOverlayScreen() {
       const possOrder = ['Offense', 'Defense', 'Special Teams'];
       const possSorted = possessions.sort((a, b) => possOrder.indexOf(a.name) - possOrder.indexOf(b.name));
       setPossessionTags(possSorted);
-      // Every sport defaults to the Offense phase so a clip is never saved without a
-      // possession stamp (Adam, 2026-09-22). Flag additionally uses it to pick the
-      // per-phase board; other sports only stamp — their columns don't change.
-      // `prev ??` means this only fills an empty slot, never overrides a coach mid-game.
-      setActivePossession((prev: any) => prev ?? possSorted.find(p => p.name === 'Offense') ?? null);
+      // DELIBERATELY NO automatic possession selection (Adam, 2026-09-25). This used to do
+      // `setActivePossession(prev => prev ?? Offense)`, which meant a clip saved without the
+      // coach ever tapping OFF still got an Offense stamp — native wrote a possession the
+      // coach never chose. Web was fixed first; this is the same contract on both surfaces:
+      // no tap = no stamp, explicit OFF = Offense, explicit DEF = Defense. The OFF board
+      // still DISPLAYS by default, handled purely by displayPhaseCode below, which touches
+      // no state. The save path gates the possession row on it (`if (activePossession)`).
     })();
     return () => { cancelled = true; };
   }, [tagTeamId, tagSport, tagTeamFormat]);
@@ -833,7 +835,9 @@ export default function TaggingOverlayScreen() {
   // (basketball) so the board opens on useful columns instead of the legacy fallback.
   // DISPLAY ONLY — activePossession is untouched, so an unselected board still stamps
   // no possession on save (see the save path, which reads activePossession).
-  const displayPhaseCode = displayPhaseForSport(tagSport, activePhaseCode);
+  // `?? sportPhases[0]` keeps the football family opening on OFF now that nothing
+  // pre-selects a possession — DISPLAY ONLY, identical to the web tagger's line.
+  const displayPhaseCode = displayPhaseForSport(tagSport, activePhaseCode) ?? sportPhases?.[0]?.code ?? null;
   const phaseCols = displayPhaseCode ? categoriesForSport(tagSport, displayPhaseCode) : null;
   const phaseHasTags = !!phaseCols && phaseCols.some(c => (tags[c.key]?.length ?? 0) > 0);
   const baseCols = sportPhases

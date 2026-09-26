@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTeamContext } from '@/context';
 import { supabase } from '@/supabase';
 import { clipMatchesGroup } from '@/lib/core/clip-filtering';
-import { categoriesForSports, pickerCategoryForKey } from '@/lib/core/tag-categories';
+import { categoriesForSports, pickerCategoryForKey, isActionCategory } from '@/lib/core/tag-categories';
 import { mayReelClip, toEligibilityTags } from '@/lib/core/highlight-eligibility';
 import { reserveReel, finalizeReel, discardReel, ReelNotAllowedError } from '@/lib/core/render-reel';
 import { generateReelThumbnailInBackground } from '@/lib/native/optimize';
@@ -310,6 +310,22 @@ export default function ExportScreen() {
     userTeams.forEach(t => { if (!m.has(t.team_id)) m.set(t.team_id, t.name); });
     return m;
   }, [userTeams]);
+  // A team's sport, for videos whose own `sport` is null. The taggers resolve
+  // `videos.sport ?? activeTeam.sport`; Export read videos.sport ALONE, so a
+  // null-sport video contributed no sport at all and a selection of only such
+  // videos fell through to the `_default` legacy columns — the team's real
+  // taxonomy never appeared. Same source of truth as teamNameById.
+  const teamSportById = useMemo(() => {
+    const m = new Map<string, string>();
+    userTeams.forEach(t => { if (t.sport && !m.has(t.team_id)) m.set(t.team_id, t.sport); });
+    return m;
+  }, [userTeams]);
+  // Video sport, falling back to its team's — the taggers' rule, one place.
+  const sportOfVideo = (videoSport: any, teamId: any): string | null => {
+    const s = (videoSport ?? (teamId ? teamSportById.get(String(teamId)) : null) ?? null) as string | null;
+    const trimmed = s ? String(s).trim() : '';
+    return trimmed ? trimmed.toLowerCase() : null;
+  };
   const gamesById = useMemo(() => new Map(games.map((g: any) => [g.id, g])), [games]);
   // A game's event type = its first video that carries one.
   const eventTypeOf = (g: any): string => (g.videos || []).map((v: any) => v.event_type).find((e: any) => e) ?? '';
@@ -770,9 +786,13 @@ export default function ExportScreen() {
     // over the sports of the selected games, so a flag game shows its OFF/DEF/SP
     // phase categories and a basketball game is unchanged. Players stays last.
     const pickerSports = new Set<string>();
-    selectedGames.forEach(gid => (gamesById.get(gid)?.videos || []).forEach((v: any) => {
-      if (v.sport) pickerSports.add(String(v.sport).trim().toLowerCase());
-    }));
+    selectedGames.forEach(gid => {
+      const g = gamesById.get(gid);
+      (g?.videos || []).forEach((v: any) => {
+        const s = sportOfVideo(v.sport, g?.team_id);
+        if (s) pickerSports.add(s);
+      });
+    });
     // HISTORICAL SAFETY. The picker is the UNION of (a) the categories the selected
     // games' sports define today and (b) the categories of tags ACTUALLY USED in
     // those games. Without (b), a tag the team's current format no longer offers —
@@ -816,7 +836,12 @@ export default function ExportScreen() {
     // tags, or 2+ actions with no player (e.g. Made 2 + Made 3). A normal group is
     // one action + a player, or a scoring play + assist (2 actions WITH players).
     const groupCats = currentGroup.map(id => gameTagMeta.get(id)?.category);
-    const groupActionCount = groupCats.filter(c => c === 'offense' || c === 'defense' || c === 'plays').length;
+    // "Action" comes from the shared sport definition, not a hardcoded list: the old
+    // `offense|defense|plays` test only knew the legacy basketball keys, so the warning
+    // was dead on the eight launch sports that use per-phase keys. isActionCategory()
+    // covers every sport's board categories and excludes players + the stamps.
+    // ADVISORY ONLY — matching and bundle semantics are untouched.
+    const groupActionCount = groupCats.filter(c => isActionCategory(c)).length;
     const groupPlayerCount = groupCats.filter(c => c === 'players').length;
     const groupOverStacked = groupActionCount >= 3 || (groupActionCount >= 2 && groupPlayerCount === 0);
     return (
@@ -968,7 +993,9 @@ export default function ExportScreen() {
   // Scope the "describe the reel" tags to the exported clips' team(s) + sport(s) — so a
   // football reel never shows basketball tags, and you never see another team's kids.
   const exportTeamIds = new Set(includedForScope.map(c => c.videoTeamId).filter(Boolean));
-  const exportSports = new Set(includedForScope.map(c => (c.videoSport || '').trim().toLowerCase()).filter(Boolean));
+  const exportSports = new Set(
+    includedForScope.map(c => sportOfVideo(c.videoSport, c.videoTeamId)).filter(Boolean) as string[],
+  );
   // Reel-description categories from the shared sport definition, unioned over the
   // sports actually being exported (so a flag reel offers OFF/DEF/SP categories, not
   // the basketball four). Players appended last — roster-sourced, not in the definition.
