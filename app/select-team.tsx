@@ -246,7 +246,11 @@ export default function SelectTeamScreen() {
     const { data: team, error: teamError } = await supabase
       .from('teams')
       .insert({ name: newTeamName.trim(), sport: newTeamSport.trim(), format: newTeamFormat, created_by_user_id: userId })
-      .select()
+      // Explicit column list, NOT a bare .select(): that compiles to RETURNING *, which
+      // needs SELECT on every teams column — including coach_code, which C.5 step 1
+      // revoked from `authenticated`. A wildcard here fails with 42501 and team creation
+      // breaks outright. Only team.id is used below.
+      .select('id')
       .single();
     if (teamError || !team) {
       Alert.alert('Error creating team', teamError?.message ?? 'unknown');

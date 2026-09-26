@@ -63,9 +63,16 @@ export default function RosterScreen() {
     setLoading(true);
     const teamId = activeTeam.id;
 
-    const { data: team } = await supabase.from('teams').select('join_code, coach_code').eq('id', teamId).maybeSingle();
-    setTeamCode(team?.join_code ?? null);
-    setCoachCode((team as any)?.coach_code ?? null);
+    // Codes come from the coach-gated get_team_codes RPC, never a raw column read:
+    // teams.coach_code is no longer SELECTable by `authenticated` (C.5 step 1), because
+    // any team member — including a parent — could otherwise read it and redeem coach
+    // access. Both codes render only inside `isCoach &&` blocks below, so a non-coach
+    // getting null here is the same thing they already saw.
+    const { data: codes } = await supabase.rpc('get_team_codes', { p_team_id: teamId });
+    const teamCodes = (Array.isArray(codes) ? codes[0] : codes) as
+      { join_code: string | null; coach_code: string | null } | null | undefined;
+    setTeamCode(teamCodes?.join_code ?? null);
+    setCoachCode(teamCodes?.coach_code ?? null);
 
     // Team staff (coach-tier members) for the Coaches section.
     const { data: st } = await supabase.rpc('list_team_staff', { p_team_id: teamId });
