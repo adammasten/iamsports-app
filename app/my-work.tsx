@@ -1464,11 +1464,15 @@ export default function MyWorkScreen() {
                 const uploadingCount = game.videos.filter(v => v.uploadStatus === 'uploading').length;
                 const preparingCount = game.videos.filter(v => v.uploadStatus === 'ready' && !v.playable).length;
                 const workMeta = uploadingCount > 0
-                  ? 'Uploading in background…'
+                  ? '⬆ Uploading in background…'
                   : preparingCount > 0 ? 'Preparing video for playback…' : null;
-                const baseMeta = workMeta
-                  ? (dateStr ? `${dateStr} · ${workMeta}` : workMeta)
-                  : (dateStr ? `${dateStr} · ${videoCount}` : videoCount);
+                // While work is in flight the status OWNS this line — no date prefix.
+                // Prefixing it ("Sep 24 · Uploading in background…") overflowed the
+                // single meta line and truncated to "Upl…", which told the user nothing.
+                // No percentage: the only progress map on this screen is the offline
+                // DOWNLOAD cache, and upload progress isn't plumbed here — not worth
+                // new infrastructure for one line of text.
+                const baseMeta = workMeta ?? (dateStr ? `${dateStr} · ${videoCount}` : videoCount);
                 return (
                     <View key={`game:${game.id}`} style={Platform.OS === 'web' ? styles.gridCell : undefined}>
                     <ContentCard
