@@ -8,7 +8,9 @@ import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
 import { isFlagFootball } from '@/lib/core/football';
-import { categoriesForSport, phasesForSport, withPlayersColumn, displayPhaseForSport, FALLBACK_FLAT_COLUMNS } from '@/lib/core/tag-categories';
+import { categoriesForSport, phasesForSport, withPlayersColumn, displayPhaseForSport,
+  stickyContextCategory,
+  stickyPhaseForCategory, FALLBACK_FLAT_COLUMNS } from '@/lib/core/tag-categories';
 import { applyTagScope } from '@/lib/core/tag-scope';
 import ClipPill from './components/ClipPill';
 import { getCachedPathSync, touch as touchVideoCache } from '@/lib/native/video-cache';
@@ -140,6 +142,18 @@ export default function TaggingOverlayScreen() {
   // activePossession is the possession TAG object ({id,name}); null = none selected.
   const [possessionTags, setPossessionTags] = useState<any[]>([]);
   const [activePossession, setActivePossession] = useState<any | null>(null);
+  // Basketball sticky defensive context (Adam, 2026-09-26). One sticky tag per PHASE:
+  // OFF remembers "Their Defense", DEF remembers "Our Defense", independently, so switching
+  // sides never overwrites the other. Keyed by phase code -> tag id.
+  //
+  // These stay ORDINARY tags: the sticky id simply survives in `building` across a save, so it
+  // is written into the same numbered bundle it gets when tapped by hand today. Nothing about
+  // bundles, categories, export or the schema changes. Per video/session only — the reset
+  // effect below drops it when a different video is opened, so no storage is involved.
+  const [stickyByPhase, setStickyByPhase] = useState<Record<string, string>>({});
+  // saveClip is defined ABOVE where displayPhaseCode is computed in the render body, so the
+  // phase currently on screen is mirrored here for it to read.
+  const displayPhaseRef = useRef<string | null>(null);
 
   // Chrome visibility — pointerEvents flips synchronously via React state; the
   // opacity transition is driven by Reanimated over 200ms. Both must move
@@ -535,7 +549,25 @@ export default function TaggingOverlayScreen() {
     return () => { cancelled = true; };
   }, [tagTeamId, tagSport, tagTeamFormat]);
 
-  function toggleTag(tagId: string) {
+  function toggleTag(tagId: string, categoryKey?: string) {
+    // Sticky categories (basketball Their Defense / Our Defense) REPLACE rather than
+    // accumulate: picking a second defense drops the first, so a clip can never carry two.
+    // Tapping the lit chip again still deselects it, exactly like any other chip.
+    const stickySlot = stickyPhaseForCategory(tagSport, categoryKey);
+    if (stickySlot && categoryKey) {
+      const deselecting = stickyByPhase[stickySlot] === tagId && building.includes(tagId);
+      const siblingIds = new Set(((tags[categoryKey] ?? []) as any[]).map(t => t.id));
+      setBuilding(prev => {
+        const without = prev.filter(id => !siblingIds.has(id));
+        return deselecting ? without : [...without, tagId];
+      });
+      setStickyByPhase(prev => {
+        const next = { ...prev };
+        if (deselecting) delete next[stickySlot]; else next[stickySlot] = tagId;
+        return next;
+      });
+      return;
+    }
     setBuilding(prev => prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]);
   }
 
@@ -776,7 +808,16 @@ export default function TaggingOverlayScreen() {
     // The sticky period stays (it carries across clips within a quarter).
     setStartTime(null);
     setEndTime(null);
-    setBuilding([]);
+    // Ordinary tags clear. The sticky defensive context for the phase ON SCREEN stays
+    // selected, so the chip is still lit and the next clip needs zero extra taps. Any OTHER
+    // phase's sticky is dropped — a DEF clip must never pick up the OFF look.
+    const keepSticky = (() => {
+      const phase = displayPhaseRef.current;
+      if (!phase || !stickyContextCategory(tagSport, phase)) return [];
+      const id = stickyByPhase[phase];
+      return id ? [id] : [];
+    })();
+    setBuilding(keepSticky);
     setStagedBundles([]);
     setIsStar(false);
     setIsPoe(false);
@@ -838,7 +879,31 @@ export default function TaggingOverlayScreen() {
   // `?? sportPhases[0]` keeps the football family opening on OFF now that nothing
   // pre-selects a possession — DISPLAY ONLY, identical to the web tagger's line.
   const displayPhaseCode = displayPhaseForSport(tagSport, activePhaseCode) ?? sportPhases?.[0]?.code ?? null;
+  displayPhaseRef.current = displayPhaseCode;
   const phaseCols = displayPhaseCode ? categoriesForSport(tagSport, displayPhaseCode) : null;
+
+  // Sticky context follows the phase on screen. Switching OFF->DEF must swap which sticky is
+  // selected, never merge them: the other phase's sticky leaves the group (its column is not
+  // even rendered) and this phase's sticky re-lights. Keyed on the phase alone so the three
+  // OFF/DEF tap sites do not each need to know about this.
+  useEffect(() => {
+    if (!displayPhaseCode || !stickyContextCategory(tagSport, displayPhaseCode)) return;
+    const keep = stickyByPhase[displayPhaseCode] ?? null;
+    const otherIds = new Set(
+      Object.entries(stickyByPhase).filter(([ph]) => ph !== displayPhaseCode).map(([, id]) => id));
+    setBuilding(prev => {
+      const without = otherIds.size ? prev.filter(id => !otherIds.has(id)) : prev;
+      if (keep && !without.includes(keep)) return [...without, keep];
+      return without.length === prev.length ? prev : without;
+    });
+    // stickyByPhase is intentionally omitted: this syncs on PHASE CHANGE, not on every pick
+    // (toggleTag already updates `building` itself, and depending on it would fight that).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayPhaseCode, tagSport]);
+
+  // Sticky context is per VIDEO / tagging session. Opening a different video starts clean, so
+  // nothing leaks between games and no storage layer is needed to achieve it.
+  useEffect(() => { setStickyByPhase({}); }, [videoId]);
   const phaseHasTags = !!phaseCols && phaseCols.some(c => (tags[c.key]?.length ?? 0) > 0);
   const baseCols = sportPhases
     ? (phaseHasTags ? phaseCols! : FALLBACK_FLAT_COLUMNS)
@@ -882,7 +947,7 @@ export default function TaggingOverlayScreen() {
                     return (
                       <TouchableOpacity
                         key={tag.id}
-                        onPress={() => toggleTag(tag.id)}
+                        onPress={() => toggleTag(tag.id, cat.key)}
                         style={[
                           styles.tagChip,
                           isTablet && styles.tagChipBig,

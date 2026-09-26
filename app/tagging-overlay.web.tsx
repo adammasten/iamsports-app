@@ -9,7 +9,9 @@ import { useTeamContext } from '@/context';
 import { loadHiddenTagIds } from '@/lib/core/hiddenTags';
 import { periodsForSport } from '@/lib/core/periods';
 import { isFootballSport } from '@/lib/core/upload-meta';
-import { categoriesForSport, phasesForSport, withPlayersColumn, displayPhaseForSport, usesSharedPlayersPlacement, FALLBACK_FLAT_COLUMNS } from '@/lib/core/tag-categories';
+import { categoriesForSport, phasesForSport, withPlayersColumn, displayPhaseForSport,
+  stickyContextCategory,
+  stickyPhaseForCategory, usesSharedPlayersPlacement, FALLBACK_FLAT_COLUMNS } from '@/lib/core/tag-categories';
 import { applyTagScope } from '@/lib/core/tag-scope';
 import {
   type Odk, type FbCtx, type FbSel, ODK_SHORT, isFlagFootball,
@@ -209,6 +211,26 @@ export default function TaggingStudioWeb() {
   }, [videoId]);
 
   const tagSport = sport ?? activeTeam?.sport ?? null;
+  // Basketball sticky defensive context (Adam, 2026-09-26) — same idea as the football
+  // situation strip above, but for ordinary tags. One sticky per PHASE, remembered
+  // independently: OFF keeps "Their Defense", DEF keeps "Our Defense". Phase code -> tag id.
+  // The sticky id simply survives in `building` across a save, so it lands in the same
+  // numbered bundle a hand-tapped chip would. No bundle-0 move, no schema, no export change.
+  const [stickyByPhase, setStickyByPhase] = useState<Record<string, string>>({});
+  // commitClip is defined ABOVE where displayPhaseCode is computed, so the phase currently on
+  // screen is mirrored here for it to read.
+  const displayPhaseRef = useRef<string | null>(null);
+  // The sticky entries to KEEP selected after a save: this phase's only. Any other phase's
+  // sticky is dropped, so a DEF clip can never inherit the OFF look.
+  const stickyKeepAfterSave = useCallback((): Built[] => {
+    const phase = displayPhaseRef.current;
+    if (!phase) return [];
+    const cat = stickyContextCategory(tagSport, phase);
+    const id = cat ? stickyByPhase[phase] : null;
+    if (!cat || !id) return [];
+    const t = (tags[cat] ?? []).find(x => x.id === id);
+    return t ? [{ id: t.id, name: t.name, category: t.category }] : [];
+  }, [tagSport, stickyByPhase, tags]);
   // Format belongs to the team that OWNS this video, which may not be the active
   // team — a coach can sit on Team A while tagging Team B's film, and Team A's
   // format must not bleed across. FAILS OPEN: any failure resolves to null, i.e.
@@ -373,9 +395,32 @@ export default function TaggingStudioWeb() {
 
   // ── build-then-commit ──
   const tapTag = useCallback((t: Tag) => {
+    // Sticky categories (basketball Their Defense / Our Defense) REPLACE rather than
+    // accumulate, so a clip can never carry two defenses. Tapping the lit chip again still
+    // deselects it, exactly like any other chip.
+    const stickySlot = stickyPhaseForCategory(tagSport, t.category);
+    if (stickySlot) {
+      // ONE predicate drives both updates. Deselecting requires the chip to be BOTH the
+      // remembered sticky AND currently lit: after "+ Group" the sticky is remembered while
+      // the group is empty, and tapping it then must RE-SELECT it, not silently wipe the
+      // memory (which would drop the context from the following clip).
+      const deselecting = stickyByPhase[stickySlot] === t.id && building.some(b => b.id === t.id);
+      setBuilding(prev => {
+        const without = prev.filter(b => b.category !== t.category);
+        return deselecting ? without : [...without, { id: t.id, name: t.name, category: t.category }];
+      });
+      setStickyByPhase(prev => {
+        const next = { ...prev };
+        if (deselecting) delete next[stickySlot]; else next[stickySlot] = t.id;
+        return next;
+      });
+      return;
+    }
     setBuilding(prev => prev.some(b => b.id === t.id) ? prev.filter(b => b.id !== t.id) : [...prev, { id: t.id, name: t.name, category: t.category }]);
-  }, []);
-  const clearBuilding = useCallback(() => { setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setIsGoodPlay(false); setMarkIn(null); setMarkOut(null); }, []);
+  }, [tagSport, stickyByPhase, building]);
+  // Explicit Clear (button / Backspace) means CLEAR: the sticky defensive context goes too,
+  // otherwise the next save would silently resurrect a chip the coach just switched off.
+  const clearBuilding = useCallback(() => { setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setIsGoodPlay(false); setMarkIn(null); setMarkOut(null); setStickyByPhase({}); }, []);
   // After committing a group, clear only the tags/flags — KEEP the Start/End
   // window and the open clip so the next Add stacks another GROUP on the SAME
   // clip (e.g. Neo steal, then Neo fouled). A new window / Clear / Backspace
@@ -457,7 +502,7 @@ export default function TaggingStudioWeb() {
       }
       setSaving(false);
       setEditingId(null);
-      setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setIsGoodPlay(false); setMarkIn(null); setMarkOut(null);
+      setBuilding(stickyKeepAfterSave()); setStagedBundles([]); setIsStar(false); setIsPoe(false); setIsGoodPlay(false); setMarkIn(null); setMarkOut(null);
       loadClips();
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 1600);
@@ -491,7 +536,9 @@ export default function TaggingStudioWeb() {
       if (cfErr) console.warn('[clip_football] situation save skipped:', cfErr.message);
     }
     setSaving(false);
-    setMarkIn(null); setMarkOut(null); setBuilding([]); setStagedBundles([]); setIsStar(false); setIsPoe(false); setIsGoodPlay(false);
+    // Ordinary tags clear; the sticky defensive context for the phase on screen stays lit, so
+    // the next clip needs zero extra taps for it.
+    setMarkIn(null); setMarkOut(null); setBuilding(stickyKeepAfterSave()); setStagedBundles([]); setIsStar(false); setIsPoe(false); setIsGoodPlay(false);
     if (isFlag) {
       // Carry the situation forward: a first down / TD / turnover resets to 1st & 10,
       // else the down bumps (distance held). The coach can always tap to correct it.
@@ -503,7 +550,7 @@ export default function TaggingStudioWeb() {
     loadClips();
     setSavedFlash(true);
     setTimeout(() => setSavedFlash(false), 1600);
-  }, [building, stagedBundles, saving, userId, videoId, teamId, isStar, isPoe, isGoodPlay, special, markIn, markOut, editingId, loadClips, fbCtx, isFlag, activePeriod, activePossession, possessionTags]);
+  }, [building, stagedBundles, saving, userId, videoId, teamId, isStar, isPoe, isGoodPlay, special, markIn, markOut, editingId, loadClips, fbCtx, isFlag, activePeriod, activePossession, possessionTags, stickyKeepAfterSave]);
 
   // Latest-commit ref, assigned DURING RENDER (not in an effect). Space/arrows
   // worked because they only touch the stable `player`; Enter called a stale
@@ -708,6 +755,32 @@ export default function TaggingStudioWeb() {
   // board it showed before the automatic possession selection was removed. DISPLAY ONLY —
   // neither branch writes activePossession, so nothing is stamped until the coach taps.
   const displayPhaseCode = displayPhaseForSport(tagSport, activePhaseCode) ?? sportPhases?.[0]?.code ?? null;
+  displayPhaseRef.current = displayPhaseCode;
+
+  // Sticky context follows the phase on screen: switching OFF<->DEF swaps which sticky chip is
+  // lit, never merges them. The other phase's sticky leaves the group (its column is not even
+  // rendered); this phase's re-lights.
+  useEffect(() => {
+    if (!displayPhaseCode || !stickyContextCategory(tagSport, displayPhaseCode)) return;
+    const keepId = stickyByPhase[displayPhaseCode] ?? null;
+    const otherIds = new Set(
+      Object.entries(stickyByPhase).filter(([ph]) => ph !== displayPhaseCode).map(([, id]) => id));
+    setBuilding(prev => {
+      const without = otherIds.size ? prev.filter(b => !otherIds.has(b.id)) : prev;
+      if (keepId && !without.some(b => b.id === keepId)) {
+        const cat = stickyContextCategory(tagSport, displayPhaseCode)!;
+        const t = (tags[cat] ?? []).find(x => x.id === keepId);
+        if (t) return [...without, { id: t.id, name: t.name, category: t.category }];
+      }
+      return without.length === prev.length ? prev : without;
+    });
+    // Syncs on PHASE CHANGE only — tapTag already maintains `building` for a pick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayPhaseCode, tagSport]);
+
+  // Sticky context is per VIDEO / tagging session — a different video starts clean, so nothing
+  // leaks between games and no storage layer is needed.
+  useEffect(() => { setStickyByPhase({}); }, [videoId]);
   const flagPhaseCols = displayPhaseCode
     ? categoriesForSport(tagSport, displayPhaseCode).map(c => ({ key: c.key, label: c.label }))
     : null;

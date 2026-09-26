@@ -534,6 +534,48 @@ export function displayPhaseForSport(
   return ('defaultVisiblePhase' in d ? d.defaultVisiblePhase : undefined) ?? null;
 }
 
+// ── STICKY DEFENSIVE CONTEXT (basketball only) ───────────────────────────────────────────
+// Adam, 2026-09-26. The defensive look a coach is FACING on offense, or RUNNING on defense,
+// barely changes from clip to clip — so re-tapping it on every clip is pure friction. Exactly
+// ONE category per phase is sticky:
+//     OFF -> off_opp_look  ("Their Defense")
+//     DEF -> def_scheme    ("Our Defense")
+// and the two remember INDEPENDENTLY, so switching OFF/DEF never overwrites the other side.
+//
+// Deliberately a two-entry lookup, NOT a configurable sticky-tag framework: only basketball
+// opts in, and no other sport's behaviour changes. Generalise later only if this earns it.
+//
+// The sticky tag stays an ORDINARY tag. It simply remains in the tagger's current group after
+// a save, so it is written into the same numbered bundle it would get if the coach tapped it
+// manually on every clip — no bundle-0 move, no new category, no schema, no export change.
+const STICKY_CONTEXT_BY_PHASE: Record<string, Record<string, string>> = {
+  basketball: { OFF: 'off_opp_look', DEF: 'def_scheme' },
+};
+
+// The sticky category for a sport+phase, or null when that sport/phase has none.
+export function stickyContextCategory(
+  sport?: string | null,
+  phaseCode?: string | null,
+): string | null {
+  if (!phaseCode) return null;
+  const key = (sport ?? DEFAULT_SPORT).trim().toLowerCase();
+  return STICKY_CONTEXT_BY_PHASE[key]?.[phaseCode] ?? null;
+}
+
+// Which phase slot a tapped category belongs to, or null when it is not sticky. The category
+// alone determines the slot (off_opp_look lives only on OFF, def_scheme only on DEF), so a tap
+// handler never has to know which phase is on screen.
+export function stickyPhaseForCategory(
+  sport?: string | null,
+  categoryKey?: string | null,
+): string | null {
+  if (!categoryKey) return null;
+  const byPhase = STICKY_CONTEXT_BY_PHASE[(sport ?? DEFAULT_SPORT).trim().toLowerCase()];
+  if (!byPhase) return null;
+  for (const [phase, cat] of Object.entries(byPhase)) if (cat === categoryKey) return phase;
+  return null;
+}
+
 // Flat lookup of every category descriptor across all sports (by key).
 // The fallback columns are folded in LAST so that the legacy flat keys stay known
 // (they are no longer in any sport definition now that Football is phased) without ever
