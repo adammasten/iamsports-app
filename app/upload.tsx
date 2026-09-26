@@ -1,7 +1,6 @@
 import { useTeamContext } from '@/context';
 import { pendingFileSize, pickVideos, uploadVideoToBucket, type PendingFile } from '@/lib/native/video-upload';
 import { optimizeVideoInBackground } from '@/lib/native/optimize';
-import { isBackgroundUploadAllowed } from '@/lib/core/flags';
 import { beginBackgroundUpload } from '@/lib/native/upload-recovery';
 import BackgroundUpload from '@/modules/background-upload';
 import { requirePermission } from './permissionGuard';
@@ -275,14 +274,22 @@ export default function UploadScreen() {
         }).select('id').single();
         if (error || !v) throw new Error(error?.message ?? 'Failed to save video');
         vid = v.id;
-        // BACKGROUND UPLOADER (invariant 6): native iOS only, allowlisted account
-        // only, module present only. Everyone else — and ALL of web — keeps the
-        // foreground TUS path untouched. Same bucket, same key, same row contract, so
-        // nothing downstream can tell which uploader produced the object.
+        // BACKGROUND UPLOADER — the DEFAULT for every authenticated native iOS user
+        // as of 2026-09-26. It was gated to a single account id during rollout; that
+        // gate is gone, because an upload that stops when the phone locks is not a
+        // shipped capability. Conditions left are capability checks, not identity:
+        //   • iOS — Android has no native module yet
+        //   • module present — absent in Expo Go, where it would throw
+        //   • signed in — belt-and-braces; the flow already returns early without a
+        //     session (see the !userId guard above), and RLS would reject the insert
+        //   • not a web file — WEB IS UNCHANGED and still uses tus-js-client
+        // The foreground TUS path below stays in the codebase as the fallback for
+        // web/Android/Expo Go, and as an emergency lever. Same bucket, same key shape,
+        // same videos row contract, so nothing downstream can tell which uploader ran.
         const f = files[i];
         const useBackground =
           Platform.OS === 'ios' && !!BackgroundUpload &&
-          isBackgroundUploadAllowed(userId) && !f.isWeb && !!f.uri;
+          !!userId && !f.isWeb && !!f.uri;
 
         if (useBackground) {
           // Creates the multipart FIRST, then stages the source, then enqueues —
