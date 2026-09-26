@@ -3,13 +3,14 @@ import { TeamLogo } from '@/components/team-logo';
 import { SkeletonCards } from '@/components/skeleton-cards';
 import { DebugPanel } from '@/components/debug-panel';
 import { loadContentFeed, type ContentFeedDebug, type FeedItem } from '@/lib/core/homeFeed';
+import { newRequestId } from '@/lib/core/requestId';
 import { SPORTS, formatsForSport } from '@/lib/core/upload-meta';
 import { getSignedVideoUrl } from '@/lib/native/video-url';
 import { supabase } from '@/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import BottomNav from './components/BottomNav';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -78,6 +79,8 @@ export default function SelectTeamScreen() {
   const [showNewKid, setShowNewKid] = useState(false);
   const [newKidName, setNewKidName] = useState('');
   const [creatingKid, setCreatingKid] = useState(false);
+  // Idempotency key for the Add-kid form (Slice D3), refreshed after each success.
+  const kidRequestId = useRef(newRequestId());
 
   // Onboarding "start fresh" deep-links: /select-team?action=newteam|newkid opens
   // the matching create modal straight away, so a new user acts in one tap.
@@ -315,12 +318,17 @@ export default function SelectTeamScreen() {
     if (!newKidName.trim()) { Alert.alert("Enter the kid's name"); return; }
     if (!userId) { Alert.alert('Not signed in'); return; }
     setCreatingKid(true);
-    const { error } = await supabase.rpc('create_kid', { name: newKidName.trim() });
+    // Slice D3: idempotent on the request id, so a double-tap or a retry after a timeout
+    // returns the SAME child instead of creating a second one.
+    const { error } = await supabase.rpc('create_kid', {
+      p_name: newKidName.trim(), p_request_id: kidRequestId.current,
+    });
     if (error) {
       Alert.alert('Error adding kid', error.message);
       setCreatingKid(false);
       return;
     }
+    kidRequestId.current = newRequestId();
     await refreshKids();
     setNewKidName('');
     setShowNewKid(false);

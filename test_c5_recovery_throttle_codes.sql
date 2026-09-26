@@ -32,9 +32,12 @@ INSERT INTO public.player_teams (player_id, team_id) VALUES
 
 -- The wrong-first-claimer scenario: 'stranger' claimed FIRST and is therefore 'parent';
 -- the real mum is only a 'guardian' and cannot remove them under remove_guardian().
-INSERT INTO public.parent_player_links (parent_user_id, player_id, relationship) VALUES
-  ('a6000000-0000-0000-0000-000000000005','c6000000-0000-0000-0000-000000000001','parent'),
-  ('a6000000-0000-0000-0000-000000000002','c6000000-0000-0000-0000-000000000001','guardian');
+-- Slice D2 moved authority from relationship to can_manage_guardians, and its backfill sets
+-- the capability on every existing relationship='parent' row. This fixture predates D2, so
+-- it sets both -- otherwise it builds a state real production data cannot be in.
+INSERT INTO public.parent_player_links (parent_user_id, player_id, relationship, can_manage_guardians) VALUES
+  ('a6000000-0000-0000-0000-000000000005','c6000000-0000-0000-0000-000000000001','parent', true),
+  ('a6000000-0000-0000-0000-000000000002','c6000000-0000-0000-0000-000000000001','guardian', false);
 
 INSERT INTO public.player_guardian_codes (player_id, code, expires_at) VALUES
   ('c6000000-0000-0000-0000-000000000001','C5BGUARD1', now() + interval '30 days');

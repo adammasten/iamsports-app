@@ -1,8 +1,9 @@
 import { COACH_ROLES, useTeamContext } from '@/context';
 import { confirm } from '@/lib/confirm';
+import { newRequestId } from '@/lib/core/requestId';
 import { supabase } from '@/supabase';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -21,7 +22,10 @@ type RosterPlayer = {
 
 // A person attached to a player (via parent_player_links) with their email +
 // current role on this team — surfaced from list_player_guardians (admin/head_coach).
-type Guardian = { user_id: string; display_name: string; email: string | null; relationship: string | null; team_role: string | null };
+type Guardian = { user_id: string; display_name: string; email: string | null; relationship: string | null; team_role: string | null;
+  // Slice D3b: authority is can_manage_guardians, not arrival order. needs_confirmation marks
+  // an adult who claimed this child but holds no authority yet, and whom nobody else manages.
+  can_manage_guardians?: boolean; needs_confirmation?: boolean };
 
 // RN's Alert.alert is a no-op on web, so anything that must surface on the web app
 // falls back to window.alert.
@@ -57,6 +61,8 @@ export default function RosterScreen() {
   const [guardiansByPlayer, setGuardiansByPlayer] = useState<Record<string, Guardian[]>>({});
   const [guardiansLoading, setGuardiansLoading] = useState<string | null>(null);
   const [assigningUid, setAssigningUid] = useState<string | null>(null);
+  // Idempotency key for the Add-player form (Slice D3), refreshed after each success.
+  const addRequestId = useRef(newRequestId());
 
   const load = useCallback(async () => {
     if (!activeTeam) { setPlayers([]); setTeamCode(null); setLoading(false); return; }
@@ -127,11 +133,15 @@ export default function RosterScreen() {
     if (!activeTeam) return;
     if (!newName.trim() && !newJersey.trim()) { webAlert('Add player', 'Enter a name or a jersey number.'); return; }
     setBusy(true);
+    // Slice D3: one request id per open form, so a double-tap or a retry after a dropped
+    // response cannot create two roster slots for the same child.
     const { error } = await supabase.rpc('create_roster_placeholder', {
       p_team_id: activeTeam.id, p_name: newName.trim() || null, p_jersey: newJersey.trim() || null,
+      p_request_id: addRequestId.current,
     });
     setBusy(false);
     if (error) { webAlert('Error', error.message); return; }
+    addRequestId.current = newRequestId();
     setNewName(''); setNewJersey(''); setShowAdd(false);
     load();
   }
@@ -238,6 +248,23 @@ export default function RosterScreen() {
     setAssigningUid(null);
     if (error) { webAlert('Make coach', error.message); return; }
     await Promise.all([loadGuardians(playerId), load()]);
+  }
+
+  // Slice D3: a code lets an adult IN; it does not make them the child's manager. Only a coach
+  // can answer "is this the adult I meant for THIS child?", so that confirmation lives here.
+  // It grants the CLAIMANT management authority and grants the coach nothing at all.
+  async function confirmGuardian(playerId: string, g: Guardian, childName: string) {
+    const ok = await confirm({
+      title: `Confirm ${g.display_name}?`,
+      message: `Confirm that ${g.display_name}${g.email ? ` (${g.email})` : ''} is ${childName}'s parent or guardian.\n\nThey will be able to manage ${childName}'s guardians and profile. You get no extra access, and you can't undo this yourself — only IamSports support can.`,
+      confirmText: 'Confirm guardian',
+    });
+    if (!ok) return;
+    setAssigningUid(g.user_id);
+    const { error } = await supabase.rpc('coach_confirm_guardian_claim', { p_player_id: playerId, p_user_id: g.user_id });
+    setAssigningUid(null);
+    if (error) { webAlert('Confirm guardian', error.message); return; }
+    await loadGuardians(playerId);
   }
 
   // Coach access: a team code that grants the coach role (Coaches' Corner + tools).
@@ -459,8 +486,15 @@ export default function RosterScreen() {
                         <View style={{ flex: 1 }}>
                           <Text style={styles.guardName} numberOfLines={1}>{g.display_name}{g.relationship ? ` · ${g.relationship}` : ''}</Text>
                           <Text style={styles.guardEmail} numberOfLines={1}>{g.email ?? 'no email on file'}</Text>
+                          {g.needs_confirmation && (
+                            <Text style={styles.guardPending} numberOfLines={2}>Claimed {p.name} — waiting on you to confirm they’re family</Text>
+                          )}
                         </View>
-                        {isStaff ? (
+                        {g.needs_confirmation ? (
+                          <TouchableOpacity onPress={() => confirmGuardian(p.playerId, g, p.name)} disabled={assigningUid === g.user_id} hitSlop={6}>
+                            <Text style={styles.guardConfirm}>{assigningUid === g.user_id ? 'Confirming…' : 'Confirm guardian'}</Text>
+                          </TouchableOpacity>
+                        ) : isStaff ? (
                           <Text style={styles.guardBadge}>{roleLabel(g.team_role!)}</Text>
                         ) : (
                           <TouchableOpacity onPress={() => assignCoach(p.playerId, g)} disabled={assigningUid === g.user_id} hitSlop={6}>
@@ -543,6 +577,8 @@ const styles = StyleSheet.create({
   guardName: { color: '#f4f4f6', fontSize: 14, fontWeight: '700' },
   guardEmail: { color: '#9aa0aa', fontSize: 13, marginTop: 2 },
   guardBadge: { color: '#8b7bff', fontSize: 12, fontWeight: '800' },
+  guardConfirm: { color: '#5ac8a8', fontWeight: '800', fontSize: 13 },
+  guardPending: { color: '#b58b4a', fontSize: 11, marginTop: 3, lineHeight: 15 },
   guardAssign: { color: '#1D9E75', fontSize: 14, fontWeight: '800' },
   meta: { fontSize: 12, color: '#62626c', marginTop: 2 },
   codeSmall: { fontSize: 13, color: '#8b7bff', fontWeight: '600', marginTop: 4 },
