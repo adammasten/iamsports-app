@@ -27,9 +27,21 @@ const GAME_SORT_OPTIONS: DropdownOption[] = [
   { value: 'az', label: 'A–Z' },
 ];
 
-// Stamp categories are surfaced by dedicated controls (★/POE buttons, the quick
-// exports, period), never as board sections — so they stay out of the picker.
+// Clip-level STAMP categories: written at bundle 0 by both taggers, never board columns.
 const STAMP_CATEGORY_KEYS = new Set(['possession', 'period', 'special']);
+// Of those, the ones that have their OWN dedicated Export control and must therefore NOT
+// also render as a picker section: `possession` -> the QUICK EXPORT row, `special` -> the
+// ★ Highlight / POE / Good Play buttons.
+//
+// PERIOD IS DELIBERATELY NOT HERE (Adam, 2026-09-26). It used to be, which meant Q1-Q4 /
+// 1H-2H / innings / sets were applied by every tagger, stored in clip_tags, and then had
+// no Export representation at all — 120 of 408 live clips carried a period a coach could
+// never export by. It now flows through `categoryDefs` like any other category, so a
+// period value becomes selectable the moment it is used, and a new one (a sport's innings
+// or sets) needs no code change. Period sits at bundle 0, so clipMatchesGroup already
+// unions it into every bundle: "2H + Made 3" matches a clip with 2H clip-level and
+// Made 3 in one bundle, with NO change to the matcher.
+const STAMP_WITH_OWN_CONTROL = new Set(['possession', 'special']);
 
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
 const ACTIVE_JOB_KEY = 'iamsports.active_export_job';
@@ -443,12 +455,16 @@ export default function ExportScreen() {
     setTags(data || []);
   }
 
-  // Special-category tags ('★ Highlight', 'POE') are surfaced only via the
+  // Special-category tags ('★ Highlight', 'POE', 'Good Play') are surfaced only via the
   // dedicated HIGHLIGHTS / EMPHASIS buttons below. Derived from `tags` on
   // every render — cheap O(n) and avoids a separate state. Undefined until
   // the fetch completes; button onPress no-ops in that window.
   const highlightTagId = tags.find(t => t.category === 'special' && t.name === '★ Highlight')?.id;
   const poeTagId = tags.find(t => t.category === 'special' && t.name === 'POE')?.id;
+  // Good Play is the third clip-level toggle both taggers offer beside ★/POE. It was the
+  // one `special` tag with no Export control at all, so a coach could mark it on every
+  // clip and never export by it (Adam, 2026-09-26).
+  const goodPlayTagId = tags.find(t => t.category === 'special' && t.name === 'Good Play')?.id;
 
   function toggleGame(id: string) {
     setSelectedGames(prev => prev.includes(id) ? prev.filter(g => g !== id) : [...prev, id]);
@@ -809,10 +825,13 @@ export default function ExportScreen() {
     const usedCategoryKeys = new Set<string>();
     tags.forEach((t: any) => { if (usedTagIds.has(t.id)) usedCategoryKeys.add(t.category); });
     const historicalDefs = [...usedCategoryKeys]
-      .filter(k => !definedKeys.has(k) && !STAMP_CATEGORY_KEYS.has(k) && k !== 'players')
+      .filter(k => !definedKeys.has(k) && !STAMP_WITH_OWN_CONTROL.has(k) && k !== 'players')
       .map(k => pickerCategoryForKey(k))
       .filter(c => {
-        if (!c.known) console.warn('[export] used historical category has no shared definition:', c.key);
+        // A stamp category is not IN a sport definition by design, so `known: false` is
+        // expected for it and is not a data problem worth warning about. Only a genuine
+        // mis-filed / unrecognised board category is reported.
+        if (!c.known && !STAMP_CATEGORY_KEYS.has(c.key)) console.warn('[export] used historical category has no shared definition:', c.key);
         return true;   // render it regardless — a used tag must stay discoverable
       });
     const categoryDefs: { key: string; label: string; phase?: string }[] = [
@@ -832,6 +851,7 @@ export default function ExportScreen() {
       .map((t: any) => ({ label: t.name as string, tagId: t.id as string }));
     const highlightSelected = !!highlightTagId && currentGroup.includes(highlightTagId);
     const poeSelected = !!poeTagId && currentGroup.includes(poeTagId);
+    const goodPlaySelected = !!goodPlayTagId && currentGroup.includes(goodPlayTagId);
     // Over-stacked = a group that can't realistically land on one play: 3+ action
     // tags, or 2+ actions with no player (e.g. Made 2 + Made 3). A normal group is
     // one action + a player, or a scoring play + assist (2 actions WITH players).
@@ -896,6 +916,18 @@ export default function ExportScreen() {
             >
               <Text style={[styles.tagBtnHighlightText, highlightSelected && styles.tagBtnHighlightTextSelected]}>
                 ★ Highlight
+              </Text>
+            </TouchableOpacity>
+            {/* Good Play — the third clip-level marker the taggers write at bundle 0.
+                Uses the SAME mechanism as every other tag button (toggleTagInGroup on a
+                real tag id) and the generic chip styles, so no new style key is added and
+                ★ Highlight / POE behaviour is untouched. */}
+            <TouchableOpacity
+              style={[styles.tagBtn, goodPlaySelected && styles.tagBtnSelected]}
+              onPress={() => goodPlayTagId && toggleTagInGroup(goodPlayTagId)}
+            >
+              <Text style={[styles.tagBtnText, goodPlaySelected && styles.tagBtnTextSelected]}>
+                Good Play
               </Text>
             </TouchableOpacity>
           </View>
