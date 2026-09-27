@@ -130,6 +130,37 @@ async function listAllParts(s3: any, key: string, uploadId: string) {
   return parts;
 }
 
+// ── NEW SUPABASE API KEYS (transitional) ─────────────────────────────────────
+// The new key system exposes SUPABASE_SECRET_KEYS / SUPABASE_PUBLISHABLE_KEYS as JSON
+// objects keyed by key NAME ('default' here) — NOT plain strings like the legacy vars.
+// Supabase adds them ALONGSIDE the legacy vars and does NOT repoint the legacy ones, so
+// every function must read the new shape itself.
+//
+// The legacy fallback is what makes this deploy zero-downtime while legacy JWT keys are
+// still enabled: a malformed or missing new var can never take the function down.
+// DELETE THE FALLBACK (the final `?? Deno.env.get(legacyEnv)`) once legacy keys are
+// deactivated. test_edge_key_migration.ts fails if a direct legacy read reappears
+// anywhere outside this resolver.
+function namedKey(jsonEnv: string, legacyEnv: string): string {
+  const raw = Deno.env.get(jsonEnv);
+  if (raw) {
+    try {
+      const k = JSON.parse(raw)?.default;
+      if (typeof k === "string" && k.length > 0) return k;
+    } catch { /* malformed → fall through to the legacy var */ }
+  }
+  // LEGACY FALLBACK. Logged by NAME so the function logs prove which key source is live —
+  // with a fallback in place, "the function works" does NOT prove the migration took
+  // effect. Never logs a key value.
+  console.warn(`[keys] ${jsonEnv} unavailable — falling back to ${legacyEnv}`);
+  return Deno.env.get(legacyEnv) ?? "";
+}
+// Privileged backend key. Sent as the project apikey; never as a user JWT.
+const SECRET_KEY = namedKey("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
+// Acting AS THE USER: apikey = publishable, Authorization = the caller's own JWT, so RLS
+// applies to them.
+const PUBLISHABLE_KEY = namedKey("SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY");
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
 
@@ -144,11 +175,15 @@ Deno.serve(async (req) => {
     // creates and immediately aborts a throwaway multipart). Anyone holding that key can
     // already do anything, so this grants no new power — but every real upload action
     // still requires a genuine user session.
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const isServiceCaller = action === 'preflight' && jwt === serviceKey;
+    // TRANSITIONAL: accept the NEW secret key or the legacy one, so the preflight tool
+    // works whichever the operator has exported. Narrow to SECRET_KEY only once legacy
+    // keys are deactivated.
+    const legacySecret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const isSecretCaller = !!jwt && (jwt === SECRET_KEY || (!!legacySecret && jwt === legacySecret));
+    const isServiceCaller = action === 'preflight' && isSecretCaller;
 
     if (!isServiceCaller) {
-      const admin = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey);
+      const admin = createClient(Deno.env.get('SUPABASE_URL')!, SECRET_KEY);
       const { data: who, error: whoErr } = await admin.auth.getUser(jwt);
       if (whoErr || !who?.user) return json({ error: 'Invalid session' }, 401);
     }

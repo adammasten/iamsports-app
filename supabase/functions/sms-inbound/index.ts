@@ -5,7 +5,37 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-const svc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+// ── NEW SUPABASE API KEYS (transitional) ─────────────────────────────────────
+// The new key system exposes SUPABASE_SECRET_KEYS / SUPABASE_PUBLISHABLE_KEYS as JSON
+// objects keyed by key NAME ('default' here) — NOT plain strings like the legacy vars.
+// Supabase adds them ALONGSIDE the legacy vars and does NOT repoint the legacy ones, so
+// every function must read the new shape itself.
+//
+// The legacy fallback is what makes this deploy zero-downtime while legacy JWT keys are
+// still enabled: a malformed or missing new var can never take the function down.
+// DELETE THE FALLBACK (the final `?? Deno.env.get(legacyEnv)`) once legacy keys are
+// deactivated. test_edge_key_migration.ts fails if a direct legacy read reappears
+// anywhere outside this resolver.
+function namedKey(jsonEnv: string, legacyEnv: string): string {
+  const raw = Deno.env.get(jsonEnv);
+  if (raw) {
+    try {
+      const k = JSON.parse(raw)?.default;
+      if (typeof k === "string" && k.length > 0) return k;
+    } catch { /* malformed → fall through to the legacy var */ }
+  }
+  // LEGACY FALLBACK. Logged by NAME so the function logs prove which key source is live —
+  // with a fallback in place, "the function works" does NOT prove the migration took
+  // effect. Never logs a key value.
+  console.warn(`[keys] ${jsonEnv} unavailable — falling back to ${legacyEnv}`);
+  return Deno.env.get(legacyEnv) ?? "";
+}
+// Privileged backend key. Sent as the project apikey; never as a user JWT.
+const SECRET_KEY = namedKey("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
+// Acting AS THE USER: apikey = publishable, Authorization = the caller's own JWT, so RLS
+// applies to them.
+const PUBLISHABLE_KEY = namedKey("SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY");
+const svc = createClient(Deno.env.get("SUPABASE_URL")!, SECRET_KEY);
 const SECRET = Deno.env.get("TWILIO_WEBHOOK_SECRET");
 const STOP = new Set(["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"]);
 const START = new Set(["START", "YES", "UNSTOP"]);

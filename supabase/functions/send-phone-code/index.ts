@@ -6,7 +6,37 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const SUPA_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// ── NEW SUPABASE API KEYS (transitional) ─────────────────────────────────────
+// The new key system exposes SUPABASE_SECRET_KEYS / SUPABASE_PUBLISHABLE_KEYS as JSON
+// objects keyed by key NAME ('default' here) — NOT plain strings like the legacy vars.
+// Supabase adds them ALONGSIDE the legacy vars and does NOT repoint the legacy ones, so
+// every function must read the new shape itself.
+//
+// The legacy fallback is what makes this deploy zero-downtime while legacy JWT keys are
+// still enabled: a malformed or missing new var can never take the function down.
+// DELETE THE FALLBACK (the final `?? Deno.env.get(legacyEnv)`) once legacy keys are
+// deactivated. test_edge_key_migration.ts fails if a direct legacy read reappears
+// anywhere outside this resolver.
+function namedKey(jsonEnv: string, legacyEnv: string): string {
+  const raw = Deno.env.get(jsonEnv);
+  if (raw) {
+    try {
+      const k = JSON.parse(raw)?.default;
+      if (typeof k === "string" && k.length > 0) return k;
+    } catch { /* malformed → fall through to the legacy var */ }
+  }
+  // LEGACY FALLBACK. Logged by NAME so the function logs prove which key source is live —
+  // with a fallback in place, "the function works" does NOT prove the migration took
+  // effect. Never logs a key value.
+  console.warn(`[keys] ${jsonEnv} unavailable — falling back to ${legacyEnv}`);
+  return Deno.env.get(legacyEnv) ?? "";
+}
+// Privileged backend key. Sent as the project apikey; never as a user JWT.
+const SECRET_KEY = namedKey("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
+// Acting AS THE USER: apikey = publishable, Authorization = the caller's own JWT, so RLS
+// applies to them. Some of these previously passed the SECRET key as the apikey, which
+// worked but shipped a secret on a request that never needed one.
+const PUBLISHABLE_KEY = namedKey("SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY");
 const CORS = { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, x-client-info, apikey, content-type", "access-control-allow-methods": "POST, OPTIONS" };
 function json(o: unknown, s = 200) { return new Response(JSON.stringify(o), { status: s, headers: { ...CORS, "content-type": "application/json" } }); }
 
@@ -26,7 +56,7 @@ async function sha256(s: string): Promise<string> {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  const asUser = createClient(SUPA_URL, SERVICE_ROLE, { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } });
+  const asUser = createClient(SUPA_URL, PUBLISHABLE_KEY, { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } });
   const { data: { user } } = await asUser.auth.getUser();
   if (!user) return json({ error: "Please sign in." }, 401);
 
@@ -34,7 +64,7 @@ Deno.serve(async (req) => {
   const phone = normalize(body?.phone ?? "");
   if (!phone) return json({ error: "Enter a valid mobile number." }, 400);
 
-  const svc = createClient(SUPA_URL, SERVICE_ROLE);
+  const svc = createClient(SUPA_URL, SECRET_KEY);
   // Simple resend throttle: one code per 45s per user.
   const { data: existing } = await svc.from("phone_verifications").select("created_at").eq("user_id", user.id).maybeSingle();
   if (existing && Date.now() - new Date(existing.created_at).getTime() < 45_000) return json({ error: "Hang on a moment before requesting another code." }, 429);
