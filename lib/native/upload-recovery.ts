@@ -14,6 +14,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 import BackgroundUpload from '@/modules/background-upload';
 import { supabase } from '@/supabase';
 import { completeMultipart, listParts, signParts, abortMultipart, createMultipart } from './background-upload';
+import {
+  recoveryRecordMismatch, classifyNativeUploadError,
+} from '@/lib/core/upload-recovery-contract';
 import { optimizeVideoInBackground } from './optimize';
 
 const RECORD_KEY = 'bgupload:active';
@@ -28,9 +31,29 @@ export type UploadRecoveryRecord = {
   startedAt: number;
 };
 
+// THROWS ON FAILURE — deliberately. This is an upload-critical durability write: the
+// record is the only thread connecting a started upload to any recovery. It used to
+// swallow its own exception, so beginBackgroundUpload's unwind could not fire and an
+// upload could start with no way home (production 2026-09-27, video 23a1e14b).
 export async function saveRecoveryRecord(r: UploadRecoveryRecord): Promise<void> {
-  try { await AsyncStorage.setItem(RECORD_KEY, JSON.stringify(r)); }
-  catch (e) { console.warn('[bg-recovery] save failed:', e); }
+  await AsyncStorage.setItem(RECORD_KEY, JSON.stringify(r));
+}
+
+// Write, then READ BACK THROUGH THE EXACT PATH RELAUNCH USES, and prove the round-trip.
+// "setItem resolved" is not evidence the record will be there later: production showed a
+// record that was either never written or never readable, and the two are
+// indistinguishable from the write side. loadRecoveryRecord() returns null on a parse
+// failure, which this treats as absence — fail closed either way.
+export async function saveAndVerifyRecoveryRecord(r: UploadRecoveryRecord): Promise<void> {
+  await saveRecoveryRecord(r);
+  const readBack = await loadRecoveryRecord();
+  const mismatch = recoveryRecordMismatch(r, readBack);
+  if (mismatch) {
+    throw new Error(
+      `Upload not started: recovery record could not be verified (${mismatch}). ` +
+      'Starting without it would leave the upload unrecoverable.',
+    );
+  }
 }
 
 export async function loadRecoveryRecord(): Promise<UploadRecoveryRecord | null> {
@@ -178,9 +201,31 @@ export function installBackgroundUploadListeners(): () => void {
     }),
 
     BackgroundUpload.addListener('onError', async (e: any) => {
-      // A part 403 means its presigned URL expired; re-signing is handled by the next
-      // reconcile pass rather than racing it here.
+      // Always log the raw event first: it is the only device-side record of WHY a
+      // native transfer died, and the 2026-09-27 stall was undiagnosable without it.
       console.warn(`[bg-upload] error on ${e?.uploadId} part=${e?.part} status=${e?.status}: ${e?.error ?? ''}`);
+      const rec = await loadRecoveryRecord();
+      const kind = classifyNativeUploadError(rec, e);
+      // 'not-ours': a late error from an abandoned/stale job. Marking anything failed
+      // here would turn one dead upload into two. Log and stop.
+      // 'transient-part': the ordinary per-part failure (e.g. a 403 expired URL). The
+      // rolling window + reconcile already re-sign and re-enqueue; unchanged on purpose.
+      if (kind !== 'terminal' || !rec) {
+        if (kind === 'not-ours') console.warn('[bg-upload] error ignored — not the active upload');
+        return;
+      }
+      // Terminal: startMultipart's own guards rejected the job (bad file / bad params),
+      // so no part will ever land. Previously this left the row on 'uploading' forever
+      // and the UI on "Uploading in background…". Mark the CORRECT video failed.
+      //
+      // The record is deliberately KEPT: it holds the uploadId + staged path needed to
+      // diagnose or retry, and the error event carries nothing that would make an
+      // automatic abort provably safe. Cleanup stays with the existing explicit paths
+      // (abandonBackgroundUpload / reconcile), which is where it already lives.
+      const { error: flipErr } = await supabase.from('videos')
+        .update({ upload_status: 'failed' }).eq('id', rec.videoId);
+      if (flipErr) console.warn(`[bg-upload] ${rec.key}: failed-flip failed:`, flipErr.message);
+      else console.warn(`[bg-upload] ${rec.key}: TERMINAL native error — video ${rec.videoId} marked failed (record kept for diagnosis)`);
     }),
   ];
 
@@ -226,7 +271,10 @@ export async function beginBackgroundUpload(opts: {
   try {
     const partNumbers = Array.from({ length: created.numParts }, (_, i) => i + 1);
     const parts = await signParts(key, created.uploadId, partNumbers);
-    await saveRecoveryRecord({
+    // NOTHING is handed to the native uploader until the record is on disk AND has been
+    // read back intact. A throw here lands in the catch below, which already unwinds
+    // everything (staged file, record, server-side multipart) — no parallel cleanup.
+    await saveAndVerifyRecoveryRecord({
       key, uploadId: created.uploadId, fileUri: durableUri,
       partSize: created.partSize, numParts: created.numParts, videoId, startedAt: Date.now(),
     });
