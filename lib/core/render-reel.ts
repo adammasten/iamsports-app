@@ -2,6 +2,7 @@
 // "Make a highlight" flow and the coach export can share ONE renderer.
 // (app/export.tsx still has its own inline copy for now — migrate it here later.)
 import { supabase } from '@/supabase';
+import { mediaAuthHeaders, mediaAuthGetHeaders } from '@/lib/core/media-auth';
 
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
 
@@ -18,25 +19,40 @@ export function deriveStoragePath(url: string): string {
   return afterBucket.split('?')[0];
 }
 
-// POST the clips to the Railway render server, then poll until the reel is done.
-// Returns the finished reel's (directly downloadable) URL. Throws on failure.
+// Start the render and poll until the reel is done. Returns the finished reel's
+// (signed, 24h) URL. Throws on failure.
+//
+// AUTHORIZATION. Every request carries the caller's Supabase access token, and the
+// server re-derives the user from it. When `reelId` is supplied the server ignores
+// the clip list entirely and resolves the clips from that reserved reel's
+// source_clip_ids — so the client no longer names the storage keys it wants cut,
+// which is what stops a crafted request reaching media the caller cannot read.
+// `clips` stays in the signature for the render-time cut points and as the fallback
+// for a server that has not yet shipped the reelId path.
 export async function renderReel(
   clips: RenderClip[],
-  opts?: { fileName?: string; onProgress?: (pct: number, label?: string) => void },
+  opts?: { fileName?: string; reelId?: string; onProgress?: (pct: number, label?: string) => void },
 ): Promise<string> {
   if (clips.length === 0) throw new Error('No clips to render.');
   const res = await fetch(`${SERVER_URL}/export`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ clips, outputFileName: opts?.fileName ?? 'iamsports-highlight.mp4' }),
+    headers: await mediaAuthHeaders(),
+    body: JSON.stringify({
+      ...(opts?.reelId ? { reelId: opts.reelId } : {}),
+      clips,
+      outputFileName: opts?.fileName ?? 'iamsports-highlight.mp4',
+    }),
   });
   const data = await res.json().catch(() => ({} as any));
+  if (res.status === 401) throw new Error('Your session expired — sign in and try again.');
+  if (res.status === 403 || res.status === 404) throw new ReelNotAllowedError(data.error);
   if (!res.ok || !data.jobId) throw new Error(data.error || 'Could not start the render.');
 
-  // Poll every 3s until done/failed.
+  // Poll every 3s until done/failed. The job is owned by this user, so the poll is
+  // authenticated too — a job id on its own is not authorization.
   for (;;) {
     await delay(3000);
-    const jr = await fetch(`${SERVER_URL}/job/${data.jobId}`);
+    const jr = await fetch(`${SERVER_URL}/job/${data.jobId}`, { headers: await mediaAuthGetHeaders() });
     const job = await jr.json().catch(() => ({} as any));
     opts?.onProgress?.(job.progress || 0, job.label);
     if (job.status === 'done') return job.url as string;

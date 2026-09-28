@@ -5,6 +5,7 @@ import { clipMatchesGroup } from '@/lib/core/clip-filtering';
 import { categoriesForSports, pickerCategoryForKey, isActionCategory } from '@/lib/core/tag-categories';
 import { mayReelClip, toEligibilityTags } from '@/lib/core/highlight-eligibility';
 import { reserveReel, finalizeReel, discardReel, ReelNotAllowedError } from '@/lib/core/render-reel';
+import { mediaAuthHeaders, mediaAuthGetHeaders } from '@/lib/core/media-auth';
 import { generateReelThumbnailInBackground } from '@/lib/native/optimize';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
@@ -232,7 +233,7 @@ export default function ExportScreen() {
 
     let job: any;
     try {
-      const response = await fetch(`${SERVER_URL}/job/${active.jobId}`);
+      const response = await fetch(`${SERVER_URL}/job/${active.jobId}`, { headers: await mediaAuthGetHeaders() });
       if (response.status === 404) {
         await clearActiveJob();
         return;
@@ -612,7 +613,7 @@ export default function ExportScreen() {
       pollIntervalRef.current = setInterval(async () => {
         if (!mountedRef.current) { stopPolling(); return; }
         try {
-          const response = await fetch(`${SERVER_URL}/job/${jobId}`);
+          const response = await fetch(`${SERVER_URL}/job/${jobId}`, { headers: await mediaAuthGetHeaders() });
           const job = await response.json();
           if (!mountedRef.current) { stopPolling(); return; }
           setExportProgress(job.progress || 0);
@@ -670,10 +671,13 @@ export default function ExportScreen() {
       });
 
       console.log('[export] POSTing to Railway', `${SERVER_URL}/export`, 'clips:', includedClips.length);
+      // reelId is sent so the SERVER resolves which clips to cut from the reserved
+      // reel's source_clip_ids; the storage keys in `includedClips` are no longer the
+      // authority. The request carries this user's Supabase token — never a shared secret.
       const response = await fetch(`${SERVER_URL}/export`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clips: includedClips, outputFileName: 'iamsports-highlight.mp4' }),
+        headers: await mediaAuthHeaders(),
+        body: JSON.stringify({ reelId, clips: includedClips, outputFileName: 'iamsports-highlight.mp4' }),
       });
 
       const data = await response.json();

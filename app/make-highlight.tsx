@@ -248,7 +248,9 @@ export default function MakeHighlightScreen() {
       reelId = await reserveReel({
         clipIds: list.map((c) => c.id), name: `${kidName}'s highlights`, durationSeconds,
       });
-      const url = await renderReel(renderClips, { fileName: `${kidName}-highlights.mp4`, onProgress: (p, l) => { setProgress(p); if (l) setProgressLabel(l); } });
+      // reelId is passed so the SERVER resolves the clips from the reserved reel
+      // rather than trusting the storage keys in renderClips.
+      const url = await renderReel(renderClips, { fileName: `${kidName}-highlights.mp4`, reelId, onProgress: (p, l) => { setProgress(p); if (l) setProgressLabel(l); } });
       await finalizeReel(reelId, { storagePath: deriveStoragePath(url), durationSeconds });
       reelId = null; // finalized — must not be discarded below
       setDoneReel({ storagePath: deriveStoragePath(url) });

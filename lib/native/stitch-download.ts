@@ -16,6 +16,7 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 
+import { mediaAuthHeaders, mediaAuthGetHeaders } from '@/lib/core/media-auth';
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
 
 function safeName(name: string): string {
@@ -41,9 +42,11 @@ export async function stitchAndDownloadGame(
   }
 
   onStatus?.({ stage: 'starting', label: 'Starting…', progress: 0 });
+  // Authenticated: the server checks every key against `videos` through THIS user's
+  // RLS, so a crafted key list cannot stitch another team's film.
   const startRes = await fetch(`${SERVER_URL}/concat-game`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await mediaAuthHeaders(),
     body: JSON.stringify({ keys, outputFileName: filename }),
   });
   if (!startRes.ok) throw new Error(`Server error (${startRes.status})`);
@@ -57,7 +60,7 @@ export async function stitchAndDownloadGame(
     await new Promise((r) => setTimeout(r, 3000));
     let job: any;
     try {
-      const jr = await fetch(`${SERVER_URL}/job/${jobId}`);
+      const jr = await fetch(`${SERVER_URL}/job/${jobId}`, { headers: await mediaAuthGetHeaders() });
       if (!jr.ok) continue;
       job = await jr.json();
     } catch {

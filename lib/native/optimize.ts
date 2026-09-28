@@ -12,14 +12,18 @@
 // its failure must NOT break the upload — the raw video still exists and can be
 // optimized later (manual /optimize or /optimize-all). We only kick off the job.
 
+import { mediaAuthHeaders } from '@/lib/core/media-auth';
 const SERVER_URL = 'https://web-production-1bf7f.up.railway.app';
 
 export function optimizeVideoInBackground(key: string): void {
-  fetch(`${SERVER_URL}/optimize`, {
+  // Authenticated. /optimize REWRITES videos.url, so the server checks this key is a
+  // video THIS user can read before doing anything. Still fire-and-forget: the header
+  // lookup is folded into the same promise chain, and a signed-out caller just logs.
+  mediaAuthHeaders().then((headers) => fetch(`${SERVER_URL}/optimize`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ key }),
-  })
+  }))
     .then(async (r) => {
       const body = await r.json().catch(() => null);
       console.log(`[optimize] kicked off for ${key} → job ${body?.jobId ?? '(no id)'} (HTTP ${r.status})`);
@@ -33,11 +37,13 @@ export function optimizeVideoInBackground(key: string): void {
 // Fire-and-forget + best-effort (same contract as optimize): never blocks or breaks
 // reel creation; a failure just leaves the reel on its placeholder icon.
 export function generateReelThumbnailInBackground(reelId: string): void {
-  fetch(`${SERVER_URL}/reel-thumbnail`, {
+  // Authenticated: the server confirms this caller owns the reel before writing its
+  // thumbnail_path. Same fire-and-forget contract as optimize.
+  mediaAuthHeaders().then((headers) => fetch(`${SERVER_URL}/reel-thumbnail`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ reelId }),
-  })
+  }))
     .then((r) => console.log(`[reel-thumbnail] kicked off for reel ${reelId} (HTTP ${r.status})`))
     .catch((e) => console.warn(`[reel-thumbnail] kickoff failed for ${reelId} (non-fatal):`, e));
 }
