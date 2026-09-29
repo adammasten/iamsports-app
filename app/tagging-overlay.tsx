@@ -1059,11 +1059,12 @@ export default function TaggingOverlayScreen() {
             <TouchableOpacity style={styles.backBtn} onPress={handleBack} hitSlop={8}>
               <Text style={styles.backBtnText}>←</Text>
             </TouchableOpacity>
-            {/* FLAG ONLY: quarters + OFF/DEF/SP + DN/DIST/DR live IN the top bar (one
-                row; flexWrap drops to a thin 2nd line inside the 60px bar if they can't
-                fit) so they never overlap the tag board. Same handlers as before — layout
-                only. Non-flag keeps the floating clusters below. */}
-            {!isWatch && isFlag && (
+            {/* CANONICAL RAIL — every PHONE sport, plus iPad flag: quarters + OFF/DEF/SP
+                (+ DN/DIST/DR for flag) live IN the top bar (one row; flexWrap drops to a
+                thin 2nd line inside the 60px bar if they can't fit) so they never overlap
+                the tag board. Same handlers as before — layout only. The floating clusters
+                below are iPad-non-flag-football only now. */}
+            {!isWatch && (isFlag || !isTablet) && (
               <View style={styles.tbClusters} pointerEvents="box-none">
                 {sportPeriods.map((p: any) => {
                   const on = activePeriod === p.id;
@@ -1082,21 +1083,28 @@ export default function TaggingOverlayScreen() {
                     </TouchableOpacity>
                   );
                 })}
-                <View style={styles.tbSep} />
-                <Text style={styles.tbLbl}>DN</Text>
-                {[1, 2, 3, 4].map(d => (
-                  <TouchableOpacity key={d} style={[styles.tbChip, fbDown === d && styles.tbChipOn]} onPress={() => setFbDown(d)} hitSlop={4}>
-                    <Text style={[styles.tbChipText, fbDown === d && styles.tbChipTextOn]}>{d}</Text>
-                  </TouchableOpacity>
-                ))}
-                <Text style={styles.tbLbl}>DIST</Text>
-                <TouchableOpacity style={styles.tbStep} onPress={() => setFbDist(v => Math.max(0, v - 1))} hitSlop={4}><Text style={styles.tbStepText}>–</Text></TouchableOpacity>
-                <Text style={styles.tbNum}>{fbDist}</Text>
-                <TouchableOpacity style={styles.tbStep} onPress={() => setFbDist(v => v + 1)} hitSlop={4}><Text style={styles.tbStepText}>+</Text></TouchableOpacity>
-                <Text style={styles.tbLbl}>DR</Text>
-                <TouchableOpacity style={styles.tbStep} onPress={() => setFbDrive(v => Math.max(1, v - 1))} hitSlop={4}><Text style={styles.tbStepText}>–</Text></TouchableOpacity>
-                <Text style={styles.tbNum}>{fbDrive}</Text>
-                <TouchableOpacity style={styles.tbStep} onPress={() => setFbDrive(v => v + 1)} hitSlop={4}><Text style={styles.tbStepText}>+</Text></TouchableOpacity>
+                {/* DN/DIST/DR is flag-only because saveClip writes clip_football only
+                    when isFlag — rendering it for 7-on-7 / Football-11v11 would show a
+                    control that silently never persists. Unchanged from before. */}
+                {isFlag && (
+                  <>
+                    <View style={styles.tbSep} />
+                    <Text style={styles.tbLbl}>DN</Text>
+                    {[1, 2, 3, 4].map(d => (
+                      <TouchableOpacity key={d} style={[styles.tbChip, fbDown === d && styles.tbChipOn]} onPress={() => setFbDown(d)} hitSlop={4}>
+                        <Text style={[styles.tbChipText, fbDown === d && styles.tbChipTextOn]}>{d}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    <Text style={styles.tbLbl}>DIST</Text>
+                    <TouchableOpacity style={styles.tbStep} onPress={() => setFbDist(v => Math.max(0, v - 1))} hitSlop={4}><Text style={styles.tbStepText}>–</Text></TouchableOpacity>
+                    <Text style={styles.tbNum}>{fbDist}</Text>
+                    <TouchableOpacity style={styles.tbStep} onPress={() => setFbDist(v => v + 1)} hitSlop={4}><Text style={styles.tbStepText}>+</Text></TouchableOpacity>
+                    <Text style={styles.tbLbl}>DR</Text>
+                    <TouchableOpacity style={styles.tbStep} onPress={() => setFbDrive(v => Math.max(1, v - 1))} hitSlop={4}><Text style={styles.tbStepText}>–</Text></TouchableOpacity>
+                    <Text style={styles.tbNum}>{fbDrive}</Text>
+                    <TouchableOpacity style={styles.tbStep} onPress={() => setFbDrive(v => v + 1)} hitSlop={4}><Text style={styles.tbStepText}>+</Text></TouchableOpacity>
+                  </>
+                )}
               </View>
             )}
             {/* iPad non-football (per the cross-sport standard): periods + OFF/DEF in the SAME
@@ -1122,21 +1130,41 @@ export default function TaggingOverlayScreen() {
                 })}
               </View>
             )}
-            {/* Phone: Save clip lives top-right. On iPad it moves into the
-                bottom-right cluster (below), same shape as + Group. */}
+            {/* Phone: ONE upper-right action region holding + Group and Save clip in a
+                single flex row, so they can never overlap by construction (+ Group used
+                to live in the absolutely-positioned sideStrip and packed upward into the
+                top bar). Behavior of both buttons is unchanged. On iPad both move into
+                the bottom-right cluster (below). */}
             {!isWatch && !isTablet && (
-              <TouchableOpacity
-                style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
-                disabled={!canSave}
-                onPress={saveClip}
-              >
-                <Text style={styles.saveBtnText}>{saving ? 'Saving…' : groupCount > 0 ? `Save clip (${groupCount})` : 'Save clip'}</Text>
-              </TouchableOpacity>
+              <View style={styles.topActions}>
+                <TouchableOpacity
+                  style={[styles.addGroupBtn, !canAddGroup && styles.disabledBtn]}
+                  onPress={addGroup}
+                  disabled={!canAddGroup}
+                  hitSlop={6}
+                >
+                  <Text style={styles.addGroupBtnText}>+ Group</Text>
+                  {/* Group count lives on the button (bottom-right), replacing the
+                      old standalone "N staged" badge. Bumps up on every addGroup. */}
+                  {groupCount > 0 && (
+                    <View style={styles.groupCountBadge}>
+                      <Text style={styles.groupCountText}>{groupCount}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
+                  disabled={!canSave}
+                  onPress={saveClip}
+                >
+                  <Text style={styles.saveBtnText}>{saving ? 'Saving…' : groupCount > 0 ? `Save clip (${groupCount})` : 'Save clip'}</Text>
+                </TouchableOpacity>
+              </View>
             )}
             {/* "Now tagged" readout — what's tagged at the current playhead, so a
                 tagger reviewing an already-tagged game sees the tags in context.
                 Centered, between Back and Save; tagging mode only. */}
-            {!isWatch && !isFlag && activeTagNames.length > 0 && (
+            {!isWatch && isTablet && !isFlag && activeTagNames.length > 0 && (
               <View style={styles.topReadout} pointerEvents="none">
                 <View style={styles.topReadoutDot} />
                 <Text style={styles.topReadoutText} numberOfLines={1}>{activeTagNames.join('  ·  ')}</Text>
@@ -1147,7 +1175,8 @@ export default function TaggingOverlayScreen() {
           </View>
         </LinearGradient>
 
-        {/* Right-edge control strip — the fullscreen Tags/Video toggle + ★/POE.
+        {/* Right-edge control strip — the fullscreen Tags/Video toggle + ★/POE/Good Play.
+            + Group moved out of here into the top-bar action region.
             Lives here (not the crowded bottom row) so all three stay visible,
             and it stays tappable in fullscreen because the tag region reserves
             this width — same slot the old bundle strip used. */}
@@ -1155,25 +1184,13 @@ export default function TaggingOverlayScreen() {
         <View
           style={[
             styles.sideStrip,
-            { top: insets.top + 60, bottom: insets.bottom + 76, right: insets.right + 8 },
+            // No `top`: the strip sizes to its content and grows UP from `bottom`, so it
+            // can never pack past the top bar (the old top+bottom box was shorter than
+            // its children in landscape, and overflow:'visible' painted them over Save).
+            { bottom: insets.bottom + 76, right: insets.right + 8 },
           ]}
           pointerEvents="box-none"
         >
-          <TouchableOpacity
-            style={[styles.addGroupBtn, !canAddGroup && styles.disabledBtn]}
-            onPress={addGroup}
-            disabled={!canAddGroup}
-            hitSlop={6}
-          >
-            <Text style={styles.addGroupBtnText}>+ Group</Text>
-            {/* Group count lives on the button now (bottom-right), replacing the
-                old standalone "N staged" badge. Bumps up on every addGroup. */}
-            {groupCount > 0 && (
-              <View style={styles.groupCountBadge}>
-                <Text style={styles.groupCountText}>{groupCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
           {/* Single Tag size toggle (same size as ★ / !): a chevron, not +/−.
               Compact → ↑ (tap to bring the tags up / enlarge); fullscreen → ↓
               (tap to push them back down / shrink). One button, two states. */}
@@ -1220,11 +1237,11 @@ export default function TaggingOverlayScreen() {
         </View>
         )}
 
-        {/* Game-period selector (top-left) — small circles, one per period for
-            the current sport (basketball → Q1..Q4, 1H, 2H). Sticky + mutually
-            exclusive; the active period auto-stamps every saved clip. Renders
-            only when the sport's period tags exist. */}
-        {!isWatch && !isFlag && !iPadNonFootball && sportPeriods.length > 0 && (
+        {/* LEGACY floating game-period selector (top-left) — small circles, one per
+            period. iPad non-flag FOOTBALL only (7-on-7 / Football-11v11); phone and iPad
+            non-football use the canonical top rail above. Sticky + mutually exclusive;
+            the active period auto-stamps every saved clip. */}
+        {!isWatch && isTablet && !isFlag && !iPadNonFootball && sportPeriods.length > 0 && (
           <View
             style={[styles.periodCluster, { top: insets.top + 60, left: insets.left + 6 }]}
             pointerEvents="box-none"
@@ -1245,9 +1262,10 @@ export default function TaggingOverlayScreen() {
           </View>
         )}
 
-        {/* Possession selector (OFF/DEF/SP) — sticky clip-level stamp for export, right of
-            the period cluster. Football also scopes the columns (see visibleCategories). */}
-        {!isWatch && !isFlag && !iPadNonFootball && possOptions.length > 0 && (
+        {/* LEGACY floating possession selector (OFF/DEF/SP) — same iPad-non-flag-football
+            scope as the period cluster above. Sticky clip-level stamp for export; football
+            also scopes the columns (see visibleCategories). */}
+        {!isWatch && isTablet && !isFlag && !iPadNonFootball && possOptions.length > 0 && (
           <View
             style={[styles.periodCluster, { top: insets.top + 60, left: insets.left + 6 + 132, width: 160 }]}
             pointerEvents="box-none"
@@ -1285,11 +1303,12 @@ export default function TaggingOverlayScreen() {
               // free — tags drop lower (just above the scrub) and inset from the
               // rails on both sides.
               bottom: insets.bottom + (isTablet ? 40 : 56 + 8 + 24 + 8),
-              // Left inset clears the top-left period cluster (fullscreen/phone) OR,
-              // on iPad, the bottom-left playback rail.
-              left: insets.left + (isTablet ? 104 : 12 + (!isFlag && tagMode === 'fullscreen' && sportPeriods.length > 0 ? 84 : 0)),
+              // Left inset: on iPad, clears the bottom-left playback rail. On phone it is
+              // one constant for every sport — the legacy floating period/phase clusters
+              // that used to need +84 of clearance are iPad-only now.
+              left: insets.left + (isTablet ? 104 : 12),
               // Right inset clears the phone side-strip OR the iPad bottom-right action rail.
-              right: insets.right + (isTablet ? 120 : SIDE_STRIP_W + (isFlag ? 24 : 16)),
+              right: insets.right + (isTablet ? 120 : SIDE_STRIP_W + 24),
             },
             tagMode === 'fullscreen' && { top: insets.top + 60 },
           ]}
@@ -1388,7 +1407,16 @@ export default function TaggingOverlayScreen() {
             style={[styles.controlsRow, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
             pointerEvents="box-none"
           >
-            <View style={styles.leftGroup}>
+            {/* ZONE 1 — transport. The ONLY compressible zone: a horizontal scroller
+                that takes whatever width zones 2 and 3 leave, so it can never push them
+                off-row. Nothing was removed from it (time, -5s, -1s, play, +1s, +5s,
+                speed all stay); on a narrow iPhone it simply scrolls. */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.transportZone}
+              contentContainerStyle={styles.transportZoneContent}
+            >
               <Text style={styles.timeText}>
                 {formatTime(currentTime)} / {formatTime(duration)}
               </Text>
@@ -1434,18 +1462,24 @@ export default function TaggingOverlayScreen() {
               >
                 <Text style={[styles.skipBtnText, speed !== 1 && styles.speedBtnOnText]}>{speedLabel(speed)}</Text>
               </TouchableOpacity>
-              {!isWatch && existingClips.length > 0 && (
-                <>
-                  <TouchableOpacity style={styles.tagNavBtn} onPress={() => jumpToTag(-1)} hitSlop={6}>
-                    <Text style={styles.tagNavBtnText}>◄ Tag</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.tagNavBtn} onPress={() => jumpToTag(1)} hitSlop={6}>
-                    <Text style={styles.tagNavBtnText}>Tag ►</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
+            </ScrollView>
 
+            {/* ZONE 2 — tag step-through. FIXED width, flexShrink 0. These used to be the
+                last children of the transport row, which overflowed on a normal-width
+                iPhone; Start/End (rendered after) then painted over them. Same jumpToTag
+                handlers as before — placement only. */}
+            {!isWatch && existingClips.length > 0 && (
+              <View style={styles.tagNavZone}>
+                <TouchableOpacity style={styles.tagNavBtn} onPress={() => jumpToTag(-1)} hitSlop={6}>
+                  <Text style={styles.tagNavBtnText}>◄ Tag</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.tagNavBtn} onPress={() => jumpToTag(1)} hitSlop={6}>
+                  <Text style={styles.tagNavBtnText}>Tag ►</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* ZONE 3 — Start / End. FIXED width, flexShrink 0. */}
             {!isWatch && (
             <View style={styles.markGroup}>
               <TouchableOpacity
@@ -1669,6 +1703,14 @@ const styles = StyleSheet.create({
   },
   saveBtnDisabled: { opacity: 0.5 },
   saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  // Phone upper-right action region — + Group and Save clip in ONE row so they
+  // share a single container instead of two overlays that can collide.
+  topActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
+  },
 
 
   tagRegion: {
@@ -1723,16 +1765,28 @@ const styles = StyleSheet.create({
     // 8pt vertical breathing room between the F.2 scrub bar and the controls row.
     gap: 8,
   },
+  // Three zones, left to right: transport (flexes + scrolls), tag step-through
+  // (fixed), Start/End (fixed). Only the first zone may give up width, so Start/End
+  // can never cover ◄Tag / Tag►.
   controlsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     height: 56,
+    gap: 8,
   },
-  leftGroup: {
+  transportZone: { flex: 1 },
+  transportZoneContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    paddingRight: 8,
+  },
+  tagNavZone: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
   },
   timeText: {
     color: '#fff',
@@ -1765,7 +1819,9 @@ const styles = StyleSheet.create({
 
   markGroup: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   sideStrip: {
     position: 'absolute',
