@@ -868,12 +868,21 @@ export default function TaggingStudioWeb() {
     return (
       <GestureHandlerRootView style={styles.mApp}>
         <Animated.View style={[{ position: 'absolute', top: 0, left: 0, width: winW, height: winH }, isPhoneFrame && zoomStyle]} pointerEvents="none">
-          <VideoView player={player} style={{ width: winW, height: winH }} nativeControls={false} contentFit="contain" />
+          {/* playsInline is what stops mobile Safari from yanking the video into its own
+              fullscreen player on play() — which looked exactly like the tagger hiding
+              itself. expo-video forwards this straight to the <video> element and has no
+              default. Phone-frame only; tablet browsers keep their current behaviour. */}
+          <VideoView player={player} playsInline={isPhoneFrame} style={{ width: winW, height: winH }} nativeControls={false} contentFit="contain" />
         </Animated.View>
         {!videoReady ? <View style={styles.mLoad}><ActivityIndicator color="#fff" size="large" /></View> : null}
 
-        {/* Tap anywhere on the video to hide the tagging chrome; tap again to bring it
-            back. Phone-browser only. */}
+        {/* CONTROL INTERACTION != VIDEO-SURFACE INTERACTION. This is the ONLY thing that
+            hides the chrome, and the rule is structural, not a runtime target check: the
+            element has no children, and every control (top bar, board, rail, bottom rail)
+            renders AFTER it and therefore paints above it. A tap on Play, a chip or the
+            scrubber lands on that control and bubbles to its own ancestors — it can never
+            reach a preceding sibling. Do not give this element children, and do not move
+            it after the chrome. Phone-browser only. */}
         {isPhoneFrame && !mChromeHidden ? (
           <Pressable style={styles.mTapLayer} onPress={() => setMChromeHidden(true)} />
         ) : null}

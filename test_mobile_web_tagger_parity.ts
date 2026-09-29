@@ -126,5 +126,41 @@ ok('the web clips query does NOT request clip_tags.id', !/clip_tags\s*\(\s*id\b/
 ok('the phone scrubber draws saved-clip markers', /styles\.mMarker/.test(PHONE),
   'Markers are how you see that clips loaded at all -- their absence was the native tell.');
 
+console.log('\n=== I. CONTROL INTERACTION != VIDEO-SURFACE INTERACTION ===');
+// Runtime bug 2026-09-29: pressing Play appeared to hide the whole tagger. It was NOT
+// propagation -- mobile Safari hands a <video> without the playsinline attribute to its
+// own fullscreen player on play(), covering the page. Both halves are guarded here: the
+// attribute, and the structural rule that made propagation impossible in the first place.
+ok('the phone video sets playsInline (mobile Safari cannot take the screen on play)',
+  /<VideoView player=\{player\} playsInline=\{isPhoneFrame\}/.test(PHONE),
+  'Without it, play() opens the native fullscreen player and the tagger vanishes behind it.');
+
+// The chrome-toggle surface must own its interaction STRUCTURALLY: no children (so no
+// interactive descendant can ever be the event target) and rendered BEFORE every chrome
+// container (so controls paint above it and their events bubble to their own ancestors,
+// never to a preceding sibling).
+// Self-closing check: read from the opening tag to the first `/>`, and require that the
+// span contains no nested element. (A simple [^>]* regex trips over the `=>` in onPress.)
+const tapOpen = PHONE.indexOf('<Pressable style={styles.mTapLayer}');
+const tapClose = tapOpen >= 0 ? PHONE.indexOf('/>', tapOpen) : -1;
+const tapDecl = tapOpen >= 0 && tapClose > tapOpen ? PHONE.slice(tapOpen + 1, tapClose) : '';
+ok('the chrome-toggle surface is self-closing (it can have no interactive descendant)',
+  tapDecl.length > 0 && !tapDecl.includes('<') && !PHONE.slice(tapOpen, tapClose).includes('</Pressable>'),
+  'Giving this element children would let a control tap become a surface tap.');
+const iTap = PHONE.indexOf('styles.mTapLayer');
+for (const container of ['styles.mTop', 'styles.mBoard', 'styles.mRail', 'styles.mBottom']) {
+  const i = PHONE.indexOf(container);
+  ok(`${container} renders AFTER the chrome-toggle surface (paints above it)`,
+    i > 0 && iTap > 0 && i > iTap);
+}
+// No control may call the chrome toggle. Everything from the top bar onward is chrome.
+const CHROME = PHONE.slice(PHONE.indexOf('styles.mTop'));
+ok('no tagger control calls the chrome-toggle path', !CHROME.includes('setMChromeHidden'),
+  'Play, the transport, chips, the rail, Save and + Group must never hide the tagger.');
+ok('chrome is hidden from exactly one place, and restored from exactly one place',
+  (PHONE.match(/setMChromeHidden\(true\)/g) || []).length === 1
+  && (WEB.match(/runOnJS\(setMChromeHidden\)\(false\)/g) || []).length === 1);
+ok('togglePlay only touches the player', /const togglePlay = useCallback\(\(\) => \{ try \{ isPlaying \? player\.pause\(\) : player\.play\(\); \} catch \{\} \}/.test(WEB));
+
 console.log(`\n=== ${fail === 0 ? 'ALL PARITY GUARDS PASS' : 'PARITY BROKEN'} — ${pass} passed, ${fail} failed ===`);
 process.exit(fail === 0 ? 0 : 1);
