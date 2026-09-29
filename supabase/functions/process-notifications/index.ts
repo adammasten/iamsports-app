@@ -300,7 +300,53 @@ async function dispatchSms(): Promise<number> {
   return claimed.length;
 }
 
-Deno.serve(async () => {
+// ── CRON AUTHENTICATION ──────────────────────────────────────────────────────
+// WHY THIS EXISTS. This function ran verify_jwt=false with NO gate at all — the
+// handler did not even read the request — so any caller on the internet could trigger
+// privileged work: service-role writes over notification_outbox and
+// schedule_notifications, outbound HTTP to Expo and web-push, and (once TWILIO_* is
+// configured) the SMS sender. Confirmed before the fix: an anonymous POST returned
+// 200 {"expanded":0,"dispatched":0,"sms":0}.
+//
+// It was never a data leak — the response is only counts, and it cannot create
+// notifications, bypass quiet hours, send before send_after, or duplicate rows
+// (expansion upserts on dedupe_key; both dispatchers claim with an atomic
+// update ... where status='queued'). It was an unauthenticated trigger of privileged
+// work and a cost-amplification vector.
+//
+// verify_jwt STAYS false: the only legitimate caller is pg_cron, which has no Supabase
+// user session. Authentication is instead a dedicated high-entropy secret held in
+// Vault — the same model purge-deleted uses. pg_cron reads it inline and sends
+// `Authorization: Bearer <secret>`; this function reads the expected value through
+// get_process_notifications_secret(), a SECURITY DEFINER RPC granted only to
+// service_role. One source of truth, so rotation is a single UPDATE and the two sides
+// cannot drift.
+//
+// FAILS CLOSED: if the gate secret cannot be read, the request is refused (500) rather
+// than processed. Never logs the secret or the supplied token.
+
+// Constant-time comparison, so a near-miss reveals nothing through timing.
+function timingSafeEqual(a: string, b: string): boolean {
+  const ab = new TextEncoder().encode(a);
+  const bb = new TextEncoder().encode(b);
+  let diff = ab.length ^ bb.length;
+  const n = Math.max(ab.length, bb.length);
+  for (let i = 0; i < n; i++) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
+  return diff === 0;
+}
+
+Deno.serve(async (req) => {
+  // Gate on the narrow cron secret (from Vault), not the service-role key.
+  const { data: expected, error: secretErr } = await svc.rpc("get_process_notifications_secret");
+  if (secretErr || !expected) {
+    console.error("[auth] refusing: process-notifications gate secret unavailable");
+    return new Response("Gate secret unavailable", { status: 500 });
+  }
+  if (!timingSafeEqual(req.headers.get("Authorization") ?? "", `Bearer ${expected}`)) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  // ===== AUTHENTICATED — original behavior below is unchanged. =====
   const expanded = await expand();
   const dispatched = await dispatchPush();
   const sms = await dispatchSms();
