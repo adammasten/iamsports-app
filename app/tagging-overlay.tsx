@@ -21,7 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import { goBackOrHome } from '@/lib/nav';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
@@ -163,9 +163,89 @@ export default function TaggingOverlayScreen() {
   const chromeOpacity = useSharedValue(1);
   const animatedChromeStyle = useAnimatedStyle(() => ({ opacity: chromeOpacity.value }));
 
+  // ── Inspect zoom (phone, chrome hidden) ────────────────────────────────────
+  // A VIEW-ONLY transform on the video layer so a coach can pinch in on a player,
+  // an alignment or off-ball action on a small screen. It touches nothing but the
+  // on-screen transform: no source video, crop, clip, timestamp, export, highlight
+  // or upload is affected, and nothing about it is persisted. Only live while the
+  // tag chrome is hidden, so it can never compete with chips, the scrubber, the
+  // right rail or Start/End — those are all inside the chrome layer, which is
+  // pointerEvents:'none' exactly when this layer is mounted.
+  const ZOOM_MAX = 4;
+  const zoomScale = useSharedValue(1);
+  const zoomSavedScale = useSharedValue(1);
+  const zoomX = useSharedValue(0);
+  const zoomY = useSharedValue(0);
+  const zoomSavedX = useSharedValue(0);
+  const zoomSavedY = useSharedValue(0);
+  const zoomAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: zoomX.value },
+      { translateY: zoomY.value },
+      { scale: zoomScale.value },
+    ],
+  }));
+
   useEffect(() => {
     chromeOpacity.value = withTiming(controlsVisible ? 1 : 0, { duration: 200 });
-  }, [controlsVisible, chromeOpacity]);
+    // Coming back to the tag board always returns the video to 1x / centered, so the
+    // board is never laid over a shifted frame.
+    if (controlsVisible) {
+      zoomScale.value = withTiming(1, { duration: 180 });
+      zoomX.value = withTiming(0, { duration: 180 });
+      zoomY.value = withTiming(0, { duration: 180 });
+      zoomSavedScale.value = 1;
+      zoomSavedX.value = 0;
+      zoomSavedY.value = 0;
+    }
+  }, [controlsVisible, chromeOpacity, zoomScale, zoomX, zoomY, zoomSavedScale, zoomSavedX, zoomSavedY]);
+
+  // Pinch = zoom 1x..4x. Pan = move the zoomed frame, clamped so the video can never
+  // be dragged off screen (at 1x the clamp is 0, so a stray drag does nothing). Tap
+  // brings the tag board back. Pinch+pan run together; the tap only wins when neither
+  // activated, so it survives a pinch or a drag.
+  const zoomGesture = useMemo(() => {
+    const pinch = Gesture.Pinch()
+      .onUpdate(e => {
+        'worklet';
+        const next = Math.min(ZOOM_MAX, Math.max(1, zoomSavedScale.value * e.scale));
+        zoomScale.value = next;
+        const mx = (landW * (next - 1)) / 2;
+        const my = (landH * (next - 1)) / 2;
+        zoomX.value = Math.min(mx, Math.max(-mx, zoomX.value));
+        zoomY.value = Math.min(my, Math.max(-my, zoomY.value));
+      })
+      .onEnd(() => {
+        'worklet';
+        zoomSavedScale.value = zoomScale.value;
+        zoomSavedX.value = zoomX.value;
+        zoomSavedY.value = zoomY.value;
+      });
+    const drag = Gesture.Pan()
+      .averageTouches(true)
+      .onUpdate(e => {
+        'worklet';
+        const mx = (landW * (zoomScale.value - 1)) / 2;
+        const my = (landH * (zoomScale.value - 1)) / 2;
+        zoomX.value = Math.min(mx, Math.max(-mx, zoomSavedX.value + e.translationX));
+        zoomY.value = Math.min(my, Math.max(-my, zoomSavedY.value + e.translationY));
+      })
+      .onEnd(() => {
+        'worklet';
+        zoomSavedX.value = zoomX.value;
+        zoomSavedY.value = zoomY.value;
+      });
+    // Same job as the tap-to-hide Pressable's no-op onLongPress: claim the long press
+    // so iOS Live Text's "Copy All" popup can't fire over the video.
+    const blockLiveText = Gesture.LongPress().minDuration(350).onStart(() => {});
+    const tapBack = Gesture.Tap()
+      .maxDuration(250)
+      .onEnd((_e, success) => {
+        'worklet';
+        if (success) runOnJS(setControlsVisible)(true);
+      });
+    return Gesture.Exclusive(Gesture.Simultaneous(pinch, drag, blockLiveText), tapBack);
+  }, [landW, landH, zoomScale, zoomX, zoomY, zoomSavedScale, zoomSavedX, zoomSavedY]);
 
   // Prefer the on-device cached file at player init. If there's no cached file,
   // the player starts empty (null) and we mint a signed URL from the storage
@@ -991,14 +1071,19 @@ export default function TaggingOverlayScreen() {
 
   return (
     <GestureHandlerRootView style={[styles.container, { width: landW, height: landH }]}>
-      <VideoView
-        player={player}
-        style={StyleSheet.absoluteFillObject}
-        nativeControls={false}
-        allowsFullscreen={false}
-        allowsPictureInPicture={false}
-        contentFit="contain"
-      />
+      {/* Video sits under a view-only transform layer (see Inspect zoom above). At
+          1x the transform is the identity, so this is a no-op for every other surface
+          and for tagging itself. */}
+      <Animated.View style={[StyleSheet.absoluteFillObject, zoomAnimatedStyle]} pointerEvents="none">
+        <VideoView
+          player={player}
+          style={StyleSheet.absoluteFillObject}
+          nativeControls={false}
+          allowsFullscreen={false}
+          allowsPictureInPicture={false}
+          contentFit="contain"
+        />
+      </Animated.View>
 
       {/* Tap-to-hide layer. Single tap toggles chrome visibility. onLongPress
           is a no-op but its mere presence claims the long-press gesture,
@@ -1009,6 +1094,17 @@ export default function TaggingOverlayScreen() {
         onPress={() => setControlsVisible(v => !v)}
         onLongPress={() => {}}
       />
+
+      {/* Inspect-zoom surface — PHONE only, and only while the tag chrome is hidden.
+          Mounted above the tap-to-hide layer so it owns pinch / pan / tap for as long
+          as the video is the inspection surface, and unmounted the instant the board
+          comes back, which is why nothing here can reach a chip, the scrubber, the
+          right rail or Start/End. */}
+      {!isTablet && !controlsVisible && (
+        <GestureDetector gesture={zoomGesture}>
+          <Animated.View style={StyleSheet.absoluteFillObject} />
+        </GestureDetector>
+      )}
 
       {/* Loading overlay — hides the crossed-out icon + NaN time while the
           source is loading or mid-retry. Rendered above the tap-to-hide layer
@@ -1407,17 +1503,13 @@ export default function TaggingOverlayScreen() {
             style={[styles.controlsRow, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}
             pointerEvents="box-none"
           >
-            {/* ZONE 1 — transport. The ONLY compressible zone: a horizontal scroller
-                that takes whatever width zones 2 and 3 leave, so it can never push them
-                off-row. Nothing was removed from it (time, -5s, -1s, play, +1s, +5s,
-                speed all stay); on a narrow iPhone it simply scrolls. */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.transportZone}
-              contentContainerStyle={styles.transportZoneContent}
-            >
-              <Text style={styles.timeText}>
+            {/* ZONE 1 — transport. Takes whatever width zones 2 and 3 leave and never
+                scrolls: every control is sized so the whole rail fits one row down to a
+                notchless 4.7" landscape phone, and the timecode is the only element that
+                may give up width (it truncates rather than pushing anything off-row).
+                Nothing was removed — time, -5s, -1s, play, +1s, +5s, speed all stay. */}
+            <View style={styles.transportZone}>
+              <Text style={styles.timeText} numberOfLines={1}>
                 {formatTime(currentTime)} / {formatTime(duration)}
               </Text>
               <TouchableOpacity
@@ -1462,12 +1554,11 @@ export default function TaggingOverlayScreen() {
               >
                 <Text style={[styles.skipBtnText, speed !== 1 && styles.speedBtnOnText]}>{speedLabel(speed)}</Text>
               </TouchableOpacity>
-            </ScrollView>
+            </View>
 
-            {/* ZONE 2 — tag step-through. FIXED width, flexShrink 0. These used to be the
-                last children of the transport row, which overflowed on a normal-width
-                iPhone; Start/End (rendered after) then painted over them. Same jumpToTag
-                handlers as before — placement only. */}
+            {/* ZONE 2 — tag step-through. FIXED width, flexShrink 0, never inside a
+                scroller: these are primary review controls and hold a permanent slot
+                between the transport and Start/End. Same jumpToTag handlers. */}
             {!isWatch && existingClips.length > 0 && (
               <View style={styles.tagNavZone}>
                 <TouchableOpacity style={styles.tagNavBtn} onPress={() => jumpToTag(-1)} hitSlop={6}>
@@ -1775,25 +1866,27 @@ const styles = StyleSheet.create({
     height: 56,
     gap: 8,
   },
-  transportZone: { flex: 1 },
-  transportZoneContent: {
+  transportZone: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingRight: 8,
+    gap: 8,
   },
   tagNavZone: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     flexShrink: 0,
   },
+  // The one elastic element in the bottom rail: on a narrow phone with an
+  // hour-long game it truncates instead of pushing ◄Tag/Tag► or Start/End off-row.
   timeText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
     minWidth: 44,
+    flexShrink: 1,
   },
   playBtn: {
     width: 36,
@@ -1806,7 +1899,7 @@ const styles = StyleSheet.create({
   playBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
   skipBtn: {
-    width: 40,
+    width: 34,
     height: 36,
     borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.15)',
@@ -1831,17 +1924,17 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   markBtn: {
-    paddingHorizontal: 10,
+    paddingHorizontal: 6,
     height: 36,
     borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
     // Fixed width so the button never resizes when the time appears/changes.
-    width: 96,
+    width: 84,
   },
   markStartBtn: { backgroundColor: '#1D9E75' },
   markEndBtn: { backgroundColor: '#D85A30' },
-  markBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  markBtnText: { color: '#fff', fontSize: 11, fontWeight: '600' },
 
   highlightBtn: {
     width: 36,
@@ -1950,7 +2043,8 @@ const styles = StyleSheet.create({
   },
   // ◄Tag / Tag► step-through buttons in the controls row (tagging mode).
   tagNavBtn: {
-    paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6,
+    width: 52, height: 32, borderRadius: 6,
+    alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(139,124,246,0.28)', borderWidth: 1, borderColor: 'rgba(139,124,246,0.7)',
   },
   tagNavBtnText: { color: '#fff', fontSize: 11, fontWeight: '700' },
