@@ -215,5 +215,57 @@ ok('the phone rail applies them (outlined off, filled on)',
   && /mRailGoodTxt: \{ color: '#2ecc71' \}/.test(WEB));
 ok('TAG hide/show stays neutral', !/mRailBtn: \{[^}]*#f5c518/s.test(WEB));
 
+console.log('\n=== N. HIDDEN-INSPECTION RESTORE ===');
+// The restore tap used maxDuration(250) against RNGH's own 500ms default. The handler
+// arms its fail timer at touch start, so a deliberate 300-400ms press died silently --
+// and unlike native there is no Pressable beneath the gesture surface to catch it.
+const tapDur = WEB.match(/Gesture\.Tap\(\)\.maxDuration\((\d+)\)/);
+ok('tapBack allows at least RNGH\'s default 500ms press',
+  !!tapDur && Number(tapDur[1]) >= 500,
+  'Below the library default the tap fails on its own timer with nothing to fall back on.');
+ok('composition is unchanged: Exclusive(Simultaneous(pinch, drag), tapBack)',
+  /return Gesture\.Exclusive\(Gesture\.Simultaneous\(pinch, drag\), tapBack\);/.test(WEB),
+  'tapBack must stay LAST so a finger lifted after a pan or pinch can never restore.');
+// Only the tap gesture and the chip may restore; nothing else, and neither pan nor pinch.
+// Slice each handler exactly, so the window cannot bleed into tapBack's declaration.
+const iPinch = WEB.indexOf('const pinch = Gesture.Pinch()');
+const iDrag = WEB.indexOf('const drag = Gesture.Pan()');
+const iTapBack = WEB.indexOf('const tapBack = Gesture.Tap()');
+const PINCH_BODY = iPinch >= 0 && iDrag > iPinch ? WEB.slice(iPinch, iDrag) : '';
+const DRAG_BODY = iDrag >= 0 && iTapBack > iDrag ? WEB.slice(iDrag, iTapBack) : '';
+ok('pan completion cannot restore the chrome',
+  DRAG_BODY.length > 0 && !DRAG_BODY.includes('setMChromeHidden'),
+  'Lifting a finger after panning must never bring the tagger back.');
+ok('pinch completion cannot restore the chrome',
+  PINCH_BODY.length > 0 && !PINCH_BODY.includes('setMChromeHidden'));
+ok('no auto-restore when zoom returns to 1x', !/zScale\.value === 1[\s\S]{0,120}setMChromeHidden/.test(WEB));
+ok('exactly two restore paths exist (the tap gesture and the chip)',
+  (WEB.match(/setMChromeHidden\)\(false\)/g) || []).length
+  + (WEB.match(/setMChromeHidden\(false\)/g) || []).length === 2);
+
+// The chip: present only while hidden, above the gesture surface, outside the transform.
+const iGesture = PHONE.indexOf('<GestureDetector gesture={inspectGesture}>');
+const iRestore = PHONE.indexOf('styles.mRestore');
+ok('a restore chip exists while the chrome is hidden',
+  /isPhoneFrame && mChromeHidden \? \([\s\S]{0,260}styles\.mRestore/.test(PHONE));
+ok('the restore chip renders AFTER the GestureDetector (so it takes the touch)',
+  iGesture > 0 && iRestore > 0 && iRestore > iGesture,
+  'Rendered before it, the inspection surface would swallow the chip.');
+ok('the restore chip is absent while the chrome is visible',
+  !/!mChromeHidden \? \([\s\S]{0,200}styles\.mRestore/.test(PHONE));
+ok('the restore chip only sets the chrome back',
+  /<Pressable onPress=\{\(\) => setMChromeHidden\(false\)\} hitSlop=\{12\} style=\{styles\.mRestore\}>/.test(PHONE));
+ok('the restore chip is chrome, not part of the transformed video layer',
+  iRestore > PHONE.indexOf('zoomStyle'),
+  'Inside the zoom transform it could be panned off screen.');
+ok('the chip reaches ~44pt of touch target', /hitSlop=\{12\}/.test(PHONE) && /mRestore: \{[\s\S]{0,200}height: 30/.test(WEB));
+
+console.log('\n=== O. INSPECTION CLAMPS USE ONE VIEWPORT ===');
+ok('the pan clamp uses the measured visual viewport, like the pinch clamp',
+  /const mx = \(phoneW \* \(zScale\.value - 1\)\) \/ 2, my = \(phoneH \* \(zScale\.value - 1\)\) \/ 2;/.test(WEB),
+  'A layout-viewport clamp lets the pan travel further than the pinch clamp intends.');
+ok('no inspection clamp still reads the layout viewport',
+  !/\(winW \* \(z(Scale|oomScale)\.value - 1\)\)/.test(WEB) && !/\(winW \* \(next - 1\)\)/.test(WEB));
+
 console.log(`\n=== ${fail === 0 ? 'ALL PARITY GUARDS PASS' : 'PARITY BROKEN'} — ${pass} passed, ${fail} failed ===`);
 process.exit(fail === 0 ? 0 : 1);

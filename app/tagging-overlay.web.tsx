@@ -742,12 +742,12 @@ export default function TaggingStudioWeb() {
       .averageTouches(true)
       .onUpdate(e => {
         'worklet';
-        const mx = (winW * (zScale.value - 1)) / 2, my = (winH * (zScale.value - 1)) / 2;
+        const mx = (phoneW * (zScale.value - 1)) / 2, my = (phoneH * (zScale.value - 1)) / 2;
         zX.value = Math.min(mx, Math.max(-mx, zSavedX.value + e.translationX));
         zY.value = Math.min(my, Math.max(-my, zSavedY.value + e.translationY));
       })
       .onEnd(() => { 'worklet'; zSavedX.value = zX.value; zSavedY.value = zY.value; });
-    const tapBack = Gesture.Tap().maxDuration(250)
+    const tapBack = Gesture.Tap().maxDuration(500)
       .onEnd((_e, success) => { 'worklet'; if (success) runOnJS(setMChromeHidden)(false); });
     return Gesture.Exclusive(Gesture.Simultaneous(pinch, drag), tapBack);
   }, [phoneW, phoneH, zScale, zX, zY, zSavedScale, zSavedX, zSavedY]);
@@ -960,6 +960,17 @@ export default function TaggingStudioWeb() {
           <GestureDetector gesture={inspectGesture}>
             <Animated.View style={[styles.mTapLayer, { touchAction: 'none' } as any]} />
           </GestureDetector>
+        ) : null}
+        {/* Guaranteed way back. A clean tap anywhere also restores, but that tap can be
+            lost to gesture arbitration or to a press the tap handler judges too long, and
+            on web there is no Pressable beneath to catch it (native keeps one). This chip
+            is chrome, not video: it renders AFTER the gesture surface so it takes the
+            touch directly, and it lives outside the transformed layer so no amount of
+            zoom or pan can carry it off screen. It only sets the chrome back. */}
+        {isPhoneFrame && mChromeHidden ? (
+          <Pressable onPress={() => setMChromeHidden(false)} hitSlop={12} style={styles.mRestore}>
+            <Text style={styles.mRestoreTxt}>TAG ↑</Text>
+          </Pressable>
         ) : null}
 
         {/* top bar: back + quarters/OFF-DEF-SP/DN-DIST-DR + the upper-right action region */}
@@ -1841,6 +1852,16 @@ const styles = StyleSheet.create({
   mRailPoeTxt: { color: '#DC3545' },
   mRailGood: { borderColor: '#1e8449' },
   mRailGoodTxt: { color: '#2ecc71' },
+  // Inspection-mode restore chip: ~44pt effective target with hitSlop 12, subtle enough
+  // not to compete with the frame being inspected.
+  mRestore: {
+    position: 'absolute', top: 8, right: 8,
+    paddingHorizontal: 10, height: 30, borderRadius: 8,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  mRestoreTxt: { color: 'rgba(255,255,255,0.92)', fontSize: 12, fontWeight: '800' },
   // Surfaced play failure — never a silent false "playing" state.
   mPlayBlocked: { position: 'absolute', top: -16, left: 10, color: '#ffb4b4', fontSize: 11, fontWeight: '700' },
 
