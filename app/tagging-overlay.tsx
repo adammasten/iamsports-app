@@ -332,10 +332,22 @@ export default function TaggingOverlayScreen() {
     if (!videoId) return;
     const { data, error } = await supabase
       .from('clips')
-      .select('id, start_time, end_time, clip_tags ( id, bundle_number, tag_id, tags ( id, name, category ) )')
+      // clip_tags is a composite-key join ( clip_id, tag_id, bundle_number, stat_side )
+      // and has NO `id` column. Asking for one made PostgREST reject the WHOLE query
+      // with 42703, which the old silent `return` swallowed — so existingClips stayed
+      // empty forever and ◄Tag/Tag►, the scrub-bar clip markers and the clip pill all
+      // silently vanished on native. Never add `id` here.
+      .select('id, start_time, end_time, clip_tags ( bundle_number, tag_id, tags ( id, name, category ) )')
       .eq('video_id', videoId)
       .order('start_time');
-    if (error || !data) return;
+    // Surfaced, not swallowed: an empty tagger on a tagged video is indistinguishable
+    // from an untagged video, which is exactly how the bug above hid for three weeks.
+    if (error) {
+      console.warn('[loadExistingClips]', error.message);
+      Alert.alert('Couldn\u2019t load saved clips', error.message);
+      return;
+    }
+    if (!data) return;
     const STAMP = new Set(['special', 'period', 'possession']);
     setExistingClips(
       data.map((c: any) => {
