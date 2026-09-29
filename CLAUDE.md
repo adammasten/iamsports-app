@@ -96,6 +96,27 @@ appears to require breaking one, stop and ask — do not "improve" your way past
 
 ## LOCKED: Tagging overlay layout — all sports, all time
 
+> ### 🔒 NATIVE IPHONE TAGGER IS FORMALLY LOCKED (Adam, 2026-09-29)
+>
+> **Canonical contract: [`docs/NATIVE_IPHONE_TAGGER_UI_LOCK.md`](docs/NATIVE_IPHONE_TAGGER_UI_LOCK.md)
+> — read it before touching the phone tagger. Do not reconstruct it from here.**
+>
+> - Approved TestFlight baseline: **Build 76**
+> - Approved runtime commit: **`56da2f27b5d93f5e275e0c2e126aef153cf51c9a`**
+> - Git baseline tag: **`native-iphone-tagger-locked-build-76`**
+> - Guards: `test_native_iphone_tagger_shell_lock.ts` (`npx tsx`)
+>
+> The lock covers the **canonical native-iPhone shell across ALL sports** — the
+> `!isTablet` path of `app/tagging-overlay.tsx`. One frame, sport-specific content
+> inside it: sport config picks CONTENT, never phone shell geometry.
+>
+> Sport-specific taxonomy/content may change when explicitly authorized, but such a
+> request **does NOT implicitly authorize any change to the locked shell.** Any change
+> to a locked native-iPhone element requires Adam's explicit authorization for that
+> specific element plus the regression procedure in the lock document.
+>
+> iPad and every web surface are **NOT** covered by this lock — see its §12.
+
 Stated by Adam 2026-09-08. The tagging overlay layout (`app/tagging-overlay.web.tsx`
 and `app/tagging-overlay.tsx`) is the cross-sport standard. It is the same screen,
 same functionality, same element placement for basketball, flag football, and every
