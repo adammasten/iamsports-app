@@ -92,7 +92,8 @@ console.log('\n=== E. BOARD MODE RULE (<=5 fixed, 6+ scrolls) ===');
 ok('board mode is decided by column count, not by sport',
   /const boardFixed = isPhoneFrame && boardCols\.length <= 5;/.test(PHONE));
 ok('the fixed board shares width instead of scrolling', /mColFixed: \{ flex: 1/.test(WEB));
-ok('6+ columns still scroll horizontally', /horizontal: true, contentContainerStyle: styles\.mBoardRow/.test(PHONE));
+ok('6+ columns still scroll horizontally',
+  /horizontal: true,[\s\S]{0,200}contentContainerStyle: \[styles\.mBoardRow/.test(PHONE));
 
 console.log('\n=== F. ONE SHELL, EVERY SPORT ===');
 // A sport may pick CONTENT (the reserved DN/DIST/DR slot). It may never pick geometry.
@@ -161,6 +162,58 @@ ok('chrome is hidden from exactly one place, and restored from exactly one place
   (PHONE.match(/setMChromeHidden\(true\)/g) || []).length === 1
   && (WEB.match(/runOnJS\(setMChromeHidden\)\(false\)/g) || []).length === 1);
 ok('togglePlay only touches the player', /const togglePlay = useCallback\(\(\) => \{ try \{ isPlaying \? player\.pause\(\) : player\.play\(\); \} catch \{\} \}/.test(WEB));
+
+console.log('\n=== J. REAL VISIBLE VIEWPORT ===');
+// window.innerHeight is the LAYOUT viewport on mobile browsers and does not shrink for
+// the address bar or landscape toolbar, so sizing to it puts the board floor (and the
+// last tag in every column) under browser chrome.
+ok('the phone frame measures visualViewport', /\(window as any\)\.visualViewport/.test(WEB));
+ok('it re-measures on toolbar/zoom change',
+  /vv\.addEventListener\('resize', sync\)/.test(WEB) && /vv\.addEventListener\('scroll', sync\)/.test(WEB));
+ok('the phone app and video are sized from the visible viewport, not innerHeight',
+  /width: phoneW, height: phoneH/.test(PHONE));
+ok('phoneW/phoneH fall back to window dimensions when visualViewport is absent',
+  /const phoneW = isPhoneFrame && vvSize \? vvSize\.w : winW;/.test(WEB));
+ok('pinch clamps use the visible viewport too', !/\(winW \* \(next - 1\)\)/.test(WEB));
+
+console.log('\n=== K. TAG COLUMNS CAN REACH THEIR LAST TAG ===');
+ok('the board floor is derived from the MEASURED bottom bar, not a magic number',
+  /isPhoneFrame && \{ bottom: mBottomH \+ 4 \}/.test(PHONE) && /onLayout=\{e => \{ const h = Math\.round\(e\.nativeEvent\.layout\.height\)/.test(PHONE));
+ok('each column scroller gets a real constrained height (flex, not a guessed maxHeight)',
+  /mColScroll: \{ flex: 1/.test(WEB));
+ok('the column keeps its own overscroll (the page must not rubber-band instead)',
+  /overscrollBehavior: 'contain'/.test(WEB));
+ok('the last chip clears the board floor', /mColScrollContent: \{ paddingBottom: \d+ \}/.test(WEB));
+ok('columns stretch to the bounded board height',
+  /mColFixedPhone: \{[^}]*alignSelf: 'stretch'/.test(WEB) && /mColScrollPhone: \{[^}]*alignSelf: 'stretch'/.test(WEB));
+ok('the phone app clips instead of letting the document scroll',
+  /isPhoneFrame && \{ width: phoneW, height: phoneH, overflow: 'hidden' \}/.test(PHONE));
+
+console.log('\n=== L. PLAYBACK STATE IS OBSERVED, NEVER ASSUMED ===');
+// expo-video's web player discards the video.play() promise and sets playing = true
+// regardless, so the transport can claim playback that WebKit refused or stalled.
+ok('no non-gesture autoplay on a phone', /!didAutoPlay\.current && !isPhoneFrame/.test(WEB),
+  'iOS refuses a play() no user gesture initiated, and the refusal is unobservable.');
+ok('the phone transport drives the real <video> element',
+  /const togglePlayPhone = useCallback/.test(WEB) && /isPhoneFrame \? togglePlayPhone : togglePlay/.test(PHONE));
+ok('the play() promise rejection is caught, logged and surfaced',
+  /\.catch\(\(err: any\) => \{[\s\S]{0,200}console\.warn\('\[tagger\] play\(\) rejected:'/.test(WEB)
+  && /setPlayBlocked\(/.test(WEB));
+ok('the phone icon reflects the element, not the optimistic flag',
+  /\(isPhoneFrame \? !domPaused : isPlaying\) \? '❚❚' : '▶'/.test(PHONE));
+ok('a blocked play is shown to the user, not swallowed', /styles\.mPlayBlocked/.test(PHONE));
+
+console.log('\n=== M. RIGHT RAIL MATCHES THE LOCKED NATIVE SEMANTICS ===');
+const NATIVE = readFileSync('app/tagging-overlay.tsx', 'utf8');
+for (const [what, colour] of [['Highlight', '#f5c518'], ['POE', '#DC3545'], ['Good Play border', '#1e8449'], ['Good Play glyph', '#2ecc71']] as [string, string][]) {
+  ok(`${what} ${colour} is the colour native uses`, NATIVE.includes(colour),
+    'Rail colours are copied from the locked native rail, never invented.');
+}
+ok('the phone rail applies them (outlined off, filled on)',
+  /mRailStar: \{ borderColor: '#f5c518' \}/.test(WEB)
+  && /mRailPoeTxt: \{ color: '#DC3545' \}/.test(WEB)
+  && /mRailGoodTxt: \{ color: '#2ecc71' \}/.test(WEB));
+ok('TAG hide/show stays neutral', !/mRailBtn: \{[^}]*#f5c518/s.test(WEB));
 
 console.log(`\n=== ${fail === 0 ? 'ALL PARITY GUARDS PASS' : 'PARITY BROKEN'} — ${pass} passed, ${fail} failed ===`);
 process.exit(fail === 0 ? 0 : 1);

@@ -162,6 +162,29 @@ export default function TaggingStudioWeb() {
   const isPhoneFrame = isPhone && Math.min(winW, winH) <= 500;
   // Chrome hidden -> the video is the inspection surface (native lock section 10).
   const [mChromeHidden, setMChromeHidden] = useState(false);
+  // TRUE VISIBLE VIEWPORT. window.innerHeight is the LAYOUT viewport: on mobile Safari
+  // and Chrome-iOS it does not shrink for the address bar or the landscape toolbar, so
+  // sizing to it pushes the bottom of the tagger (and the bottom of every tag column)
+  // underneath browser chrome. visualViewport reports what is actually on screen and
+  // fires on every toolbar/keyboard/zoom change. Phone frame only; everything else keeps
+  // useWindowDimensions. (iPhone WebKit -- which Chrome for iOS also uses -- has no
+  // element Fullscreen API, so this is the only way to reclaim that space; see the
+  // fullscreen note in the mobile-web report.)
+  const [vvSize, setVvSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const vv: any = typeof window !== 'undefined' ? (window as any).visualViewport : null;
+    if (!vv) return;
+    const sync = () => setVvSize({ w: Math.round(vv.width), h: Math.round(vv.height) });
+    sync();
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+    return () => { vv.removeEventListener('resize', sync); vv.removeEventListener('scroll', sync); };
+  }, []);
+  const phoneW = isPhoneFrame && vvSize ? vvSize.w : winW;
+  const phoneH = isPhoneFrame && vvSize ? vvSize.h : winH;
+  // Measured height of the bottom bar, so the tag board's floor is derived from the real
+  // chrome rather than a hard-coded guess.
+  const [mBottomH, setMBottomH] = useState(78);
   const [mBoardFS, setMBoardFS] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false); // brief "Saved ✓" after each clip commits
@@ -200,14 +223,18 @@ export default function TaggingStudioWeb() {
       retryRef.current = 0; setVideoReady(true); setLoadError(false);
       // WEB: start playback on first ready (a manual play right after replace()
       // races the load and aborts — same fix game-player uses). Coach pauses with Space.
-      if (!didAutoPlay.current) { didAutoPlay.current = true; try { player.play(); } catch {} }
+      // NOT on a phone: iOS/WebKit refuses a play() that no user gesture initiated, and
+      // expo-video's web player ignores the rejected promise while setting playing = true,
+      // so the transport ends up showing "playing" over a video parked at 0:00. On a phone
+      // the first play must come from the user's own tap (see togglePlayPhone).
+      if (!didAutoPlay.current && !isPhoneFrame) { didAutoPlay.current = true; try { player.play(); } catch {} }
       return;
     }
     if (status?.status === 'error') {
       if (retryRef.current < 3) { retryRef.current += 1; const id = setTimeout(() => loadSignedSource(), 2000); return () => clearTimeout(id); }
       setLoadError(true);
     }
-  }, [status, loadSignedSource]);
+  }, [status, loadSignedSource, isPhoneFrame, player]);
   const retryNow = useCallback(() => { retryRef.current = 0; setLoadError(false); setVideoReady(false); loadSignedSource(); }, [loadSignedSource]);
 
   // ── team + tags + clips ──
@@ -385,6 +412,45 @@ export default function TaggingStudioWeb() {
 
   // ── player controls ──
   const togglePlay = useCallback(() => { try { isPlaying ? player.pause() : player.play(); } catch {} }, [player, isPlaying]);
+  // ── PHONE: drive the real <video> element, and believe only what it reports. ──
+  // expo-video's web player calls video.play() and DISCARDS the promise, then sets
+  // playing = true unconditionally (VideoPlayer.web.js play() and replace()). So when
+  // WebKit refuses or stalls the play, nothing in the JS layer knows and the transport
+  // shows a pause icon over a video that never moved. Talking to the element gives us the
+  // promise, so a refusal is surfaced instead of faked, and el.paused becomes the single
+  // source of truth for the icon. expo-video listens to the element's own play/pause
+  // events, so driving it directly keeps the player's state in sync rather than bypassing it.
+  const videoHostRef = useRef<any>(null);
+  const [domPaused, setDomPaused] = useState(true);
+  const [playBlocked, setPlayBlocked] = useState<string | null>(null);
+  const videoEl = useCallback((): any => {
+    try { return videoHostRef.current?.querySelector?.('video') ?? null; } catch { return null; }
+  }, []);
+  // Resample on every tick and on every reported playback change, so the icon tracks
+  // reality even when the stall or the resume happened outside our control.
+  useEffect(() => {
+    const el = videoEl();
+    if (el) setDomPaused(!!el.paused);
+  }, [currentTime, isPlaying, videoReady, videoEl]);
+  const togglePlayPhone = useCallback(() => {
+    const el = videoEl();
+    if (!el) { togglePlay(); return; }
+    if (el.paused) {
+      setPlayBlocked(null);
+      let p: any;
+      try { p = el.play(); } catch (e: any) { p = Promise.reject(e); }
+      if (p && typeof p.then === 'function') {
+        p.then(() => setDomPaused(false)).catch((err: any) => {
+          console.warn('[tagger] play() rejected:', err?.name, err?.message);
+          setDomPaused(true);
+          setPlayBlocked(err?.name === 'NotAllowedError' ? 'Tap play again to start playback' : (err?.message || 'Playback failed'));
+        });
+      } else setDomPaused(false);
+    } else {
+      el.pause();
+      setDomPaused(true);
+    }
+  }, [videoEl, togglePlay]);
   const cycleSpeed = useCallback(() => {
     setSpeed(s => PLAYBACK_SPEEDS[(PLAYBACK_SPEEDS.indexOf(s) + 1) % PLAYBACK_SPEEDS.length]);
   }, []);
@@ -667,7 +733,7 @@ export default function TaggingStudioWeb() {
         'worklet';
         const next = Math.min(ZOOM_MAX, Math.max(1, zSavedScale.value * e.scale));
         zScale.value = next;
-        const mx = (winW * (next - 1)) / 2, my = (winH * (next - 1)) / 2;
+        const mx = (phoneW * (next - 1)) / 2, my = (phoneH * (next - 1)) / 2;
         zX.value = Math.min(mx, Math.max(-mx, zX.value));
         zY.value = Math.min(my, Math.max(-my, zY.value));
       })
@@ -684,7 +750,7 @@ export default function TaggingStudioWeb() {
     const tapBack = Gesture.Tap().maxDuration(250)
       .onEnd((_e, success) => { 'worklet'; if (success) runOnJS(setMChromeHidden)(false); });
     return Gesture.Exclusive(Gesture.Simultaneous(pinch, drag), tapBack);
-  }, [winW, winH, zScale, zX, zY, zSavedScale, zSavedX, zSavedY]);
+  }, [phoneW, phoneH, zScale, zX, zY, zSavedScale, zSavedX, zSavedY]);
 
   // Resizable split: drag the handle to size the board. Up = smaller board / bigger video.
   // Clamp so the video area stays ≥200px and the board ≥120px (reserve ≈340 for video+controls).
@@ -866,13 +932,13 @@ export default function TaggingStudioWeb() {
       ? phaseColsWithPlayers!
       : flatColsWithPlayers;
     return (
-      <GestureHandlerRootView style={styles.mApp}>
-        <Animated.View style={[{ position: 'absolute', top: 0, left: 0, width: winW, height: winH }, isPhoneFrame && zoomStyle]} pointerEvents="none">
+      <GestureHandlerRootView style={[styles.mApp, isPhoneFrame && { width: phoneW, height: phoneH, overflow: 'hidden' }]}>
+        <Animated.View ref={videoHostRef} style={[{ position: 'absolute', top: 0, left: 0, width: phoneW, height: phoneH }, isPhoneFrame && zoomStyle]} pointerEvents="none">
           {/* playsInline is what stops mobile Safari from yanking the video into its own
               fullscreen player on play() — which looked exactly like the tagger hiding
               itself. expo-video forwards this straight to the <video> element and has no
               default. Phone-frame only; tablet browsers keep their current behaviour. */}
-          <VideoView player={player} playsInline={isPhoneFrame} style={{ width: winW, height: winH }} nativeControls={false} contentFit="contain" />
+          <VideoView player={player} playsInline={isPhoneFrame} style={{ width: phoneW, height: phoneH }} nativeControls={false} contentFit="contain" />
         </Animated.View>
         {!videoReady ? <View style={styles.mLoad}><ActivityIndicator color="#fff" size="large" /></View> : null}
 
@@ -947,15 +1013,23 @@ export default function TaggingStudioWeb() {
         const boardFixed = isPhoneFrame && boardCols.length <= 5;
         const Wrap: any = boardFixed ? View : ScrollView;
         const wrapProps = boardFixed
-          ? { style: styles.mBoardRowFixed }
-          : { horizontal: true, contentContainerStyle: styles.mBoardRow };
+          ? { style: [styles.mBoardRowFixed, isPhoneFrame && styles.mBoardRowPhone] }
+          : {
+              horizontal: true,
+              style: isPhoneFrame ? styles.mBoardScrollPhone : undefined,
+              contentContainerStyle: [styles.mBoardRow, isPhoneFrame && styles.mBoardRowStretch],
+            };
         return (
-        <View style={[styles.mBoard, mBoardFS && styles.mBoardFS]}>
+        <View style={[styles.mBoard, mBoardFS && styles.mBoardFS, isPhoneFrame && { bottom: mBottomH + 4 }]}>
           <Wrap {...wrapProps}>
             {boardCols.map(c => (
-              <View key={c.key} style={boardFixed ? styles.mColFixed : styles.mCol}>
+              <View key={c.key} style={[boardFixed ? styles.mColFixed : styles.mCol, isPhoneFrame && (boardFixed ? styles.mColFixedPhone : styles.mColScrollPhone)]}>
                 <Text style={[styles.mColHead, { color: CAT_COLOR[c.key] ?? C.dim }]}>{c.label.toUpperCase()}</Text>
-                <ScrollView style={{ maxHeight: mBoardFS ? Math.round(winH * 0.62) : 118 }} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                  style={isPhoneFrame ? styles.mColScroll : { maxHeight: mBoardFS ? Math.round(winH * 0.62) : 118 }}
+                  contentContainerStyle={isPhoneFrame ? styles.mColScrollContent : undefined}
+                  showsVerticalScrollIndicator={false}
+                >
                   <View style={styles.mChipsWrap}>{(tags[c.key] ?? []).map(t => tagButton(t, c.key))}</View>
                 </ScrollView>
               </View>
@@ -970,15 +1044,21 @@ export default function TaggingStudioWeb() {
         <View style={styles.mRail}>
           <Pressable onPress={() => setMBoardFS(f => !f)} style={styles.mRailBtn}><Text style={styles.mRailTxt}>TAG{mBoardFS ? '↓' : '↑'}</Text></Pressable>
           {!isPhoneFrame && !editingId ? <Pressable onPress={addGroup} disabled={!canAddGroup} style={[styles.mRailBtn, !canAddGroup && { opacity: 0.4 }]}><Text style={styles.mRailTxt}>+Grp{groupCount > 0 ? ` ${groupCount}` : ''}</Text></Pressable> : null}
-          <Pressable onPress={() => setIsStar(s => !s)} style={[styles.mRailBtn, isStar && { backgroundColor: C.star }]}><Text style={[styles.mRailTxt, isStar && { color: '#1a1030' }]}>★</Text></Pressable>
-          <Pressable onPress={() => setIsPoe(p => !p)} style={[styles.mRailBtn, isPoe && { backgroundColor: '#dc3545' }]}><Text style={[styles.mRailTxt, isPoe && { color: '#fff' }]}>!</Text></Pressable>
-          {special.goodPlay ? <Pressable onPress={() => setIsGoodPlay(g => !g)} style={[styles.mRailBtn, isGoodPlay && { backgroundColor: '#1e8449' }]}><Text style={[styles.mRailTxt, isGoodPlay && { color: '#fff' }]}>✓</Text></Pressable> : null}
+          {/* Semantic colours copied from the locked native rail: Highlight #f5c518,
+              POE #DC3545, Good Play border #1e8449 / glyph #2ecc71. Inactive is the
+              outlined form, active fills. TAG stays neutral. Phone frame only. */}
+          <Pressable onPress={() => setIsStar(s => !s)} style={[styles.mRailBtn, isPhoneFrame && styles.mRailStar, isStar && { backgroundColor: C.star, borderColor: C.star }]}><Text style={[styles.mRailTxt, isPhoneFrame && styles.mRailStarTxt, isStar && { color: '#1a1030' }]}>★</Text></Pressable>
+          <Pressable onPress={() => setIsPoe(p => !p)} style={[styles.mRailBtn, isPhoneFrame && styles.mRailPoe, isPoe && { backgroundColor: '#DC3545', borderColor: '#DC3545' }]}><Text style={[styles.mRailTxt, isPhoneFrame && styles.mRailPoeTxt, isPoe && { color: '#fff' }]}>!</Text></Pressable>
+          {special.goodPlay ? <Pressable onPress={() => setIsGoodPlay(g => !g)} style={[styles.mRailBtn, isPhoneFrame && styles.mRailGood, isGoodPlay && { backgroundColor: '#1e8449', borderColor: '#1e8449' }]}><Text style={[styles.mRailTxt, isPhoneFrame && styles.mRailGoodTxt, isGoodPlay && { color: '#fff' }]}>✓</Text></Pressable> : null}
         </View>
         )}
 
         {/* bottom: scrubber + transport + mark */}
         {isPhoneFrame && mChromeHidden ? null : (
-        <View style={styles.mBottom}>
+        <View style={styles.mBottom} onLayout={e => { const h = Math.round(e.nativeEvent.layout.height); if (h > 0 && h !== mBottomH) setMBottomH(h); }}>
+          {isPhoneFrame && playBlocked ? (
+            <Text style={styles.mPlayBlocked} numberOfLines={1}>{playBlocked}</Text>
+          ) : null}
           <GestureDetector gesture={scrub}>
             <View style={styles.scrubTouch} onLayout={e => setBarWidth(e.nativeEvent.layout.width)}>
               <View style={styles.scrubTrack}>
@@ -1013,7 +1093,7 @@ export default function TaggingStudioWeb() {
             <Text style={[styles.mTime, isPhoneFrame && styles.mTimeTight]} numberOfLines={isPhoneFrame ? 1 : undefined}>{fmt(currentTime)} / {fmt(duration)}</Text>
             <Pressable onPress={() => seekBy(-5)} style={[styles.mTBtn, isPhoneFrame && styles.mTBtnTight]}><Text style={styles.mTTxt}>−5s</Text></Pressable>
             {isPhoneFrame ? <Pressable onPress={() => seekBy(-1)} style={[styles.mTBtn, styles.mTBtnTight]}><Text style={styles.mTTxt}>−1s</Text></Pressable> : null}
-            <Pressable onPress={togglePlay} style={[styles.mTBtn, isPhoneFrame && styles.mTBtnTight, styles.mPlay]}><Text style={styles.mTTxt}>{isPlaying ? '❚❚' : '▶'}</Text></Pressable>
+            <Pressable onPress={isPhoneFrame ? togglePlayPhone : togglePlay} style={[styles.mTBtn, isPhoneFrame && styles.mTBtnTight, styles.mPlay]}><Text style={styles.mTTxt}>{(isPhoneFrame ? !domPaused : isPlaying) ? '❚❚' : '▶'}</Text></Pressable>
             {isPhoneFrame ? <Pressable onPress={() => seekBy(1)} style={[styles.mTBtn, styles.mTBtnTight]}><Text style={styles.mTTxt}>+1s</Text></Pressable> : null}
             <Pressable onPress={() => seekBy(5)} style={[styles.mTBtn, isPhoneFrame && styles.mTBtnTight]}><Text style={styles.mTTxt}>+5s</Text></Pressable>
             <Pressable onPress={cycleSpeed} style={[styles.mTBtn, isPhoneFrame && styles.mTBtnTight, speed !== 1 && styles.tSpeedOn]}><Text style={[styles.mTTxt, speed !== 1 && styles.tSpeedOnTxt]}>{speed}×</Text></Pressable>
@@ -1740,6 +1820,29 @@ const styles = StyleSheet.create({
   mTagNavTight: { minWidth: 48, paddingHorizontal: 4, flexShrink: 0, borderColor: 'rgba(139,124,246,0.7)', backgroundColor: 'rgba(139,124,246,0.28)' },
   mMarkTight: { paddingHorizontal: 6, minWidth: 74, flexShrink: 0 },
   mMarkTxtTight: { fontSize: 11 },
+  // Board owns a bounded region between the top shell and the bottom bar, and each
+  // column scrolls INSIDE it. `flex: 1` all the way down gives the inner scroller a real
+  // constrained height (a maxHeight guessed from window.innerHeight was both wrong on a
+  // browser with chrome and unrelated to the box it lives in), and overscrollBehavior
+  // keeps the rubber-band in the column instead of handing it to the page.
+  mBoardRowPhone: { flex: 1, alignItems: 'stretch' },
+  mBoardScrollPhone: { flex: 1 },
+  mBoardRowStretch: { alignItems: 'stretch' },
+  mColFixedPhone: { flex: 1, minWidth: 0, alignSelf: 'stretch' },
+  mColScrollPhone: { width: 108, alignSelf: 'stretch' },
+  mColScroll: { flex: 1, overscrollBehavior: 'contain' } as any,
+  // Bottom padding so the final chip clears the board floor and stays put after the
+  // gesture ends, instead of springing back under the scrubber.
+  mColScrollContent: { paddingBottom: 16 },
+  // Right rail, locked native semantics (outlined when off, filled when on).
+  mRailStar: { borderColor: '#f5c518' },
+  mRailStarTxt: { color: '#f5c518' },
+  mRailPoe: { borderColor: '#DC3545' },
+  mRailPoeTxt: { color: '#DC3545' },
+  mRailGood: { borderColor: '#1e8449' },
+  mRailGoodTxt: { color: '#2ecc71' },
+  // Surfaced play failure — never a silent false "playing" state.
+  mPlayBlocked: { position: 'absolute', top: -16, left: 10, color: '#ffb4b4', fontSize: 11, fontWeight: '700' },
 
   clipsPanel: { width: 300, backgroundColor: C.panel, borderLeftWidth: 1, borderLeftColor: C.line },
   clipsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: C.line },
