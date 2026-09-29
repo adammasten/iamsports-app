@@ -1,3 +1,10 @@
+// NATIVE IPHONE TAGGER UI LOCK (Adam, 2026-09-29 — TestFlight build 76, commit 56da2f2).
+// The phone path (!isTablet) is the CANONICAL SHELL FOR EVERY SPORT: sport config picks
+// CONTENT, never phone shell geometry. Contract + regression checklist:
+// docs/NATIVE_IPHONE_TAGGER_UI_LOCK.md — guarded by test_native_iphone_tagger_shell_lock.ts.
+// Do not change native-phone shell geometry or the locked interactions without explicit
+// product-owner approval for the specific element.
+//
 // V2 overlay tagging screen — Phases A-G + F.2 scrub + F.3 translucency + F.4 tall tag region.
 // Two tag modes: compact (default — tag region above the bottom controls row)
 // and fullscreen (tag region grows up under the top bar). Everything else
