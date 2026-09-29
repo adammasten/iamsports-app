@@ -185,6 +185,12 @@ export default function TaggingStudioWeb() {
   // Measured height of the bottom bar, so the tag board's floor is derived from the real
   // chrome rather than a hard-coded guess.
   const [mBottomH, setMBottomH] = useState(78);
+  // Arms the restore chip. react-native-web's PressResponder fires onPress from a bare
+  // DOM `click` with NO preceding pointerdown -- its own source says so -- and iOS
+  // dispatches a compatibility click after touchend, hit-tested against whatever occupies
+  // those coordinates by then. Without this, a ghost click landing on a freshly mounted
+  // chip could restore the chrome on its own. A real press sets this in onPressIn first.
+  const restoreArmed = useRef(false);
   const [mBoardFS, setMBoardFS] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false); // brief "Saved ✓" after each clip commits
@@ -968,7 +974,18 @@ export default function TaggingStudioWeb() {
             touch directly, and it lives outside the transformed layer so no amount of
             zoom or pan can carry it off screen. It only sets the chrome back. */}
         {isPhoneFrame && mChromeHidden ? (
-          <Pressable onPress={() => setMChromeHidden(false)} hitSlop={12} style={styles.mRestore}>
+          <Pressable
+            onPressIn={() => { restoreArmed.current = true; }}
+            onPress={() => {
+              // A bare ghost click arrives with no onPressIn, so it finds this unarmed
+              // and is ignored. Consume the arm either way so it can never carry over.
+              const armed = restoreArmed.current;
+              restoreArmed.current = false;
+              if (armed) setMChromeHidden(false);
+            }}
+            hitSlop={12}
+            style={styles.mRestore}
+          >
             <Text style={styles.mRestoreTxt}>TAG ↑</Text>
           </Pressable>
         ) : null}
@@ -1053,7 +1070,18 @@ export default function TaggingStudioWeb() {
             to the top-bar action region (locked native frame); tablet browsers keep it here. */}
         {isPhoneFrame && mChromeHidden ? null : (
         <View style={styles.mRail}>
-          <Pressable onPress={() => setMBoardFS(f => !f)} style={styles.mRailBtn}><Text style={styles.mRailTxt}>TAG{mBoardFS ? '↓' : '↑'}</Text></Pressable>
+          {/* PHONE: mChromeHidden is the one authoritative visible/hidden state, so TAG
+              enters the SAME inspection mode the free-space tap does. mBoardFS is bypassed
+              here -- the board floor is derived from the measured bottom bar now, so its
+              compact/fullscreen distinction no longer changes anything on a phone. The
+              label is a fixed ↓ because this rail only exists while the chrome is visible.
+              TABLET/DESKTOP: untouched, still the mBoardFS board-size toggle. */}
+          <Pressable
+            onPress={() => (isPhoneFrame ? setMChromeHidden(true) : setMBoardFS(f => !f))}
+            style={styles.mRailBtn}
+          >
+            <Text style={styles.mRailTxt}>TAG{isPhoneFrame ? '↓' : (mBoardFS ? '↓' : '↑')}</Text>
+          </Pressable>
           {!isPhoneFrame && !editingId ? <Pressable onPress={addGroup} disabled={!canAddGroup} style={[styles.mRailBtn, !canAddGroup && { opacity: 0.4 }]}><Text style={styles.mRailTxt}>+Grp{groupCount > 0 ? ` ${groupCount}` : ''}</Text></Pressable> : null}
           {/* Semantic colours copied from the locked native rail: Highlight #f5c518,
               POE #DC3545, Good Play border #1e8449 / glyph #2ecc71. Inactive is the

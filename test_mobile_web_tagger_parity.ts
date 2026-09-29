@@ -156,11 +156,18 @@ for (const container of ['styles.mTop', 'styles.mBoard', 'styles.mRail', 'styles
 }
 // No control may call the chrome toggle. Everything from the top bar onward is chrome.
 const CHROME = PHONE.slice(PHONE.indexOf('styles.mTop'));
-ok('no tagger control calls the chrome-toggle path', !CHROME.includes('setMChromeHidden'),
-  'Play, the transport, chips, the rail, Save and + Group must never hide the tagger.');
-ok('chrome is hidden from exactly one place, and restored from exactly one place',
-  (PHONE.match(/setMChromeHidden\(true\)/g) || []).length === 1
-  && (WEB.match(/runOnJS\(setMChromeHidden\)\(false\)/g) || []).length === 1);
+// The rail TAG is a deliberate hide control (approved 2026-09-29). Nothing ELSE inside
+// the chrome may toggle the mode: not the transport, the board, the top bar or Save.
+const TOPBAR = PHONE.slice(PHONE.indexOf('styles.mTop'), PHONE.indexOf('styles.mBoard'));
+const BOARD_TO_RAIL = PHONE.slice(PHONE.indexOf('styles.mBoard'), PHONE.indexOf('styles.mRail'));
+ok('the top bar never calls the chrome-toggle path', !TOPBAR.includes('setMChromeHidden'),
+  'Save, + Group, periods, phases and DN/DIST/DR must never hide the tagger.');
+ok('the tag board never calls the chrome-toggle path', !BOARD_TO_RAIL.includes('setMChromeHidden'),
+  'Tapping a chip must never hide the tagger.');
+ok('the bottom rail never calls the chrome-toggle path', !BOTTOM.includes('setMChromeHidden'),
+  'Play, the transport, Prev/Next and Start/End must never hide the tagger.');
+ok('the ONLY chrome-toggle inside the chrome is the rail TAG',
+  (CHROME.match(/setMChromeHidden\(true\)/g) || []).length === 1);
 ok('togglePlay only touches the player', /const togglePlay = useCallback\(\(\) => \{ try \{ isPlaying \? player\.pause\(\) : player\.play\(\); \} catch \{\} \}/.test(WEB));
 
 console.log('\n=== J. REAL VISIBLE VIEWPORT ===');
@@ -247,14 +254,15 @@ ok('exactly two restore paths exist (the tap gesture and the chip)',
 const iGesture = PHONE.indexOf('<GestureDetector gesture={inspectGesture}>');
 const iRestore = PHONE.indexOf('styles.mRestore');
 ok('a restore chip exists while the chrome is hidden',
-  /isPhoneFrame && mChromeHidden \? \([\s\S]{0,260}styles\.mRestore/.test(PHONE));
+  /isPhoneFrame && mChromeHidden \? \([\s\S]{0,700}styles\.mRestore/.test(PHONE));
 ok('the restore chip renders AFTER the GestureDetector (so it takes the touch)',
   iGesture > 0 && iRestore > 0 && iRestore > iGesture,
   'Rendered before it, the inspection surface would swallow the chip.');
 ok('the restore chip is absent while the chrome is visible',
   !/!mChromeHidden \? \([\s\S]{0,200}styles\.mRestore/.test(PHONE));
-ok('the restore chip only sets the chrome back',
-  /<Pressable onPress=\{\(\) => setMChromeHidden\(false\)\} hitSlop=\{12\} style=\{styles\.mRestore\}>/.test(PHONE));
+ok('the restore chip only sets the chrome back (and only when armed)',
+  /if \(armed\) setMChromeHidden\(false\);/.test(PHONE)
+  && /hitSlop=\{12\}/.test(PHONE) && /style=\{styles\.mRestore\}/.test(PHONE));
 ok('the restore chip is chrome, not part of the transformed video layer',
   iRestore > PHONE.indexOf('zoomStyle'),
   'Inside the zoom transform it could be panned off screen.');
@@ -266,6 +274,57 @@ ok('the pan clamp uses the measured visual viewport, like the pinch clamp',
   'A layout-viewport clamp lets the pan travel further than the pinch clamp intends.');
 ok('no inspection clamp still reads the layout viewport',
   !/\(winW \* \(z(Scale|oomScale)\.value - 1\)\)/.test(WEB) && !/\(winW \* \(next - 1\)\)/.test(WEB));
+
+console.log('\n=== P. TAG IS ONE TWO-STATE TOGGLE ON PHONE ===');
+// mChromeHidden is the authoritative visible/hidden state on a phone. mBoardFS is the
+// legacy board-size toggle and is inert here (the board floor comes from the measured
+// bottom bar), so the rail TAG must not drive it.
+ok('the rail TAG enters inspection on a phone',
+  /onPress=\{\(\) => \(isPhoneFrame \? setMChromeHidden\(true\) : setMBoardFS\(f => !f\)\)\}/.test(PHONE),
+  'TAG must reach the SAME state the free-space tap sets.');
+ok('the old unguarded rail TAG (straight to mBoardFS) is gone from the phone branch',
+  !/<Pressable onPress=\{\(\) => setMBoardFS\(f => !f\)\} style=\{styles\.mRailBtn\}>/.test(PHONE),
+  'On a phone mBoardFS is inert, so TAG must drive mChromeHidden instead.');
+ok('the rail TAG label is a fixed ↓ on a phone (it only renders while chrome is visible)',
+  /TAG\{isPhoneFrame \? '↓' : \(mBoardFS \? '↓' : '↑'\)\}/.test(PHONE));
+ok('exactly two phone hide paths exist: free-space tap and rail TAG',
+  (PHONE.match(/setMChromeHidden\(true\)/g) || []).length === 2);
+ok('the free-space tap remains one of them',
+  /<Pressable style=\{styles\.mTapLayer\} onPress=\{\(\) => setMChromeHidden\(true\)\} \/>/.test(PHONE));
+ok('TAG ↑ still restores', /if \(armed\) setMChromeHidden\(false\);/.test(PHONE));
+// The rail and the chip are mutually exclusive: the rail is null while hidden, the chip
+// renders only while hidden. They can never be on screen together.
+ok('rail and restore chip cannot render simultaneously',
+  /\{isPhoneFrame && mChromeHidden \? null : \(\s*<View style=\{styles\.mRail\}>/.test(PHONE)
+  && /\{isPhoneFrame && mChromeHidden \? \(\s*<Pressable\s+onPressIn/.test(PHONE));
+ok('mBoardFS is NOT deleted -- tablet and desktop still use it',
+  /mBoardFS && styles\.mBoardFS/.test(WEB)
+  && /maxHeight: mBoardFS \? Math\.round\(winH \* 0\.62\) : 118/.test(WEB)
+  && (WEB.match(/setMBoardFS\(f => !f\)/g) || []).length === 2);
+
+console.log('\n=== Q. GHOST-CLICK CANNOT RESTORE THE CHROME ===');
+// react-native-web's PressResponder fires onPress from a bare DOM click with no
+// preceding pointerdown (see its own source comment), and iOS dispatches a
+// compatibility click after touchend against whatever now sits at those coordinates.
+ok('the restore chip is armed by onPressIn', /onPressIn=\{\(\) => \{ restoreArmed\.current = true; \}\}/.test(PHONE));
+ok('an unarmed press cannot restore', /const armed = restoreArmed\.current;[\s\S]{0,120}if \(armed\) setMChromeHidden\(false\);/.test(PHONE));
+ok('the arm is consumed on every press, armed or not',
+  /const armed = restoreArmed\.current;\s*\n\s*restoreArmed\.current = false;/.test(PHONE));
+
+// Geometry: TAG ↓ (rail) hides, TAG ↑ (chip) restores. If the chip's hitSlop-expanded
+// box ever reached the rail TAG, the ghost click from pressing TAG ↓ would land on the
+// chip and instantly undo it -- TAG ↓ would look broken again for a new reason.
+const styleNum = (key: string, prop: string) => {
+  const m = WEB.match(new RegExp(`${key}: \\{[^}]*\\b${prop}: (\\d+)`, 's'));
+  return m ? Number(m[1]) : NaN;
+};
+const chipTop = styleNum('mRestore', 'top'), chipH = styleNum('mRestore', 'height');
+const railTop = styleNum('mRail', 'top'), railBtnH = styleNum('mRailBtn', 'height');
+const chipSlop = 12;
+const chipBottom = chipTop + chipH + chipSlop;   // hitSlop-expanded
+ok(`restore chip (ends y=${chipBottom}) does not reach rail TAG (starts y=${railTop})`,
+  Number.isFinite(chipBottom) && Number.isFinite(railTop) && chipBottom < railTop,
+  'Overlap would let the ghost click from TAG ↓ immediately re-restore the chrome.');
 
 console.log(`\n=== ${fail === 0 ? 'ALL PARITY GUARDS PASS' : 'PARITY BROKEN'} — ${pass} passed, ${fail} failed ===`);
 process.exit(fail === 0 ? 0 : 1);
