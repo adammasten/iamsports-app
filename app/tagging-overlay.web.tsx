@@ -28,7 +28,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 const C = {
   bg: '#0b0c10', panel: '#14161c', panel2: '#1b1e26', line: '#262a34',
@@ -154,6 +154,14 @@ export default function TaggingStudioWeb() {
   // the resizable split layout.
   const coarsePointer = (() => { try { return window.matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
   const isPhone = coarsePointer && Math.min(winW, winH) <= 820;
+  // PHONE-BROWSER PARITY GUARD. `isPhone` above is the touch-immersive branch, and its
+  // 820 threshold also catches tablet browsers (iPad mini portrait 744, iPad 10.9" 820).
+  // Tablet web is reviewed and locked separately, so the native-parity frame is gated to
+  // an actual phone viewport and tablet browsers keep the pre-parity rendering untouched.
+  // When tablet web gets its own review these two should collapse into one.
+  const isPhoneFrame = isPhone && Math.min(winW, winH) <= 500;
+  // Chrome hidden -> the video is the inspection surface (native lock section 10).
+  const [mChromeHidden, setMChromeHidden] = useState(false);
   const [mBoardFS, setMBoardFS] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false); // brief "Saved ✓" after each clip commits
@@ -631,6 +639,53 @@ export default function TaggingStudioWeb() {
     .onBegin(e => runOnJS(seekToX)(e.x))
     .onUpdate(e => runOnJS(seekToX)(e.x));
 
+  // ── Inspect zoom (phone browser, chrome hidden) — mirrors the locked native
+  //    behaviour. VIEW ONLY: a CSS transform on the video layer. No source video,
+  //    crop, clip, timestamp, tag, export, highlight, upload or metadata is touched,
+  //    and nothing is persisted. Bounded 1x..4x, pan clamped so the frame can never
+  //    be dragged away, and restoring the chrome animates back to 1x centred.
+  const ZOOM_MAX = 4;
+  const zScale = useSharedValue(1);
+  const zSavedScale = useSharedValue(1);
+  const zX = useSharedValue(0);
+  const zY = useSharedValue(0);
+  const zSavedX = useSharedValue(0);
+  const zSavedY = useSharedValue(0);
+  const zoomStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: zX.value }, { translateY: zY.value }, { scale: zScale.value }],
+  }));
+  useEffect(() => {
+    if (mChromeHidden) return;
+    zScale.value = withTiming(1, { duration: 180 });
+    zX.value = withTiming(0, { duration: 180 });
+    zY.value = withTiming(0, { duration: 180 });
+    zSavedScale.value = 1; zSavedX.value = 0; zSavedY.value = 0;
+  }, [mChromeHidden, zScale, zX, zY, zSavedScale, zSavedX, zSavedY]);
+  const inspectGesture = useMemo(() => {
+    const pinch = Gesture.Pinch()
+      .onUpdate(e => {
+        'worklet';
+        const next = Math.min(ZOOM_MAX, Math.max(1, zSavedScale.value * e.scale));
+        zScale.value = next;
+        const mx = (winW * (next - 1)) / 2, my = (winH * (next - 1)) / 2;
+        zX.value = Math.min(mx, Math.max(-mx, zX.value));
+        zY.value = Math.min(my, Math.max(-my, zY.value));
+      })
+      .onEnd(() => { 'worklet'; zSavedScale.value = zScale.value; zSavedX.value = zX.value; zSavedY.value = zY.value; });
+    const drag = Gesture.Pan()
+      .averageTouches(true)
+      .onUpdate(e => {
+        'worklet';
+        const mx = (winW * (zScale.value - 1)) / 2, my = (winH * (zScale.value - 1)) / 2;
+        zX.value = Math.min(mx, Math.max(-mx, zSavedX.value + e.translationX));
+        zY.value = Math.min(my, Math.max(-my, zSavedY.value + e.translationY));
+      })
+      .onEnd(() => { 'worklet'; zSavedX.value = zX.value; zSavedY.value = zY.value; });
+    const tapBack = Gesture.Tap().maxDuration(250)
+      .onEnd((_e, success) => { 'worklet'; if (success) runOnJS(setMChromeHidden)(false); });
+    return Gesture.Exclusive(Gesture.Simultaneous(pinch, drag), tapBack);
+  }, [winW, winH, zScale, zX, zY, zSavedScale, zSavedX, zSavedY]);
+
   // Resizable split: drag the handle to size the board. Up = smaller board / bigger video.
   // Clamp so the video area stays ≥200px and the board ≥120px (reserve ≈340 for video+controls).
   const beginBoardDrag = () => { boardUserSetRef.current = true; boardDragStartRef.current = boardLatestRef.current; };
@@ -812,10 +867,28 @@ export default function TaggingStudioWeb() {
       : flatColsWithPlayers;
     return (
       <GestureHandlerRootView style={styles.mApp}>
-        <VideoView player={player} style={{ position: 'absolute', top: 0, left: 0, width: winW, height: winH }} nativeControls={false} contentFit="contain" />
+        <Animated.View style={[{ position: 'absolute', top: 0, left: 0, width: winW, height: winH }, isPhoneFrame && zoomStyle]} pointerEvents="none">
+          <VideoView player={player} style={{ width: winW, height: winH }} nativeControls={false} contentFit="contain" />
+        </Animated.View>
         {!videoReady ? <View style={styles.mLoad}><ActivityIndicator color="#fff" size="large" /></View> : null}
 
-        {/* top bar: back + quarters/OFF-DEF-SP/DN-DIST-DR + save (the standard arrangement) */}
+        {/* Tap anywhere on the video to hide the tagging chrome; tap again to bring it
+            back. Phone-browser only. */}
+        {isPhoneFrame && !mChromeHidden ? (
+          <Pressable style={styles.mTapLayer} onPress={() => setMChromeHidden(true)} />
+        ) : null}
+        {/* Inspection surface — mounted ONLY while the chrome is hidden, so pinch and pan
+            can never reach a tag chip, the rail, the scrubber or the transport. touchAction
+            'none' is scoped to THIS element so browser/page accessibility zoom is untouched
+            everywhere else on the site. */}
+        {isPhoneFrame && mChromeHidden ? (
+          <GestureDetector gesture={inspectGesture}>
+            <Animated.View style={[styles.mTapLayer, { touchAction: 'none' } as any]} />
+          </GestureDetector>
+        ) : null}
+
+        {/* top bar: back + quarters/OFF-DEF-SP/DN-DIST-DR + the upper-right action region */}
+        {isPhoneFrame && mChromeHidden ? null : (
         <View style={styles.mTop}>
           <Pressable onPress={goBackOrHome} hitSlop={10}><Text style={styles.mBack}>‹</Text></Pressable>
           <View style={styles.mClusters}>
@@ -844,60 +917,110 @@ export default function TaggingStudioWeb() {
               </Fragment>
             ) : null}
           </View>
-          <Pressable onPress={commitClip} disabled={!canSave} style={[styles.mSave, !canSave && { opacity: 0.4 }]}><Text style={styles.mSaveTxt}>{saving ? '…' : editingId ? 'Save' : groupCount > 0 ? `Save (${groupCount})` : 'Save'}</Text></Pressable>
-          {isFS ? <Pressable onPress={toggleFS} hitSlop={8} style={styles.mExitFS}><Text style={styles.mExitFSTxt}>⤡</Text></Pressable> : null}
+          {/* ONE upper-right action region: + Group then Save clip, Save far-right — the
+              same arrangement the locked native frame uses, so they cannot overlap. On a
+              tablet browser + Group stays in the right rail (pre-parity behaviour). */}
+          <View style={styles.mActions}>
+            {isPhoneFrame && !editingId ? (
+              <Pressable onPress={addGroup} disabled={!canAddGroup} style={[styles.mGroup, !canAddGroup && { opacity: 0.4 }]}>
+                <Text style={styles.mGroupTxt}>+ Group{groupCount > 0 ? ` ${groupCount}` : ''}</Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={commitClip} disabled={!canSave} style={[styles.mSave, !canSave && { opacity: 0.4 }]}><Text style={styles.mSaveTxt}>{saving ? '…' : editingId ? 'Save' : groupCount > 0 ? `${isPhoneFrame ? 'Save clip' : 'Save'} (${groupCount})` : isPhoneFrame ? 'Save clip' : 'Save'}</Text></Pressable>
+            {isFS ? <Pressable onPress={toggleFS} hitSlop={8} style={styles.mExitFS}><Text style={styles.mExitFSTxt}>⤡</Text></Pressable> : null}
+          </View>
         </View>
+        )}
 
-        {/* tag board overlay (horizontal scroll of columns; TAG toggle grows it) */}
+        {/* Tag board. Locked board-mode rule: <=5 columns render fixed (no horizontal
+            scroll), 6+ scroll horizontally rather than being crushed. TAG toggle grows it. */}
+        {isPhoneFrame && mChromeHidden ? null : (() => {
+        const boardFixed = isPhoneFrame && boardCols.length <= 5;
+        const Wrap: any = boardFixed ? View : ScrollView;
+        const wrapProps = boardFixed
+          ? { style: styles.mBoardRowFixed }
+          : { horizontal: true, contentContainerStyle: styles.mBoardRow };
+        return (
         <View style={[styles.mBoard, mBoardFS && styles.mBoardFS]}>
-          <ScrollView horizontal contentContainerStyle={styles.mBoardRow}>
+          <Wrap {...wrapProps}>
             {boardCols.map(c => (
-              <View key={c.key} style={styles.mCol}>
+              <View key={c.key} style={boardFixed ? styles.mColFixed : styles.mCol}>
                 <Text style={[styles.mColHead, { color: CAT_COLOR[c.key] ?? C.dim }]}>{c.label.toUpperCase()}</Text>
                 <ScrollView style={{ maxHeight: mBoardFS ? Math.round(winH * 0.62) : 118 }} showsVerticalScrollIndicator={false}>
                   <View style={styles.mChipsWrap}>{(tags[c.key] ?? []).map(t => tagButton(t, c.key))}</View>
                 </ScrollView>
               </View>
             ))}
-          </ScrollView>
+          </Wrap>
         </View>
+        ); })()}
 
-        {/* right rail: TAG size toggle + group + star/POE/GoodPlay */}
+        {/* right rail: TAG size toggle + star/POE/GoodPlay. On a phone + Group has moved
+            to the top-bar action region (locked native frame); tablet browsers keep it here. */}
+        {isPhoneFrame && mChromeHidden ? null : (
         <View style={styles.mRail}>
           <Pressable onPress={() => setMBoardFS(f => !f)} style={styles.mRailBtn}><Text style={styles.mRailTxt}>TAG{mBoardFS ? '↓' : '↑'}</Text></Pressable>
-          {!editingId ? <Pressable onPress={addGroup} disabled={!canAddGroup} style={[styles.mRailBtn, !canAddGroup && { opacity: 0.4 }]}><Text style={styles.mRailTxt}>+Grp{groupCount > 0 ? ` ${groupCount}` : ''}</Text></Pressable> : null}
+          {!isPhoneFrame && !editingId ? <Pressable onPress={addGroup} disabled={!canAddGroup} style={[styles.mRailBtn, !canAddGroup && { opacity: 0.4 }]}><Text style={styles.mRailTxt}>+Grp{groupCount > 0 ? ` ${groupCount}` : ''}</Text></Pressable> : null}
           <Pressable onPress={() => setIsStar(s => !s)} style={[styles.mRailBtn, isStar && { backgroundColor: C.star }]}><Text style={[styles.mRailTxt, isStar && { color: '#1a1030' }]}>★</Text></Pressable>
           <Pressable onPress={() => setIsPoe(p => !p)} style={[styles.mRailBtn, isPoe && { backgroundColor: '#dc3545' }]}><Text style={[styles.mRailTxt, isPoe && { color: '#fff' }]}>!</Text></Pressable>
           {special.goodPlay ? <Pressable onPress={() => setIsGoodPlay(g => !g)} style={[styles.mRailBtn, isGoodPlay && { backgroundColor: '#1e8449' }]}><Text style={[styles.mRailTxt, isGoodPlay && { color: '#fff' }]}>✓</Text></Pressable> : null}
         </View>
+        )}
 
         {/* bottom: scrubber + transport + mark */}
+        {isPhoneFrame && mChromeHidden ? null : (
         <View style={styles.mBottom}>
           <GestureDetector gesture={scrub}>
             <View style={styles.scrubTouch} onLayout={e => setBarWidth(e.nativeEvent.layout.width)}>
               <View style={styles.scrubTrack}>
                 {inPct != null && outPct != null ? <View style={[styles.inOutBand, { left: `${inPct}%`, width: `${Math.max(0, outPct - inPct)}%` }]} /> : null}
                 <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
+                {/* Saved-clip markers, as on the locked native scrubber: you can see where
+                    the tagged plays are, and their absence is the first sign clips failed
+                    to load at all. Visual only — the pan gesture still owns the bar. */}
+                {isPhoneFrame && duration > 0 ? clips.map(c => {
+                  const l = (c.start / duration) * 100;
+                  const w = Math.max(0.4, ((c.end - c.start) / duration) * 100);
+                  const active = currentTime >= c.start && currentTime <= c.end;
+                  return (
+                    <View
+                      key={c.id}
+                      pointerEvents="none"
+                      style={[styles.mMarker, { left: `${Math.min(l, 100 - w)}%`, width: `${w}%` },
+                        (c.starred || c.poe) && { backgroundColor: C.star },
+                        active && { opacity: 1 }]}
+                    />
+                  );
+                }) : null}
               </View>
             </View>
           </GestureDetector>
-          <View style={styles.mTransport}>
-            <Text style={styles.mTime}>{fmt(currentTime)} / {fmt(duration)}</Text>
-            <Pressable onPress={() => seekBy(-5)} style={styles.mTBtn}><Text style={styles.mTTxt}>−5s</Text></Pressable>
-            <Pressable onPress={togglePlay} style={[styles.mTBtn, styles.mPlay]}><Text style={styles.mTTxt}>{isPlaying ? '❚❚' : '▶'}</Text></Pressable>
-            <Pressable onPress={() => seekBy(5)} style={styles.mTBtn}><Text style={styles.mTTxt}>+5s</Text></Pressable>
-            <Pressable onPress={cycleSpeed} style={[styles.mTBtn, speed !== 1 && styles.tSpeedOn]}><Text style={[styles.mTTxt, speed !== 1 && styles.tSpeedOnTxt]}>{speed}×</Text></Pressable>
+          {/* Locked native arrangement, three zones:
+              TIME -5s -1s play +1s +5s speed | [space] | ◄ Tag  Tag ► | Start  End
+              Only the timecode may give up width, so Prev/Next and Start/End can never be
+              pushed off-row and never need a scroller to discover. Tablet browsers keep
+              the pre-parity row unchanged. */}
+          <View style={[styles.mTransport, isPhoneFrame && styles.mTransportTight]}>
+            <Text style={[styles.mTime, isPhoneFrame && styles.mTimeTight]} numberOfLines={isPhoneFrame ? 1 : undefined}>{fmt(currentTime)} / {fmt(duration)}</Text>
+            <Pressable onPress={() => seekBy(-5)} style={[styles.mTBtn, isPhoneFrame && styles.mTBtnTight]}><Text style={styles.mTTxt}>−5s</Text></Pressable>
+            {isPhoneFrame ? <Pressable onPress={() => seekBy(-1)} style={[styles.mTBtn, styles.mTBtnTight]}><Text style={styles.mTTxt}>−1s</Text></Pressable> : null}
+            <Pressable onPress={togglePlay} style={[styles.mTBtn, isPhoneFrame && styles.mTBtnTight, styles.mPlay]}><Text style={styles.mTTxt}>{isPlaying ? '❚❚' : '▶'}</Text></Pressable>
+            {isPhoneFrame ? <Pressable onPress={() => seekBy(1)} style={[styles.mTBtn, styles.mTBtnTight]}><Text style={styles.mTTxt}>+1s</Text></Pressable> : null}
+            <Pressable onPress={() => seekBy(5)} style={[styles.mTBtn, isPhoneFrame && styles.mTBtnTight]}><Text style={styles.mTTxt}>+5s</Text></Pressable>
+            <Pressable onPress={cycleSpeed} style={[styles.mTBtn, isPhoneFrame && styles.mTBtnTight, speed !== 1 && styles.tSpeedOn]}><Text style={[styles.mTTxt, speed !== 1 && styles.tSpeedOnTxt]}>{speed}×</Text></Pressable>
+            {isPhoneFrame ? <View style={{ flex: 1 }} /> : null}
             {clips.length > 0 ? (
               <Fragment>
-                <Pressable onPress={() => jumpToTag(-1)} style={styles.mTBtn}><Text style={styles.mTTxt}>◄</Text></Pressable>
-                <Pressable onPress={() => jumpToTag(1)} style={styles.mTBtn}><Text style={styles.mTTxt}>►</Text></Pressable>
+                <Pressable onPress={() => jumpToTag(-1)} style={[styles.mTBtn, isPhoneFrame && styles.mTagNavTight]}><Text style={styles.mTTxt}>{isPhoneFrame ? '◄ Tag' : '◄'}</Text></Pressable>
+                <Pressable onPress={() => jumpToTag(1)} style={[styles.mTBtn, isPhoneFrame && styles.mTagNavTight]}><Text style={styles.mTTxt}>{isPhoneFrame ? 'Tag ►' : '►'}</Text></Pressable>
               </Fragment>
             ) : null}
-            <View style={{ flex: 1 }} />
-            <Pressable onPress={markInNow} style={[styles.mMark, { borderColor: C.made }, markIn != null && { backgroundColor: C.made }]}><Text style={styles.mMarkTxt}>{markIn != null ? `In ${fmt(markIn)}` : 'In'}</Text></Pressable>
-            <Pressable onPress={markOutNow} style={[styles.mMark, { borderColor: C.poe }, markOut != null && { backgroundColor: C.poe }]}><Text style={styles.mMarkTxt}>{markOut != null ? `Out ${fmt(markOut)}` : 'Out'}</Text></Pressable>
+            {isPhoneFrame ? null : <View style={{ flex: 1 }} />}
+            <Pressable onPress={markInNow} style={[styles.mMark, isPhoneFrame && styles.mMarkTight, { borderColor: C.made }, markIn != null && { backgroundColor: C.made }]}><Text style={[styles.mMarkTxt, isPhoneFrame && styles.mMarkTxtTight]} numberOfLines={isPhoneFrame ? 1 : undefined}>{markIn != null ? `${isPhoneFrame ? 'Start' : 'In'} ${fmt(markIn)}` : isPhoneFrame ? 'Start' : 'In'}</Text></Pressable>
+            <Pressable onPress={markOutNow} style={[styles.mMark, isPhoneFrame && styles.mMarkTight, { borderColor: C.poe }, markOut != null && { backgroundColor: C.poe }]}><Text style={[styles.mMarkTxt, isPhoneFrame && styles.mMarkTxtTight]} numberOfLines={isPhoneFrame ? 1 : undefined}>{markOut != null ? `${isPhoneFrame ? 'End' : 'Out'} ${fmt(markOut)}` : isPhoneFrame ? 'End' : 'Out'}</Text></Pressable>
           </View>
         </View>
+        )}
       </GestureHandlerRootView>
     );
   }
@@ -1586,6 +1709,28 @@ const styles = StyleSheet.create({
   mTTxt: { color: '#fff', fontSize: 13, fontWeight: '700' },
   mMark: { height: 34, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   mMarkTxt: { color: '#fff', fontSize: 12, fontWeight: '800' },
+
+  // ── PHONE-BROWSER PARITY with the locked native frame (isPhoneFrame only; tablet
+  //    browsers keep every style above unchanged). ──
+  // Full-bleed gesture/tap surface over the video.
+  mTapLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  // Upper-right action region: + Group then Save clip, in ONE row so they cannot overlap.
+  mActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  mGroup: { backgroundColor: '#1D9E75', borderRadius: 16, paddingHorizontal: 10, height: 32, alignItems: 'center', justifyContent: 'center' },
+  mGroupTxt: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  // <=5 columns: fixed board, columns share the width instead of scrolling.
+  mBoardRowFixed: { flexDirection: 'row', gap: 8, paddingHorizontal: 6, alignItems: 'flex-start' },
+  mColFixed: { flex: 1, minWidth: 0 },
+  // Saved-clip markers on the scrubber.
+  mMarker: { position: 'absolute', top: -2, height: 5, borderRadius: 2.5, backgroundColor: '#8B7CF6', opacity: 0.6 },
+  // Compact bottom rail so TIME..speed, ◄Tag/Tag► and Start/End all fit one row on a
+  // phone-width landscape viewport without a scroller. Nothing is removed to fit.
+  mTransportTight: { gap: 4 },
+  mTimeTight: { fontSize: 11, flexShrink: 1 },
+  mTBtnTight: { minWidth: 32, paddingHorizontal: 4 },
+  mTagNavTight: { minWidth: 48, paddingHorizontal: 4, flexShrink: 0, borderColor: 'rgba(139,124,246,0.7)', backgroundColor: 'rgba(139,124,246,0.28)' },
+  mMarkTight: { paddingHorizontal: 6, minWidth: 74, flexShrink: 0 },
+  mMarkTxtTight: { fontSize: 11 },
 
   clipsPanel: { width: 300, backgroundColor: C.panel, borderLeftWidth: 1, borderLeftColor: C.line },
   clipsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: C.line },
