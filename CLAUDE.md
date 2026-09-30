@@ -117,6 +117,22 @@ appears to require breaking one, stop and ask — do not "improve" your way past
 >
 > iPad and every web surface are **NOT** covered by this lock — see its §12.
 
+> ### 🔒 MOBILE WEB (PHONE BROWSER) TAGGER IS FORMALLY LOCKED (Adam, 2026-09-30)
+>
+> **Canonical contract: [`docs/MOBILE_WEB_TAGGER_UI_LOCK.md`](docs/MOBILE_WEB_TAGGER_UI_LOCK.md).**
+>
+> - Approved commit: **`0a5a517812443dfb3f1ed15a2ac3a3814598b55c`**
+> - Git baseline tag: **`mobile-web-tagger-locked-0a5a517`**
+> - Guards: `test_mobile_web_tagger_parity.ts` (100 assertions, `npx tsx`)
+>
+> Covers the **phone-browser path only** — the `isPhoneFrame` branch of
+> `app/tagging-overlay.web.tsx`. **Tablet browser and desktop web share that file and
+> are explicitly NOT locked and NOT reviewed.** Keep phone changes behind
+> `isPhoneFrame`, and add new style keys rather than editing shared ones.
+>
+> Same change-control rule as the native lock: a request elsewhere never implicitly
+> authorizes a change to the locked phone frame.
+
 Stated by Adam 2026-09-08. The tagging overlay layout (`app/tagging-overlay.web.tsx`
 and `app/tagging-overlay.tsx`) is the cross-sport standard. It is the same screen,
 same functionality, same element placement for basketball, flag football, and every

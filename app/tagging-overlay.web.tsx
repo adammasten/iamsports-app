@@ -1,3 +1,11 @@
+// MOBILE WEB TAGGER UI LOCK (Adam, 2026-09-30 — commit 0a5a517). The PHONE-BROWSER path
+// (isPhoneFrame) is locked: contract + regression checklist in
+// docs/MOBILE_WEB_TAGGER_UI_LOCK.md, guarded by test_mobile_web_tagger_parity.ts.
+// Tablet browser and desktop share this file and are NOT locked — keep phone changes
+// behind isPhoneFrame and add new style keys rather than editing shared ones.
+// Do not change locked phone geometry or interactions without explicit product-owner
+// approval for the specific element.
+//
 // WEB tagging studio (Metro serves this on web; native keeps tagging-overlay.tsx).
 // A desktop "button-matrix" tagger: centered player + scrubber on the left, the
 // FULL tag board across the bottom (all tags always visible), a build-then-commit
