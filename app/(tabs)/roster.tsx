@@ -105,8 +105,13 @@ export default function RosterScreen() {
       });
     }
 
-    // Per-player guardian codes — a coach may read them (player_guardian_codes_read
-    // RLS). This is the code a parent enters under "Have a code?" to claim THAT kid.
+    // Per-player family codes. This is the code a parent enters under "Have a code?" to claim
+    // THAT kid -- and since Slice D9 presenting it also makes the first such adult the child's
+    // guardian manager, with no coach confirmation needed.
+    // A coach may read it only while NOBODY MANAGES the child (player_guardian_codes_read).
+    // Once a family has claimed the kid this returns null for a coach, so the row below falls
+    // back to "Get invite code", which will also refuse — by design: a claimed child's family
+    // credential is the family's to share, not the coach's.
     const codeById = new Map<string, string>();
     if (ids.length) {
       const { data: codes } = await supabase.from('player_guardian_codes').select('player_id, code').in('player_id', ids);

@@ -57,6 +57,16 @@ function message(n: Notif, count = 1): string {
       ? `${n.actor_name} shared ${count} items with ${player}`
       : `${n.actor_name} shared a ${ent} with ${player}`;
     case 'guardian_joined': return `${n.actor_name} joined ${player} as a guardian`;
+    // Slice D9. The last three have been emitted server-side since Slice D with no case here,
+    // so they rendered as the `default` below -- “X did something with your kid”. The first two
+    // are new in D9. A guardian/authority change is the last thing that should arrive
+    // unreadable, and the whole point of allowing a coach to self-claim rather than blocking it
+    // is that the other adults are actually TOLD.
+    case 'guardian_manager_established': return `${n.actor_name} is now ${player}’s guardian manager`;
+    case 'guardian_management_granted': return `${n.actor_name} gave you access to manage ${player}`;
+    case 'guardian_self_claimed_by_coach': return `${n.actor_name} claimed ${player} as their own child`;
+    case 'guardian_claim_awaiting_confirmation': return `${n.actor_name} says they’re ${player}’s parent — confirm it on the roster`;
+    case 'guardian_claim_confirmed': return `${n.actor_name} confirmed you as ${player}’s guardian`;
     case 'kid_added_to_team': return `${player} was added to ${n.team_name || 'a team'}`;
     case 'share_to_team': return many
       ? `${n.actor_name} shared ${count} items with ${team}`
