@@ -66,6 +66,28 @@ const EVENT_KEYS = 'QWERTYUPASDFGHJKLZXCVBNM'.split('');
 // tucked into the transport row (matches the mobile tagger).
 const PLAYBACK_SPEEDS = [1, 1.2, 1.5, 2];
 
+// ── LARGE-TABLET TAGGER BREAKPOINT — the only place this is encoded ──────────
+// Two INDEPENDENT questions (Adam 2026-10-01), deliberately not collapsed into one:
+//   A. is this a touch device?  (see `touchDevice`)
+//   B. is the CURRENT USABLE viewport big enough for stage + overlay + 300px clips?
+// Both must hold. Numbers are measured against the viewport the BROWSER gives us
+// (innerWidth/innerHeight), not screen size — iPad Chrome/Safari spend ~90px of
+// height on the address bar, so a screen-size threshold would be wrong.
+//
+// Landscape usable heights, iPad Chrome (screen height minus ~90px of chrome):
+//   iPad Pro 13"  1366 x ~934   -> in
+//   iPad 11"      1194 x ~744   -> in
+//   iPad 10.9"    1180 x ~730   -> in
+//   iPad 9th gen  1080 x ~720   -> in
+//   iPad mini     1133 x ~654   -> OUT (height) — tested separately, do not widen
+//                                   this to admit it without Adam's say-so.
+// MIN_H 700 is what separates the Mini from every full-size iPad. MIN_W 1000 keeps
+// portrait iPads out (they have the height but not the width for a 300px panel).
+// MAX_SIDE keeps a large desktop touch display out of the tablet layout.
+const LARGE_TABLET_MIN_W = 1000;
+const LARGE_TABLET_MIN_H = 700;
+const LARGE_TABLET_MAX_SIDE = 1500;
+
 type Tag = { id: string; name: string; category: string };
 type Built = { id: string; name: string; category: string };
 type ClipRow = { id: string; start: number; end: number; groups: { name: string; category: string }[][]; starred: boolean; poe: boolean; goodPlay: boolean; editTags: { id: string; name: string; category: string }[]; fb?: FbSummary | null };
@@ -127,13 +149,50 @@ export default function TaggingStudioWeb() {
   const boardContentHRef = useRef(0);
   // Once the user has chosen a size (saved value, drag, or nudge) we stop auto-defaulting.
   const boardUserSetRef = useRef(savedBoard != null);
-  // Right clip list can collapse to a thin strip so the video reclaims that 300px.
-  const [clipsCollapsed, setClipsCollapsed] = useState<boolean>(() => { try { return localStorage.getItem('iamsports.tagger.clipsCollapsed') === '1'; } catch { return false; } });
-  const toggleClipsCollapsed = () => setClipsCollapsed(c => { const n = !c; try { localStorage.setItem('iamsports.tagger.clipsCollapsed', n ? '1' : '0'); } catch {} return n; });
-  const [handleHover, setHandleHover] = useState(false);
-  // Browser fullscreen: on enter, collapse the board to min + hide the clip list so the
-  // video fills; the drag handle still works; on exit, restore the previous split.
+  // Browser fullscreen: on enter, collapse the board to min so the video fills; the drag
+  // handle still works; on exit, restore the previous split.
   const [isFS, setIsFS] = useState(false);
+  // Phone-sized browser → immersive full-bleed layout that mirrors the native app
+  // (desktop web layout unchanged). mBoardFS = tag panel compact vs fullscreen.
+  const { width: winW, height: winH } = useWindowDimensions();
+  // Immersive layout only on ACTUAL touch devices (coarse pointer) that are phone-sized —
+  // never on a desktop with a mouse, even if the window is small. So desktop always gets
+  // the resizable split layout.
+  const coarsePointer = (() => { try { return window.matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
+  const isPhone = coarsePointer && Math.min(winW, winH) <= 820;
+  // PHONE-BROWSER PARITY GUARD. `isPhone` above is the touch-immersive branch, and its
+  // 820 threshold also catches tablet browsers (iPad mini portrait 744, iPad 10.9" 820).
+  // Tablet web is reviewed and locked separately, so the native-parity frame is gated to
+  // an actual phone viewport and tablet browsers keep the pre-parity rendering untouched.
+  // When tablet web gets its own review these two should collapse into one.
+  const isPhoneFrame = isPhone && Math.min(winW, winH) <= 500;
+  // (A) TOUCH CAPABILITY. `pointer: coarse` / `hover: none` are NOT reliable on an iPad:
+  // attach a Magic Keyboard or trackpad and iPadOS reports a FINE, hover-capable pointer,
+  // so a media-query-only test silently fails on exactly the setup Adam tags with.
+  // maxTouchPoints stays > 0 whatever is plugged in. A desktop Mac reports 0.
+  const touchDevice = (() => {
+    try { return (navigator.maxTouchPoints ?? 0) > 0 || coarsePointer; } catch { return coarsePointer; }
+  })();
+  // (B) USABLE VIEWPORT. Re-evaluated on every resize/rotation, so this follows the real
+  // window rather than the device — see the breakpoint note at the top of this file.
+  const viewportFitsLargeTablet =
+    winW >= LARGE_TABLET_MIN_W && winH >= LARGE_TABLET_MIN_H &&
+    Math.max(winW, winH) <= LARGE_TABLET_MAX_SIDE;
+  // (C) LARGE-TABLET TAGGER LAYOUT = both, and never a phone/small-tablet viewport.
+  // Small tablets keep whatever they render today; they are a separate decision.
+  const isTabletWeb = touchDevice && !isPhone && viewportFitsLargeTablet;
+  // The immersive presentation is used for TRUE browser fullscreen and, unconditionally,
+  // on a large tablet. Exiting browser fullscreen on a tablet therefore drops the
+  // fullscreen flag but leaves the layout alone — an iPad never falls back into the split.
+  const fsLayout = isFS || isTabletWeb;
+  // Right clip list can collapse to a thin strip so the video reclaims that 300px.
+  // The large-tablet layout keeps its OWN memory of this (Adam 2026-10-01): it must start
+  // OPEN there regardless of whether the panel was last collapsed on desktop, and the two
+  // layouts have very different width budgets. Absent key -> open.
+  const clipsCollapsedKey = isTabletWeb ? 'iamsports.tagger.clipsCollapsed.tablet' : 'iamsports.tagger.clipsCollapsed';
+  const [clipsCollapsed, setClipsCollapsed] = useState<boolean>(() => { try { return localStorage.getItem(clipsCollapsedKey) === '1'; } catch { return false; } });
+  const toggleClipsCollapsed = () => setClipsCollapsed(c => { const n = !c; try { localStorage.setItem(clipsCollapsedKey, n ? '1' : '0'); } catch {} return n; });
+  const [handleHover, setHandleHover] = useState(false);
   const preFSBoardRef = useRef(boardHeight);
   const [markIn, setMarkIn] = useState<number | null>(null);
   const [markOut, setMarkOut] = useState<number | null>(null);
@@ -154,20 +213,6 @@ export default function TaggingStudioWeb() {
   // contentFit can't letterbox and the frame stretches. Feeding explicit px
   // dimensions gives it a real box → contentFit="contain" works.
   const [vbox, setVbox] = useState({ w: 0, h: 0 });
-  // Phone-sized browser → immersive full-bleed layout that mirrors the native app
-  // (desktop web layout unchanged). mBoardFS = tag panel compact vs fullscreen.
-  const { width: winW, height: winH } = useWindowDimensions();
-  // Immersive layout only on ACTUAL touch devices (coarse pointer) that are phone-sized —
-  // never on a desktop with a mouse, even if the window is small. So desktop always gets
-  // the resizable split layout.
-  const coarsePointer = (() => { try { return window.matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
-  const isPhone = coarsePointer && Math.min(winW, winH) <= 820;
-  // PHONE-BROWSER PARITY GUARD. `isPhone` above is the touch-immersive branch, and its
-  // 820 threshold also catches tablet browsers (iPad mini portrait 744, iPad 10.9" 820).
-  // Tablet web is reviewed and locked separately, so the native-parity frame is gated to
-  // an actual phone viewport and tablet browsers keep the pre-parity rendering untouched.
-  // When tablet web gets its own review these two should collapse into one.
-  const isPhoneFrame = isPhone && Math.min(winW, winH) <= 500;
   // Chrome hidden -> the video is the inspection surface (native lock section 10).
   const [mChromeHidden, setMChromeHidden] = useState(false);
   // TRUE VISIBLE VIEWPORT. window.innerHeight is the LAYOUT viewport: on mobile Safari
@@ -193,6 +238,9 @@ export default function TaggingStudioWeb() {
   // Measured height of the bottom bar, so the tag board's floor is derived from the real
   // chrome rather than a hard-coded guess.
   const [mBottomH, setMBottomH] = useState(78);
+  // Measured height of the floating top strip. The large-tablet chips are bigger and can
+  // wrap, so the board ceiling is derived from the real strip rather than mBoard's fixed 56.
+  const [mTopH, setMTopH] = useState(52);
   // Arms the restore chip. react-native-web's PressResponder fires onPress from a bare
   // DOM `click` with NO preceding pointerdown -- its own source says so -- and iOS
   // dispatches a compatibility click after touchend, hit-tested against whatever occupies
@@ -686,8 +734,9 @@ export default function TaggingStudioWeb() {
       else document.exitFullscreen?.();
     } catch {}
   }, []);
-  // Sync layout to browser fullscreen: entering collapses the board to its min (video
-  // fills) and hides the clip list; exiting restores the split you had before.
+  // Sync layout to browser fullscreen: entering collapses the board to its min (the
+  // floating overlay takes over); exiting restores the split you had before. The clips
+  // panel is NOT hidden either way — it is one real layout column in both presentations.
   useEffect(() => {
     const onFsChange = () => {
       const fs = !!document.fullscreenElement;
@@ -1162,15 +1211,16 @@ export default function TaggingStudioWeb() {
   }
 
   // FS immersive board columns — the SAME set the non-FS desktop board shows below,
-  // just floated over the video. Computed unconditionally (used only inside {isFS}).
+  // just floated over the video. Computed unconditionally (used only inside {fsLayout}).
   const boardCols = useFlagPhaseBoard
     ? phaseColsWithPlayers!
     : flatColsWithPlayers;
 
   return (
     <GestureHandlerRootView style={styles.app}>
-      {/* top bar — hidden in FS; a translucent floating strip (immersive) replaces it */}
-      {!isFS && (
+      {/* top bar — hidden in the full-screen / large-tablet layout; the translucent
+          floating strip inside the overlay replaces it */}
+      {!fsLayout && (
       <View style={styles.topbar}>
         <Pressable onPress={goBackOrHome} hitSlop={10}><Text style={styles.back}>‹ Back</Text></Pressable>
         <Text style={styles.gameLabel} numberOfLines={1}>{label}</Text>
@@ -1262,47 +1312,82 @@ export default function TaggingStudioWeb() {
               VideoView above — it is never remounted, so playback survives the toggle.
               Mirrors the mobile branch's arrangement + reuses its styles. Authorized by
               Adam 2026-09-10 (LOCKED-layout override, fullscreen state only). */}
-          {isFS && (
+          {fsLayout && (
             <View style={styles.fsOverlay} pointerEvents="box-none">
               {/* translucent floating top strip (replaces the solid 52px band) */}
-              <View style={styles.mTop}>
-                <Pressable onPress={toggleFS} hitSlop={8} style={styles.mExitFS}><Text style={styles.mExitFSTxt}>⤡</Text></Pressable>
+              <View
+                style={[styles.mTop, isTabletWeb && styles.tabTop]}
+                onLayout={e => { const h = Math.round(e.nativeEvent.layout.height); if (h > 0 && h !== mTopH) setMTopH(h); }}
+              >
+                {/* A tablet lives in this layout permanently, so the way OUT of the tagger
+                    has to be here — the solid top bar that normally carries ‹ Back is not
+                    rendered. Desktop full screen still exits to that bar, so it keeps only
+                    the ⤡ control and is unchanged. */}
+                {isTabletWeb ? <Pressable onPress={goBackOrHome} hitSlop={10}><Text style={styles.mBack}>‹</Text></Pressable> : null}
+                <Pressable onPress={toggleFS} hitSlop={8} style={styles.mExitFS}><Text style={styles.mExitFSTxt}>{isFS ? '⤡' : '⛶'}</Text></Pressable>
                 <View style={styles.mClusters}>
                   {sportPeriods.map(p => { const on = activePeriod === p.id; return (
-                    <Pressable key={p.id} onPress={() => setActivePeriod(on ? null : p.id)} style={[styles.mChip, on && styles.mChipOn]}><Text style={[styles.mChipTxt, on && styles.mChipTxtOn]}>{p.name}</Text></Pressable>
+                    <Pressable key={p.id} onPress={() => setActivePeriod(on ? null : p.id)} style={[styles.mChip, isTabletWeb && styles.tabChip, on && styles.mChipOn]}><Text style={[styles.mChipTxt, isTabletWeb && styles.tabChipTxt, on && styles.mChipTxtOn]}>{p.name}</Text></Pressable>
                   ); })}
                   {possOptions.length > 0 ? <View style={styles.mSep} /> : null}
                   {possOptions.map(p => { const on = activePossession === p.id; return (
-                    <Pressable key={p.id} onPress={() => setActivePossession(on ? null : p.id)} style={[styles.mChip, on && styles.mChipOn]}><Text style={[styles.mChipTxt, on && styles.mChipTxtOn]}>{possShort(p.name)}</Text></Pressable>
+                    <Pressable key={p.id} onPress={() => setActivePossession(on ? null : p.id)} style={[styles.mChip, isTabletWeb && styles.tabChip, on && styles.mChipOn]}><Text style={[styles.mChipTxt, isTabletWeb && styles.tabChipTxt, on && styles.mChipTxtOn]}>{possShort(p.name)}</Text></Pressable>
                   ); })}
                   {isFlag ? (
                     <Fragment>
                       <View style={styles.mSep} />
-                      <Text style={styles.mLbl}>DN</Text>
+                      <Text style={[styles.mLbl, isTabletWeb && styles.tabLbl]}>DN</Text>
                       {[1, 2, 3, 4].map(d => (
-                        <Pressable key={d} onPress={() => setFbCtx(c => ({ ...c, down: d }))} style={[styles.mChip, fbCtx.down === d && styles.mChipOn]}><Text style={[styles.mChipTxt, fbCtx.down === d && styles.mChipTxtOn]}>{d}</Text></Pressable>
+                        <Pressable key={d} onPress={() => setFbCtx(c => ({ ...c, down: d }))} style={[styles.mChip, isTabletWeb && styles.tabChip, fbCtx.down === d && styles.mChipOn]}><Text style={[styles.mChipTxt, isTabletWeb && styles.tabChipTxt, fbCtx.down === d && styles.mChipTxtOn]}>{d}</Text></Pressable>
                       ))}
-                      <Text style={styles.mLbl}>DIST</Text>
-                      <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: Math.max(0, (c.distance ?? 0) - 1) }))} style={styles.mChip}><Text style={styles.mChipTxt}>–</Text></Pressable>
-                      <Text style={styles.mNum}>{fbCtx.distance ?? '—'}</Text>
-                      <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: (c.distance ?? 0) + 1 }))} style={styles.mChip}><Text style={styles.mChipTxt}>+</Text></Pressable>
-                      <Text style={styles.mLbl}>DR</Text>
-                      <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: Math.max(1, c.drive - 1) }))} style={styles.mChip}><Text style={styles.mChipTxt}>–</Text></Pressable>
-                      <Text style={styles.mNum}>{fbCtx.drive}</Text>
-                      <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: c.drive + 1 }))} style={styles.mChip}><Text style={styles.mChipTxt}>+</Text></Pressable>
+                      <Text style={[styles.mLbl, isTabletWeb && styles.tabLbl]}>DIST</Text>
+                      <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: Math.max(0, (c.distance ?? 0) - 1) }))} style={[styles.mChip, isTabletWeb && styles.tabChip]}><Text style={[styles.mChipTxt, isTabletWeb && styles.tabChipTxt]}>–</Text></Pressable>
+                      <Text style={[styles.mNum, isTabletWeb && styles.tabNum]}>{fbCtx.distance ?? '—'}</Text>
+                      <Pressable onPress={() => setFbCtx(c => ({ ...c, distance: (c.distance ?? 0) + 1 }))} style={[styles.mChip, isTabletWeb && styles.tabChip]}><Text style={[styles.mChipTxt, isTabletWeb && styles.tabChipTxt]}>+</Text></Pressable>
+                      <Text style={[styles.mLbl, isTabletWeb && styles.tabLbl]}>DR</Text>
+                      <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: Math.max(1, c.drive - 1) }))} style={[styles.mChip, isTabletWeb && styles.tabChip]}><Text style={[styles.mChipTxt, isTabletWeb && styles.tabChipTxt]}>–</Text></Pressable>
+                      <Text style={[styles.mNum, isTabletWeb && styles.tabNum]}>{fbCtx.drive}</Text>
+                      <Pressable onPress={() => setFbCtx(c => ({ ...c, drive: c.drive + 1 }))} style={[styles.mChip, isTabletWeb && styles.tabChip]}><Text style={[styles.mChipTxt, isTabletWeb && styles.tabChipTxt]}>+</Text></Pressable>
                     </Fragment>
                   ) : null}
                 </View>
+                {/* Editing is reachable from the clips rail below, so it needs a way back
+                    out that is not "save it anyway". Same handler the desktop board uses. */}
+                {editingId ? <Pressable onPress={cancelEdit} style={styles.fsCancel}><Text style={styles.fsCancelTxt}>Cancel</Text></Pressable> : null}
                 <Pressable onPress={commitClip} disabled={!canSave} style={[styles.mSave, !canSave && { opacity: 0.4 }]}><Text style={styles.mSaveTxt}>{saving ? '…' : editingId ? 'Save' : groupCount > 0 ? `Save (${groupCount})` : 'Save'}</Text></Pressable>
               </View>
 
-              {/* floating tag columns (TAG↑ grows them) — right-inset so they clear the clips panel */}
-              <View style={[styles.mBoard, mBoardFS && styles.mBoardFS, styles.fsBoardInset]}>
-                <ScrollView horizontal contentContainerStyle={styles.mBoardRow}>
+              {/* floating tag columns (TAG↑ grows them). mBoard's own right: 52 clears the
+                  utility rail; the clips panel is a real layout column outside this overlay
+                  now, so no extra inset is needed. */}
+              {/* LARGE TABLET: the SAME definite-height scroll chain the phone board uses,
+                  because a content-sized board cannot scroll. Definite board height ->
+                  flex:1 horizontal scroller -> stretched column -> flex:1 column scroller.
+                  `mColScroll` carries overscrollBehavior:'contain', which is what stops a
+                  vertical swipe that hits the end of a column from chaining out into the
+                  clips rail. Desktop full screen keeps its maxHeight boxes untouched. */}
+              <View style={[
+                styles.mBoard,
+                mBoardFS && styles.mBoardFS,
+                isTabletWeb && styles.tabBoardClear,
+                isTabletWeb && { top: mTopH + 4 },
+                isTabletWeb && (mBoardFS
+                  ? { bottom: mBottomH + 4 }
+                  : { height: Math.max(170, Math.round((stageH || winH) * 0.34)) }),
+              ]}>
+                <ScrollView
+                  horizontal
+                  style={isTabletWeb ? styles.tabBoardScroll : undefined}
+                  contentContainerStyle={[styles.mBoardRow, isTabletWeb && styles.mBoardRowStretch]}
+                >
                   {boardCols.map(c => (
-                    <View key={c.key} style={styles.mCol}>
-                      <Text style={[styles.mColHead, { color: CAT_COLOR[c.key] ?? C.dim }]}>{c.label.toUpperCase()}</Text>
-                      <ScrollView style={{ maxHeight: mBoardFS ? Math.round(winH * 0.62) : 118 }} showsVerticalScrollIndicator={false}>
+                    <View key={c.key} style={[styles.mCol, isTabletWeb && styles.tabCol]}>
+                      <Text style={[styles.mColHead, isTabletWeb && styles.tabColHead, { color: CAT_COLOR[c.key] ?? C.dim }]}>{c.label.toUpperCase()}</Text>
+                      <ScrollView
+                        style={isTabletWeb ? styles.mColScroll : { maxHeight: mBoardFS ? Math.round(winH * 0.62) : 118 }}
+                        contentContainerStyle={isTabletWeb ? styles.mColScrollContent : undefined}
+                        showsVerticalScrollIndicator={false}
+                      >
                         <View style={styles.mChipsWrap}>{(tags[c.key] ?? []).map(t => tagButton(t, c.key))}</View>
                       </ScrollView>
                     </View>
@@ -1310,43 +1395,17 @@ export default function TaggingStudioWeb() {
                 </ScrollView>
               </View>
 
-              {/* right rail: TAG size toggle + group + star/POE/GoodPlay */}
-              <View style={styles.mRail}>
+              {/* Utility cluster: TAG size toggle + group + star/POE/GoodPlay. LOWER right
+                  (Adam 2026-09-30) — it sits in the same 44px column it always did, just
+                  anchored to the bottom, so it clears the clips rail (which stops at
+                  right: 52) and stays above the transport row. `mRail` itself is untouched
+                  because the locked phone frame renders from it. */}
+              <View style={styles.fsRail}>
                 <Pressable onPress={() => setMBoardFS(f => !f)} style={styles.mRailBtn}><Text style={styles.mRailTxt}>TAG{mBoardFS ? '↓' : '↑'}</Text></Pressable>
                 {!editingId ? <Pressable onPress={addGroup} disabled={!canAddGroup} style={[styles.mRailBtn, !canAddGroup && { opacity: 0.4 }]}><Text style={styles.mRailTxt}>+Grp{groupCount > 0 ? ` ${groupCount}` : ''}</Text></Pressable> : null}
                 <Pressable onPress={() => setIsStar(s => !s)} style={[styles.mRailBtn, isStar && { backgroundColor: C.star }]}><Text style={[styles.mRailTxt, isStar && { color: '#1a1030' }]}>★</Text></Pressable>
                 <Pressable onPress={() => setIsPoe(p => !p)} style={[styles.mRailBtn, isPoe && { backgroundColor: '#dc3545' }]}><Text style={[styles.mRailTxt, isPoe && { color: '#fff' }]}>!</Text></Pressable>
                 {special.goodPlay ? <Pressable onPress={() => setIsGoodPlay(g => !g)} style={[styles.mRailBtn, isGoodPlay && { backgroundColor: '#1e8449' }]}><Text style={[styles.mRailTxt, isGoodPlay && { color: '#fff' }]}>✓</Text></Pressable> : null}
-              </View>
-
-              {/* saved clips — added to the FS immersive per Adam 2026-09-10 (translucent,
-                  right side, just inboard of the rail). Tap a clip to jump. */}
-              <View style={styles.fsClips}>
-                <View style={styles.fsClipsHead}>
-                  <Text style={styles.clipsTitle}>CLIPS</Text>
-                  <Text style={styles.clipsCount}>{clips.length}</Text>
-                </View>
-                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 8, gap: 8 }}>
-                  {clips.map(c => (
-                    <Pressable key={c.id} onPress={() => jumpToClip(c.start)} style={styles.fsClipCard}>
-                      <Text style={styles.clipTime}>▶ {fmt(c.start)}</Text>
-                      {c.groups.map((g, gi) => (
-                        <View key={gi} style={styles.clipGroup}>
-                          {c.groups.length > 1 ? <Text style={styles.clipGroupNum}>{gi + 1}</Text> : null}
-                          <View style={styles.clipTags}>
-                            {orderTags(g).map((t, i) => (
-                              <View key={i} style={[styles.miniTag, { backgroundColor: CAT_COLOR[t.category] ?? C.dim }]}>
-                                <Text style={styles.miniTxt}>{t.name}</Text>
-                              </View>
-                            ))}
-                          </View>
-                        </View>
-                      ))}
-                      {c.starred || c.poe ? <Text style={styles.clipFoot}>{c.starred ? '★ ' : ''}{c.poe ? '◎ POE' : ''}</Text> : null}
-                    </Pressable>
-                  ))}
-                  {clips.length === 0 ? <Text style={styles.clipsEmpty}>No clips yet.</Text> : null}
-                </ScrollView>
               </View>
 
               {/* bottom: scrubber + transport + mark */}
@@ -1356,6 +1415,17 @@ export default function TaggingStudioWeb() {
                     <View style={styles.scrubTrack}>
                       {inPct != null && outPct != null ? <View style={[styles.inOutBand, { left: `${inPct}%`, width: `${Math.max(0, outPct - inPct)}%` }]} /> : null}
                       <View style={[styles.scrubFill, { width: `${Math.round(progress * 100)}%` }]} />
+                      {/* Saved-clip markers + playhead, as on the split layout's scrubber and
+                          the phone's. A tablet never sees the split scrubber, so without these
+                          there is nothing showing where the tagged plays are. Visual only —
+                          pointerEvents none, the pan gesture still owns the bar. */}
+                      {duration > 0 ? clips.map(c => {
+                        const left = (c.start / duration) * 100;
+                        const w = Math.max(0.4, ((c.end - c.start) / duration) * 100);
+                        const active = currentTime >= c.start && currentTime <= c.end;
+                        return <View key={c.id} pointerEvents="none" style={[styles.clipMarker, { left: `${left}%`, width: `${w}%`, backgroundColor: (c.starred || c.poe) ? C.star : C.accent, opacity: active ? 1 : 0.5 }]} />;
+                      }) : null}
+                      <View pointerEvents="none" style={[styles.scrubHead, { left: `${Math.round(progress * 100)}%` }]} />
                     </View>
                   </View>
                 </GestureDetector>
@@ -1379,7 +1449,7 @@ export default function TaggingStudioWeb() {
             </View>
           )}
 
-          {!isFS && (<>
+          {!fsLayout && (<>
           {/* scrubber + transport */}
           <View style={styles.scrubZone}>
             <GestureDetector gesture={scrub}>
@@ -1631,15 +1701,16 @@ export default function TaggingStudioWeb() {
           </>)}
         </View>
 
-        {/* right clip list — hidden in fullscreen; collapsible to a thin strip otherwise */}
-        {!isFS && clipsCollapsed && (
+        {/* right clip list — ONE implementation, used by the split layout AND the
+            large-tablet / full-screen layout. Collapsible to a thin strip either way. */}
+        {clipsCollapsed && (
           <Pressable style={styles.clipsStrip} onPress={toggleClipsCollapsed}>
             <Text style={styles.clipsStripChev}>‹</Text>
             <Text style={styles.clipsStripLbl}>CLIPS</Text>
             <Text style={styles.clipsStripCount}>{clips.length}</Text>
           </Pressable>
         )}
-        {!isFS && !clipsCollapsed && (
+        {!clipsCollapsed && (
         <View style={styles.clipsPanel}>
           <View style={styles.clipsHead}>
             <Text style={styles.clipsTitle}>CLIPS</Text>
@@ -1647,19 +1718,25 @@ export default function TaggingStudioWeb() {
             <View style={{ flex: 1 }} />
             <Pressable onPress={toggleClipsCollapsed} hitSlop={8}><Text style={styles.clipsCollapseBtn}>›</Text></Pressable>
           </View>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
+          {/* overscrollBehavior:'contain' both here and on the board columns, so a swipe that
+              bottoms out in one scroll region cannot chain into the other. */}
+          <ScrollView style={[{ flex: 1 }, isTabletWeb && styles.tabClipsScroll]} contentContainerStyle={{ padding: 10 }}>
             {clips.map(c => (
               <View key={c.id} style={[styles.clipCard, editingId === c.id && styles.clipCardEditing]}>
-                <View style={styles.clipCardTop}>
-                  <Pressable focusable={false} onPress={() => jumpToClip(c.start)}>
-                    <Text style={styles.clipTime}>▶ {fmt(c.start)}</Text>
+                {/* ONE implementation. On a large tablet these are bare 12px text labels with
+                    a ~28x14 hit area, which reads as card text and is well under a usable
+                    touch target — so the tablet gets real button chrome and a spelled-out
+                    "Delete", same handlers, same row. Desktop/phone sizing untouched. */}
+                <View style={[styles.clipCardTop, isTabletWeb && styles.tabClipCardTop]}>
+                  <Pressable focusable={false} onPress={() => jumpToClip(c.start)} hitSlop={8} style={isTabletWeb ? styles.tabClipJump : undefined}>
+                    <Text style={[styles.clipTime, isTabletWeb && styles.tabClipTime]}>▶ {fmt(c.start)}</Text>
                   </Pressable>
-                  <View style={styles.clipActions}>
-                    <Pressable focusable={false} onPress={() => startEditClip(c)}>
-                      <Text style={styles.clipEdit}>{editingId === c.id ? 'Editing…' : 'Edit'}</Text>
+                  <View style={[styles.clipActions, isTabletWeb && styles.tabClipActions]}>
+                    <Pressable focusable={false} onPress={() => startEditClip(c)} hitSlop={8} style={isTabletWeb ? styles.tabClipBtn : undefined}>
+                      <Text style={[styles.clipEdit, isTabletWeb && styles.tabClipBtnTxt]}>{editingId === c.id ? 'Editing…' : 'Edit'}</Text>
                     </Pressable>
-                    <Pressable focusable={false} onPress={() => deleteClipRow(c.id)}>
-                      <Text style={styles.clipDelete}>✕</Text>
+                    <Pressable focusable={false} onPress={() => deleteClipRow(c.id)} hitSlop={8} style={isTabletWeb ? styles.tabClipBtn : undefined}>
+                      <Text style={[styles.clipDelete, isTabletWeb && styles.tabClipBtnTxt]}>{isTabletWeb ? 'Delete' : '✕'}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -1808,11 +1885,7 @@ const styles = StyleSheet.create({
   mApp: { flex: 1, backgroundColor: '#000' },
   fsOverlay: { ...StyleSheet.absoluteFillObject },
   // FS immersive clips panel — translucent, right side, inboard of the 44px rail.
-  fsClips: { position: 'absolute', top: 56, right: 52, bottom: 82, width: 200, backgroundColor: 'rgba(11,12,16,0.72)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
-  fsClipsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)' },
-  fsClipCard: { backgroundColor: 'rgba(27,30,38,0.7)', borderWidth: 1, borderColor: C.line, borderRadius: 9, padding: 8 },
   // Keep the tag columns clear of the clips panel (rail 44 + gaps + panel 200).
-  fsBoardInset: { right: 256 },
   mLoad: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   mTop: { position: 'absolute', top: 0, left: 0, right: 0, height: 52, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8, backgroundColor: 'rgba(0,0,0,0.42)' },
   mBack: { color: '#fff', fontSize: 30, fontWeight: '700', paddingHorizontal: 4 },
@@ -1835,6 +1908,40 @@ const styles = StyleSheet.create({
   mColHead: { fontSize: 10, fontWeight: '800', marginBottom: 3, paddingLeft: 2 },
   mChipsWrap: { gap: 4 },
   mRail: { position: 'absolute', top: 56, right: 4, width: 44, gap: 6, alignItems: 'stretch' },
+  // FS/tablet utility cluster. Same column and same button styles as mRail, anchored to
+  // the bottom instead of the top. 86 clears mBottom (the transport, ~78 tall) so it can
+  // never sit over Start/End, play or the scrubber.
+  fsRail: { position: 'absolute', bottom: 86, right: 4, width: 44, gap: 6, alignItems: 'stretch' },
+
+  // ── LARGE-TABLET (isTabletWeb) OVERRIDES. Additive keys only: every style they sit on
+  //    top of is shared with the locked phone frame and must not be edited. ─────────────
+  // (B) The floating strip reuses the PHONE chip sizing (26px tall, 11px text). Before the
+  // large-tablet layout existed an iPad defaulted to the solid top bar's bigger periodBtn
+  // and only met these chips if the user pressed the fullscreen control. Restored to the
+  // larger scale here. `height: 'auto'` + minHeight lets the strip grow if the chips wrap;
+  // mTopH is measured so the board ceiling follows.
+  tabTop: { height: 'auto', minHeight: 60, paddingVertical: 6, paddingHorizontal: 10, gap: 8 },
+  tabChip: { minWidth: 38, height: 34, paddingHorizontal: 11, borderRadius: 17 },
+  tabChipTxt: { fontSize: 14 },
+  tabLbl: { fontSize: 11 },
+  tabNum: { fontSize: 15, minWidth: 22 },
+  // (C) definite-height chain for the board; (D) the board itself no longer paints a dark
+  // rectangle over the whole video — each column carries its own subtle backing instead, so
+  // the darkening ends with the actual controls.
+  tabBoardClear: { backgroundColor: 'transparent', paddingVertical: 0 },
+  tabBoardScroll: { flex: 1 },
+  tabCol: { width: 136, alignSelf: 'stretch', backgroundColor: 'rgba(0,0,0,0.38)', borderRadius: 8, paddingHorizontal: 5, paddingTop: 5, paddingBottom: 2 },
+  tabColHead: { fontSize: 12, marginBottom: 5 },
+  // (A) real touch targets for the clip actions in the shared panel.
+  tabClipCardTop: { paddingBottom: 8, gap: 8 },
+  tabClipJump: { borderWidth: 1, borderColor: C.line, borderRadius: 8, paddingHorizontal: 10, height: 34, minWidth: 64, alignItems: 'center', justifyContent: 'center', backgroundColor: '#23262f' },
+  tabClipTime: { fontSize: 13 },
+  tabClipActions: { gap: 8 },
+  tabClipBtn: { borderWidth: 1, borderColor: C.line, borderRadius: 8, paddingHorizontal: 11, height: 34, minWidth: 56, alignItems: 'center', justifyContent: 'center', backgroundColor: '#23262f' },
+  tabClipBtnTxt: { fontSize: 13 },
+  tabClipsScroll: { overscrollBehavior: 'contain' } as any,
+  fsCancel: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)', borderRadius: 16, paddingHorizontal: 12, height: 32, alignItems: 'center', justifyContent: 'center' },
+  fsCancelTxt: { color: '#fff', fontSize: 12, fontWeight: '800' },
   mRailBtn: { height: 34, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', backgroundColor: 'rgba(0,0,0,0.42)', alignItems: 'center', justifyContent: 'center' },
   mRailTxt: { color: '#fff', fontSize: 11, fontWeight: '800' },
   mBottom: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 10, paddingBottom: 6, paddingTop: 4, backgroundColor: 'rgba(0,0,0,0.42)' },
