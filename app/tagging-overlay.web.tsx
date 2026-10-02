@@ -1326,18 +1326,14 @@ export default function TaggingStudioWeb() {
                     rendered. Desktop full screen still exits to that bar, so it keeps only
                     the ⤡ control and is unchanged. */}
                 {isTabletWeb ? <Pressable onPress={goBackOrHome} hitSlop={10}><Text style={styles.mBack}>‹</Text></Pressable> : null}
-                {/* NO TRUE BROWSER FULLSCREEN ON A LARGE TABLET (Adam 2026-10-01). iPadOS
-                    dismisses element fullscreen on a downward drag and WebKit will not let a
-                    page block that — it is a deliberate anti-phishing guarantee — so a normal
-                    swipe at the top of a tag column kicked the coach out mid-tag. This layout
-                    never needed the Fullscreen API (it is driven by isTabletWeb), so the
-                    enter-fullscreen control is simply not offered here; the tagger occupies the
-                    viewport Chrome gives it and ‹ Back is the way out. The control still renders
-                    while isFS is true so a session that somehow entered fullscreen can leave it,
-                    and desktop full screen keeps it unchanged. */}
-                {!isTabletWeb || isFS ? (
-                  <Pressable onPress={toggleFS} hitSlop={8} style={styles.mExitFS}><Text style={styles.mExitFSTxt}>{isFS ? '⤡' : '⛶'}</Text></Pressable>
-                ) : null}
+                {/* Fullscreen is OFFERED on a large tablet again (Adam 2026-10-02, reverting
+                    cdc4257). iPadOS can still dismiss element fullscreen on a downward drag and
+                    we do NOT fight that — no preventDefault, no gesture hacks. Adam tested the
+                    no-fullscreen version and judged Chrome's toolbar too expensive; if the OS
+                    drops fullscreen he presses this again. The LAYOUT stays driven by
+                    isTabletWeb alone, so a dismiss costs the browser chrome and never the
+                    tagging workspace. Same toggleFS the desktop uses; shows ⤡ while active. */}
+                <Pressable onPress={toggleFS} hitSlop={8} style={styles.mExitFS}><Text style={styles.mExitFSTxt}>{isFS ? '⤡' : '⛶'}</Text></Pressable>
                 <View style={styles.mClusters}>
                   {sportPeriods.map(p => { const on = activePeriod === p.id; return (
                     <Pressable key={p.id} onPress={() => setActivePeriod(on ? null : p.id)} style={[styles.mChip, isTabletWeb && styles.tabChip, on && styles.mChipOn]}><Text style={[styles.mChipTxt, isTabletWeb && styles.tabChipTxt, on && styles.mChipTxtOn]}>{p.name}</Text></Pressable>
@@ -1367,7 +1363,13 @@ export default function TaggingStudioWeb() {
                 {/* Editing is reachable from the clips rail below, so it needs a way back
                     out that is not "save it anyway". Same handler the desktop board uses. */}
                 {editingId ? <Pressable onPress={cancelEdit} style={styles.fsCancel}><Text style={styles.fsCancelTxt}>Cancel</Text></Pressable> : null}
-                <Pressable onPress={commitClip} disabled={!canSave} style={[styles.mSave, !canSave && { opacity: 0.4 }]}><Text style={styles.mSaveTxt}>{saving ? '…' : editingId ? 'Save' : groupCount > 0 ? `Save (${groupCount})` : 'Save'}</Text></Pressable>
+                {/* MOVED on a large tablet: Save now lives in the right utility rail, directly
+                    above + Group, so Save/Group/★/!/✓ fall under the same hand while the left
+                    hand works the transport (Adam 2026-10-02). Desktop full screen keeps it
+                    here. Exactly ONE of the two is ever rendered. */}
+                {isTabletWeb ? null : (
+                  <Pressable onPress={commitClip} disabled={!canSave} style={[styles.mSave, !canSave && { opacity: 0.4 }]}><Text style={styles.mSaveTxt}>{saving ? '…' : editingId ? 'Save' : groupCount > 0 ? `Save (${groupCount})` : 'Save'}</Text></Pressable>
+                )}
               </View>
 
               {/* floating tag columns (TAG↑ grows them). mBoard's own right: 52 clears the
@@ -1415,6 +1417,21 @@ export default function TaggingStudioWeb() {
                   because the locked phone frame renders from it. */}
               <View style={styles.fsRail}>
                 <Pressable onPress={() => setMBoardFS(f => !f)} style={styles.mRailBtn}><Text style={styles.mRailTxt}>TAG{mBoardFS ? '↓' : '↑'}</Text></Pressable>
+                {/* Save — the SAME commitClip / canSave / saving the top strip used; this is
+                    that control relocated, not a second one. Keeps its existing #534AB7 purple
+                    so it can never read as another + Group, and takes the rail's button
+                    geometry so the stack looks deliberate. Disabled uses an opaque muted purple
+                    for the reason + Group does: a translucent fill over bright video takes the
+                    label with it. The staged-group count stays visible on + Group below. */}
+                {isTabletWeb ? (
+                  <Pressable
+                    onPress={commitClip}
+                    disabled={!canSave}
+                    style={[styles.mRailBtn, canSave ? styles.tabRailSave : styles.tabRailSaveOff]}
+                  >
+                    <Text style={[styles.mRailTxt, !canSave && styles.tabRailSaveOffTxt]}>{saving ? '…' : 'Save'}</Text>
+                  </Pressable>
+                ) : null}
                 {/* + Group. Same addGroup / canAddGroup / groupCount as every other surface —
                     nothing here is a second implementation. It is given the SOLID GREEN the
                     phone (mGroup) and desktop (addGroupBtn) already use for this action,
@@ -1982,6 +1999,11 @@ const styles = StyleSheet.create({
   tabRailGroup: { backgroundColor: '#1D9E75', borderColor: '#1D9E75' },
   tabRailGroupOff: { backgroundColor: '#14543F', borderColor: 'rgba(29,158,117,0.55)' },
   tabRailGroupOffTxt: { color: 'rgba(255,255,255,0.72)' },
+  // Save in the tablet utility rail. Existing Save purple (#534AB7, same as mSave), so it
+  // is unmistakably a different action from the green + Group directly beneath it.
+  tabRailSave: { backgroundColor: '#534AB7', borderColor: '#534AB7' },
+  tabRailSaveOff: { backgroundColor: '#2E2A5C', borderColor: 'rgba(83,74,183,0.55)' },
+  tabRailSaveOffTxt: { color: 'rgba(255,255,255,0.72)' },
   fsCancel: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)', borderRadius: 16, paddingHorizontal: 12, height: 32, alignItems: 'center', justifyContent: 'center' },
   fsCancelTxt: { color: '#fff', fontSize: 12, fontWeight: '800' },
   mRailBtn: { height: 34, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', backgroundColor: 'rgba(0,0,0,0.42)', alignItems: 'center', justifyContent: 'center' },
