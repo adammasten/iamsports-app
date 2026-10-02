@@ -181,9 +181,11 @@ export default function TaggingStudioWeb() {
   // (C) LARGE-TABLET TAGGER LAYOUT = both, and never a phone/small-tablet viewport.
   // Small tablets keep whatever they render today; they are a separate decision.
   const isTabletWeb = touchDevice && !isPhone && viewportFitsLargeTablet;
-  // The immersive presentation is used for TRUE browser fullscreen and, unconditionally,
-  // on a large tablet. Exiting browser fullscreen on a tablet therefore drops the
-  // fullscreen flag but leaves the layout alone — an iPad never falls back into the split.
+  // The immersive presentation is used for TRUE browser fullscreen (desktop) and,
+  // unconditionally, on a large tablet. On a tablet it is driven by isTabletWeb ALONE and
+  // never by the Fullscreen API, so no browser gesture can take the layout away: losing
+  // the fullscreen flag leaves the layout untouched and an iPad never falls back into the
+  // split. See the no-true-fullscreen note on the floating strip's controls.
   const fsLayout = isFS || isTabletWeb;
   // Right clip list can collapse to a thin strip so the video reclaims that 300px.
   // The large-tablet layout keeps its OWN memory of this (Adam 2026-10-01): it must start
@@ -1324,7 +1326,18 @@ export default function TaggingStudioWeb() {
                     rendered. Desktop full screen still exits to that bar, so it keeps only
                     the ⤡ control and is unchanged. */}
                 {isTabletWeb ? <Pressable onPress={goBackOrHome} hitSlop={10}><Text style={styles.mBack}>‹</Text></Pressable> : null}
-                <Pressable onPress={toggleFS} hitSlop={8} style={styles.mExitFS}><Text style={styles.mExitFSTxt}>{isFS ? '⤡' : '⛶'}</Text></Pressable>
+                {/* NO TRUE BROWSER FULLSCREEN ON A LARGE TABLET (Adam 2026-10-01). iPadOS
+                    dismisses element fullscreen on a downward drag and WebKit will not let a
+                    page block that — it is a deliberate anti-phishing guarantee — so a normal
+                    swipe at the top of a tag column kicked the coach out mid-tag. This layout
+                    never needed the Fullscreen API (it is driven by isTabletWeb), so the
+                    enter-fullscreen control is simply not offered here; the tagger occupies the
+                    viewport Chrome gives it and ‹ Back is the way out. The control still renders
+                    while isFS is true so a session that somehow entered fullscreen can leave it,
+                    and desktop full screen keeps it unchanged. */}
+                {!isTabletWeb || isFS ? (
+                  <Pressable onPress={toggleFS} hitSlop={8} style={styles.mExitFS}><Text style={styles.mExitFSTxt}>{isFS ? '⤡' : '⛶'}</Text></Pressable>
+                ) : null}
                 <View style={styles.mClusters}>
                   {sportPeriods.map(p => { const on = activePeriod === p.id; return (
                     <Pressable key={p.id} onPress={() => setActivePeriod(on ? null : p.id)} style={[styles.mChip, isTabletWeb && styles.tabChip, on && styles.mChipOn]}><Text style={[styles.mChipTxt, isTabletWeb && styles.tabChipTxt, on && styles.mChipTxtOn]}>{p.name}</Text></Pressable>
