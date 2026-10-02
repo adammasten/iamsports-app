@@ -1415,7 +1415,26 @@ export default function TaggingStudioWeb() {
                   because the locked phone frame renders from it. */}
               <View style={styles.fsRail}>
                 <Pressable onPress={() => setMBoardFS(f => !f)} style={styles.mRailBtn}><Text style={styles.mRailTxt}>TAG{mBoardFS ? '↓' : '↑'}</Text></Pressable>
-                {!editingId ? <Pressable onPress={addGroup} disabled={!canAddGroup} style={[styles.mRailBtn, !canAddGroup && { opacity: 0.4 }]}><Text style={styles.mRailTxt}>+Grp{groupCount > 0 ? ` ${groupCount}` : ''}</Text></Pressable> : null}
+                {/* + Group. Same addGroup / canAddGroup / groupCount as every other surface —
+                    nothing here is a second implementation. It is given the SOLID GREEN the
+                    phone (mGroup) and desktop (addGroupBtn) already use for this action,
+                    because as a dim outline button at opacity 0.4 over bright video it read as
+                    absent next to TAG/★/!/✓ at full opacity (Adam, large iPad, 2026-10-02).
+                    Disabled stays visibly dimmer, just legible. Tablet only; desktop full
+                    screen and the phone rail are untouched. */}
+                {!editingId ? (
+                  <Pressable
+                    onPress={addGroup}
+                    disabled={!canAddGroup}
+                    style={[
+                      styles.mRailBtn,
+                      isTabletWeb && (canAddGroup ? styles.tabRailGroup : styles.tabRailGroupOff),
+                      !canAddGroup && !isTabletWeb && { opacity: 0.4 },
+                    ]}
+                  >
+                    <Text style={[styles.mRailTxt, isTabletWeb && !canAddGroup && styles.tabRailGroupOffTxt]}>+Grp{groupCount > 0 ? ` ${groupCount}` : ''}</Text>
+                  </Pressable>
+                ) : null}
                 <Pressable onPress={() => setIsStar(s => !s)} style={[styles.mRailBtn, isStar && { backgroundColor: C.star }]}><Text style={[styles.mRailTxt, isStar && { color: '#1a1030' }]}>★</Text></Pressable>
                 <Pressable onPress={() => setIsPoe(p => !p)} style={[styles.mRailBtn, isPoe && { backgroundColor: '#dc3545' }]}><Text style={[styles.mRailTxt, isPoe && { color: '#fff' }]}>!</Text></Pressable>
                 {special.goodPlay ? <Pressable onPress={() => setIsGoodPlay(g => !g)} style={[styles.mRailBtn, isGoodPlay && { backgroundColor: '#1e8449' }]}><Text style={[styles.mRailTxt, isGoodPlay && { color: '#fff' }]}>✓</Text></Pressable> : null}
@@ -1953,6 +1972,16 @@ const styles = StyleSheet.create({
   tabClipBtn: { borderWidth: 1, borderColor: C.line, borderRadius: 8, paddingHorizontal: 11, height: 34, minWidth: 56, alignItems: 'center', justifyContent: 'center', backgroundColor: '#23262f' },
   tabClipBtnTxt: { fontSize: 13 },
   tabClipsScroll: { overscrollBehavior: 'contain' } as any,
+  // + Group in the tablet utility rail, matched to the green this action already uses on
+  // the phone (mGroup) and desktop (addGroupBtn) — same hex, no new accent colour.
+  // DISABLED deliberately uses an OPAQUE muted green rather than a blanket opacity:
+  // dimming the whole button is what made it vanish over bright video, because the
+  // translucent fill let the frame through and took the label with it. An opaque darker
+  // fill keeps the shape and the "+Grp" text crisp whatever is playing underneath, while
+  // reading unmistakably as inactive. Tablet only.
+  tabRailGroup: { backgroundColor: '#1D9E75', borderColor: '#1D9E75' },
+  tabRailGroupOff: { backgroundColor: '#14543F', borderColor: 'rgba(29,158,117,0.55)' },
+  tabRailGroupOffTxt: { color: 'rgba(255,255,255,0.72)' },
   fsCancel: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)', borderRadius: 16, paddingHorizontal: 12, height: 32, alignItems: 'center', justifyContent: 'center' },
   fsCancelTxt: { color: '#fff', fontSize: 12, fontWeight: '800' },
   mRailBtn: { height: 34, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', backgroundColor: 'rgba(0,0,0,0.42)', alignItems: 'center', justifyContent: 'center' },
