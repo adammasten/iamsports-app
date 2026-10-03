@@ -126,12 +126,59 @@ appears to require breaking one, stop and ask — do not "improve" your way past
 > - Guards: `test_mobile_web_tagger_parity.ts` (100 assertions, `npx tsx`)
 >
 > Covers the **phone-browser path only** — the `isPhoneFrame` branch of
-> `app/tagging-overlay.web.tsx`. **Tablet browser and desktop web share that file and
-> are explicitly NOT locked and NOT reviewed.** Keep phone changes behind
+> `app/tagging-overlay.web.tsx`. **Desktop web shares that file and is NOT locked.** The
+> LARGE-tablet path of the same file is now separately locked (see the next banner);
+> iPad Mini / small tablets remain NOT locked and NOT reviewed. Keep phone changes behind
 > `isPhoneFrame`, and add new style keys rather than editing shared ones.
 >
 > Same change-control rule as the native lock: a request elsewhere never implicitly
 > authorizes a change to the locked phone frame.
+
+> ### 🔒 LARGE-IPAD WEB TAGGER IS FORMALLY LOCKED (Adam, 2026-10-02)
+>
+> **Canonical contract: [`docs/LARGE_IPAD_WEB_TAGGER_UI_LOCK.md`](docs/LARGE_IPAD_WEB_TAGGER_UI_LOCK.md).**
+>
+> - Approved commit: **`025c6ea40affa4b0b3ba406cae3df4e4ddaecc7e`**
+> - Git baseline tag: **`large-ipad-web-tagger-locked-025c6ea`**
+> - Guards: `test_large_ipad_web_tagger_lock.ts` (56 assertions, `npx tsx`)
+>
+> Covers the **large-tablet browser path only** — the `isTabletWeb` branch of
+> `app/tagging-overlay.web.tsx`. The gate is three consts (`LARGE_TABLET_MIN_W` 1000 /
+> `MIN_H` 700 / `MAX_SIDE` 1500) measured against the USABLE viewport.
+> **`MIN_H` 700 is what excludes an iPad Mini — do not lower it to admit one.**
+>
+> Load-bearing: `fsLayout = isFS || isTabletWeb` means the tablet layout NEVER depends on
+> the Fullscreen API, so a WebKit fullscreen dismiss costs browser chrome only.
+>
+> **iPadOS/WebKit can dismiss true fullscreen on a downward drag. That is an ACCEPTED
+> platform limitation, not a defect.** Investigated to conclusion: the Fullscreen API has
+> no cancellable exit event, so no page can veto it. **Never add `preventDefault`,
+> `touchmove` interception, `scrollTop` pinning, `touch-action` hacks, or any
+> momentum-scroll compromise to work around it.**
+
+> ### 🔒 LARGE-IPAD NATIVE TAGGER IS FORMALLY LOCKED (Adam, 2026-10-02)
+>
+> **Canonical contract: [`docs/LARGE_IPAD_NATIVE_TAGGER_UI_LOCK.md`](docs/LARGE_IPAD_NATIVE_TAGGER_UI_LOCK.md).**
+>
+> - Approved commit: **`025c6ea40affa4b0b3ba406cae3df4e4ddaecc7e`**
+> - Git baseline tag: **`large-ipad-native-tagger-locked-025c6ea`**
+> - Guards: `test_large_ipad_native_tagger_lock.ts` (51 assertions, `npx tsx`)
+>
+> Covers the **`isTablet` branch** of `app/tagging-overlay.tsx`: the two bottom-corner
+> rails and their control order (LEFT = playback, play/pause at the bottom; RIGHT = TAG,
+> POE, ★, Good Play, + Group, Save, End, Start), the tablet board sizes, the 6+ column
+> horizontal strip, and the iPad insets.
+>
+> ⚠️ **Scope caveat:** native `isTablet` is `min side >= 700`, and an iPad Mini is 744 —
+> so a Mini DOES enter this branch, but Adam approved it on a LARGE iPad only. The lock
+> protects the shell CONTRACT, not the claim that it suits a Mini. Narrowing the native
+> gate later is permitted precisely because the Mini is not locked.
+>
+> **This lock does NOT weaken the native iPhone lock.** The phone shell renders from
+> `!isTablet` and both locks coexist; the guards assert isolation in both directions.
+>
+> Known open deviation, NOT blessed by this lock: Football and 7-on-7 on iPad still use
+> the floating clusters rather than the top bar.
 
 Stated by Adam 2026-09-08. The tagging overlay layout (`app/tagging-overlay.web.tsx`
 and `app/tagging-overlay.tsx`) is the cross-sport standard. It is the same screen,
